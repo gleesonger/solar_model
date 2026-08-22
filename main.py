@@ -34,9 +34,9 @@ def main() -> None:
                             client = candidate
                         else:
                             candidate.close()
-                            LOGGER.warning("Modbus connection failed; retrying next cycle")
+                            LOGGER.info("Modbus connection failed; retrying next cycle")
                     except Exception:
-                        LOGGER.exception("Modbus connection failed; retrying next cycle")
+                        LOGGER.info("Modbus connection failed; retrying next cycle")
                 if client is not None and not collect_modbus_once(client, database, registers, previous, config.timezone):
                     client.close()
                     client = None

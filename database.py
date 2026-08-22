@@ -1,0 +1,207 @@
+from __future__ import annotations
+
+import re
+from pathlib import Path
+from typing import Any
+
+from sqlalchemy import Float, Index, Integer, String, create_engine, inspect, select
+from sqlalchemy.engine import Engine
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
+
+
+def column_name(metric: str, unit: str) -> str:
+    suffix = {"%": "percent", "kWh": "kwh", "kW": "kw", "V": "volts", "A": "amps", "Hz": "hz"}.get(unit, unit)
+    metric = re.sub(r"[^a-zA-Z0-9_]", "_", metric).lower()
+    return metric if metric.endswith(f"_{suffix}") else f"{metric}_{suffix}"
+
+
+class Base(DeclarativeBase):
+    pass
+
+
+class SigenStorModbusSample(Base):
+    __tablename__ = "sigenstor_samples"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    collected_at_utc: Mapped[str] = mapped_column(String, nullable=False)
+    collected_at_local: Mapped[str] = mapped_column(String, nullable=False)
+
+    plant_grid_power_kw: Mapped[float | None] = mapped_column(Float)
+    plant_pv_power_kw: Mapped[float | None] = mapped_column(Float)
+    plant_battery_power_kw: Mapped[float | None] = mapped_column(Float)
+    plant_battery_soc_percent: Mapped[float | None] = mapped_column(Float)
+    plant_pv_daily_kwh: Mapped[float | None] = mapped_column(Float)
+    plant_pv_daily_kwh_period: Mapped[float | None] = mapped_column(Float)
+    plant_pv_total_kwh: Mapped[float | None] = mapped_column(Float)
+    plant_pv_total_kwh_period: Mapped[float | None] = mapped_column(Float)
+    plant_load_power_kw: Mapped[float | None] = mapped_column(Float)
+    plant_load_daily_kwh: Mapped[float | None] = mapped_column(Float)
+    plant_load_daily_kwh_period: Mapped[float | None] = mapped_column(Float)
+    plant_load_total_kwh: Mapped[float | None] = mapped_column(Float)
+    plant_load_total_kwh_period: Mapped[float | None] = mapped_column(Float)
+    plant_grid_import_total_kwh: Mapped[float | None] = mapped_column(Float)
+    plant_grid_import_total_kwh_period: Mapped[float | None] = mapped_column(Float)
+    plant_grid_export_total_kwh: Mapped[float | None] = mapped_column(Float)
+    plant_grid_export_total_kwh_period: Mapped[float | None] = mapped_column(Float)
+    plant_battery_charge_total_kwh: Mapped[float | None] = mapped_column(Float)
+    plant_battery_charge_total_kwh_period: Mapped[float | None] = mapped_column(Float)
+    plant_battery_discharge_total_kwh: Mapped[float | None] = mapped_column(Float)
+    plant_battery_discharge_total_kwh_period: Mapped[float | None] = mapped_column(Float)
+
+    inverter_power_kw: Mapped[float | None] = mapped_column(Float)
+    inverter_battery_power_kw: Mapped[float | None] = mapped_column(Float)
+    inverter_battery_soc_percent: Mapped[float | None] = mapped_column(Float)
+    inverter_battery_avg_cell_voltage_volts: Mapped[float | None] = mapped_column(Float)
+    inverter_battery_charge_daily_kwh: Mapped[float | None] = mapped_column(Float)
+    inverter_battery_charge_daily_kwh_period: Mapped[float | None] = mapped_column(Float)
+    inverter_battery_discharge_daily_kwh: Mapped[float | None] = mapped_column(Float)
+    inverter_battery_discharge_daily_kwh_period: Mapped[float | None] = mapped_column(Float)
+    inverter_pv_daily_kwh: Mapped[float | None] = mapped_column(Float)
+    inverter_pv_daily_kwh_period: Mapped[float | None] = mapped_column(Float)
+    inverter_pv_total_kwh: Mapped[float | None] = mapped_column(Float)
+    inverter_pv_total_kwh_period: Mapped[float | None] = mapped_column(Float)
+    inverter_pv1_voltage_volts: Mapped[float | None] = mapped_column(Float)
+    inverter_pv1_current_amps: Mapped[float | None] = mapped_column(Float)
+    inverter_pv2_voltage_volts: Mapped[float | None] = mapped_column(Float)
+    inverter_pv2_current_amps: Mapped[float | None] = mapped_column(Float)
+    inverter_pv3_voltage_volts: Mapped[float | None] = mapped_column(Float)
+    inverter_pv3_current_amps: Mapped[float | None] = mapped_column(Float)
+    inverter_pv4_voltage_volts: Mapped[float | None] = mapped_column(Float)
+    inverter_pv4_current_amps: Mapped[float | None] = mapped_column(Float)
+    inverter_grid_frequency_hz: Mapped[float | None] = mapped_column(Float)
+    inverter_phase_a_voltage_volts: Mapped[float | None] = mapped_column(Float)
+    inverter_phase_b_voltage_volts: Mapped[float | None] = mapped_column(Float)
+    inverter_phase_c_voltage_volts: Mapped[float | None] = mapped_column(Float)
+    inverter_phase_a_current_amps: Mapped[float | None] = mapped_column(Float)
+    inverter_phase_b_current_amps: Mapped[float | None] = mapped_column(Float)
+    inverter_phase_c_current_amps: Mapped[float | None] = mapped_column(Float)
+
+
+class ForecastSolarSample(Base):
+    __tablename__ = "forecast_solar_samples"
+    __table_args__ = (Index("idx_forecast_collection_time", "collection_guid", "forecast_time", unique=True),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    collection_guid: Mapped[str | None] = mapped_column(String(36))
+    collected_at_utc: Mapped[str] = mapped_column(String, nullable=False)
+    collected_at_local: Mapped[str] = mapped_column(String, nullable=False)
+    forecast_time: Mapped[str] = mapped_column(String, nullable=False)
+
+    west_watts: Mapped[float | None] = mapped_column(Float)
+    west_watt_hours: Mapped[float | None] = mapped_column(Float)
+    west_watt_hours_day: Mapped[float | None] = mapped_column(Float)
+    east_watts: Mapped[float | None] = mapped_column(Float)
+    east_watt_hours: Mapped[float | None] = mapped_column(Float)
+    east_watt_hours_day: Mapped[float | None] = mapped_column(Float)
+
+
+CUMULATIVE_COLUMNS = (
+    "plant_pv_daily_kwh", "plant_pv_total_kwh", "plant_load_daily_kwh", "plant_load_total_kwh",
+    "plant_grid_import_total_kwh", "plant_grid_export_total_kwh", "plant_battery_charge_total_kwh",
+    "plant_battery_discharge_total_kwh", "inverter_battery_charge_daily_kwh",
+    "inverter_battery_discharge_daily_kwh", "inverter_pv_daily_kwh", "inverter_pv_total_kwh",
+)
+
+
+class SolarDatabase:
+    def __init__(self, engine: Engine):
+        self.engine = engine
+        self.sessions = sessionmaker(engine)
+
+    def close(self) -> None:
+        self.engine.dispose()
+
+    def load_previous_cumulatives(self) -> dict[str, float]:
+        with self.sessions() as session:
+            row = session.scalar(select(SigenStorModbusSample).order_by(SigenStorModbusSample.collected_at_utc.desc()).limit(1))
+        return {column: getattr(row, column) for column in CUMULATIVE_COLUMNS if row is not None and getattr(row, column) is not None}
+
+    def save_forecast(self, array, payload: dict, collected: tuple[str, str], collection_guid: str) -> int:
+        result = payload.get("result", {})
+        watts = result.get("watts", {})
+        watt_hours = result.get("watt_hours", {})
+        daily = result.get("watt_hours_day", {})
+        prefix = re.sub(r"[^a-zA-Z0-9_]", "_", array.name).lower()
+        fields = (f"{prefix}_watts", f"{prefix}_watt_hours", f"{prefix}_watt_hours_day")
+        if any(field not in ForecastSolarSample.__table__.c for field in fields):
+            raise ValueError(f"forecast array {array.name!r} is not declared in ForecastSampleWide")
+
+        rows = 0
+        with self.sessions.begin() as session:
+            for forecast_time in sorted(set(watts) | set(watt_hours)):
+                values: dict[str, Any] = {
+                    "collection_guid": collection_guid,
+                    "collected_at_utc": collected[0],
+                    "collected_at_local": collected[1],
+                    "forecast_time": forecast_time,
+                    fields[0]: watts.get(forecast_time),
+                    fields[1]: watt_hours.get(forecast_time),
+                    fields[2]: daily.get(forecast_time[:10]),
+                }
+                row = session.scalar(select(ForecastSolarSample).where(
+                    ForecastSolarSample.collection_guid == collection_guid,
+                    ForecastSolarSample.forecast_time == forecast_time,
+                ))
+                if row is None:
+                    session.add(ForecastSolarSample(**values))
+                else:
+                    for name, value in values.items():
+                        setattr(row, name, value)
+                rows += 1
+        return rows
+
+    def save_modbus_sample(self, values: dict[str, tuple[float, str, bool]], previous: dict[str, float], collected: tuple[str, str]) -> None:
+        row: dict[str, Any] = {
+            "collected_at_utc": collected[0],
+            "collected_at_local": collected[1],
+        }
+        for metric, (value, unit, cumulative) in values.items():
+            name = column_name(metric, unit)
+            if name not in SigenStorModbusSample.__table__.c:
+                raise ValueError(f"Modbus metric {metric!r} is not declared in ModbusSampleWide")
+            row[name] = value
+            if cumulative:
+                row[f"{name}_period"] = value - previous[name] if name in previous and value >= previous[name] else None
+        with self.sessions.begin() as session:
+            session.add(SigenStorModbusSample(**row))
+        previous.update({column_name(metric, unit): value for metric, (value, unit, _) in values.items()})
+
+
+def open_database(path: str | Path) -> SolarDatabase:
+    engine = create_engine(f"sqlite:///{Path(path)}", future=True)
+    Base.metadata.create_all(engine)
+    _add_missing_columns(engine, SigenStorModbusSample)
+    _add_missing_columns(engine, ForecastSolarSample)
+    _drop_columns(engine, SigenStorModbusSample, ("raw_registers_json",))
+    _drop_columns(engine, ForecastSolarSample, ("raw_json",))
+    return SolarDatabase(engine)
+
+
+def _add_missing_columns(engine: Engine, model: type[Base]) -> None:
+    table = model.__table__
+    existing_columns = {column["name"] for column in inspect(engine).get_columns(table.name)}
+    missing_columns = [column for column in table.columns if column.name not in existing_columns]
+    if not missing_columns:
+        return
+
+    preparer = engine.dialect.identifier_preparer
+    table_name = preparer.quote(table.name)
+    with engine.begin() as connection:
+        for column in missing_columns:
+            column_name = preparer.quote(column.name)
+            column_type = column.type.compile(dialect=engine.dialect)
+            connection.exec_driver_sql(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_type}")
+
+
+def _drop_columns(engine: Engine, model: type[Base], column_names: tuple[str, ...]) -> None:
+    table_name = model.__table__.name
+    existing_columns = {column["name"] for column in inspect(engine).get_columns(table_name)}
+    columns_to_drop = [name for name in column_names if name in existing_columns]
+    if not columns_to_drop:
+        return
+
+    preparer = engine.dialect.identifier_preparer
+    quoted_table = preparer.quote(table_name)
+    with engine.begin() as connection:
+        for name in columns_to_drop:
+            connection.exec_driver_sql(f"ALTER TABLE {quoted_table} DROP COLUMN {preparer.quote(name)}")

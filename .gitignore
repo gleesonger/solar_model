@@ -1,0 +1,46 @@
+# Byte-compiled / optimized Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Packaging / build artifacts
+build/
+dist/
+*.egg-info/
+.eggs/
+pip-wheel-metadata/
+
+# Test and coverage output
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+
+# Type-checker caches
+.mypy_cache/
+.pyre/
+.pytype/
+
+# IDE / editor files
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Local configuration and databases
+*.sqlite
+*.sqlite3
+*.db
+
+# OS files
+.DS_Store
+
+solar.db

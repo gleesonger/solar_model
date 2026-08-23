@@ -20,24 +20,26 @@ Set `actuals.scheduler.interval_seconds` in `config.yaml` to change the schedule
 Set `live.scheduler.interval_seconds` to change the live-power interval; it defaults to `5` seconds.
 Set `forecast.interval_seconds` in `config.yaml` to change the minimum elapsed time between forecast scans; it is configured for `3600` seconds.
 
+Configuration loading is strict: every documented field must be present, unknown fields and incorrect types are rejected, and invalid values cause the process to exit during startup.
+
 SQLite schema creation and all database writes are handled by `database.py`. The collectors only fetch, decode, and pass records to that module.
 
 ## Forecast
 
 The arrays are parameterized in `config.yaml`:
 
-| Panel | Name | Latitude | Longitude | Declination | Azimuth | Peak |
+| Panel ID | Name | Latitude | Longitude | Declination | Azimuth | Peak |
 | --- | --- | ---: | ---: | ---: | ---: | ---: |
-| panel_1 | East | 53.4508401 | -6.15367 | 35 | -67.5 | 6.175 kWp |
-| panel_2 | West | 53.4508401 | -6.15367 | 35 | 112.5 | 5.225 kWp |
+| 1 | East | 53.4508401 | -6.15367 | 35 | -67.5 | 6.175 kWp |
+| 2 | West | 53.4508401 | -6.15367 | 35 | 112.5 | 5.225 kWp |
 
 The API returns cumulative `watt_hours` values for forecast timestamps and daily totals. Forecast.Solar public access may return hourly data; 15-minute data depends on the account plan.
 
-Each forecast array requires a unique `panel` value from `panel_1` through `panel_4`; its `name` is only used as a display label. `dashboard.actuals_to_forecast` associates inverter PV inputs with those panels. For example, `pv1: panel_1` compares inverter string PV1 with the forecast configured as `panel_1`.
+Each forecast array requires a unique integer `panel_id` from `1` through `4`; its `name` is only used as a display label. `dashboard.actuals_to_forecast` associates inverter PV inputs with those panel IDs. For example, `pv1: 1` compares inverter string PV1 with the forecast configured with `panel_id: 1`.
 
 ## Modbus register map
 
-Sigenergy register addresses and scaling are firmware/device dependent. The collector reads contiguous groups. The supplied `sigen_register_map.json` contains electrical metrics, while `sigen_device_register_map.json` contains the device and system metadata recorded when values change.
+Sigenergy register addresses and scaling are firmware/device dependent. The collector reads contiguous groups. The supplied `sigen_register_map.json` contains electrical metrics, while `sigen_device_register_map.json` contains the device and system metadata recorded when values change. Relative register-map paths are resolved from the application source directory; the maps are not copied into the runtime configuration directory.
 
 Each entry has this shape:
 

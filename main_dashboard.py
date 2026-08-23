@@ -29,11 +29,11 @@ PV_STRING_READERS: dict[str, PvStringReader] = {
     "pv4": lambda row: (row.inverter_pv4_voltage_volts, row.inverter_pv4_current_amps),
 }
 ForecastWattHoursReader = Callable[[ForecastSolarSample], float | None]
-FORECAST_WATT_HOURS_READERS: dict[str, ForecastWattHoursReader] = {
-    "panel_1": lambda row: row.panel_1_watt_hours,
-    "panel_2": lambda row: row.panel_2_watt_hours,
-    "panel_3": lambda row: row.panel_3_watt_hours,
-    "panel_4": lambda row: row.panel_4_watt_hours,
+FORECAST_WATT_HOURS_READERS: dict[int, ForecastWattHoursReader] = {
+    1: lambda row: row.panel_1_watt_hours,
+    2: lambda row: row.panel_2_watt_hours,
+    3: lambda row: row.panel_3_watt_hours,
+    4: lambda row: row.panel_4_watt_hours,
 }
 PANEL_COLORS = ("#5470c6", "#91cc75", "#fac858", "#ee6666")
 SUMMARY_LATEST_KEYS = {
@@ -139,7 +139,7 @@ def render_dashboard(
     database_path: str,
     timezone_name: str,
     forecast_arrays: tuple[SolarArrayConfig, ...],
-    actuals_to_forecast: dict[str, str],
+    actuals_to_forecast: dict[str, int],
     state: DashboardState,
     elements: DashboardElements,
 ) -> None:
@@ -378,7 +378,7 @@ def render_data_by_hour(
     power_hourly: pd.DataFrame,
     battery_hourly: pd.DataFrame,
     forecast_arrays: tuple[SolarArrayConfig, ...],
-    actuals_to_forecast: dict[str, str],
+    actuals_to_forecast: dict[str, int],
     power_interval_minutes: int,
     on_power_interval_change: Callable[[int], None],
 ) -> None:
@@ -415,11 +415,11 @@ def render_data_by_hour(
         *[
             (
                 f"Solar - {array.name}",
-                actual_column_name(array.panel),
+                actual_column_name(array.panel_id),
                 PANEL_COLORS[index % len(PANEL_COLORS)],
             )
             for index, array in enumerate(forecast_arrays)
-            if array.panel in mapped_panels
+            if array.panel_id in mapped_panels
         ],
         ("Load", "load", None),
         ("Battery", "battery", None),
@@ -489,7 +489,7 @@ def render_historical(
     data: pd.DataFrame,
     frequency: str,
     forecast_arrays: tuple[SolarArrayConfig, ...],
-    actuals_to_forecast: dict[str, str],
+    actuals_to_forecast: dict[str, int],
 ) -> None:
     render_energy_chart(data, "period", f"Energy by {frequency} (kWh)")
     render_array_energy_chart(
@@ -531,11 +531,11 @@ def render_array_energy_chart(
     category_column: str,
     title: str,
     forecast_arrays: tuple[SolarArrayConfig, ...],
-    actuals_to_forecast: dict[str, str],
+    actuals_to_forecast: dict[str, int],
 ) -> None:
     ui.label(title).classes("text-lg font-semibold mt-4")
-    panel_names = {array.panel: array.name for array in forecast_arrays}
-    forecast_panels = [array.panel for array in forecast_arrays]
+    panel_names = {array.panel_id: array.name for array in forecast_arrays}
+    forecast_panels = [array.panel_id for array in forecast_arrays]
     mapped_panels = set(actuals_to_forecast.values())
     array_series: list[dict[str, Any]] = []
     for panel_index, panel_id in enumerate(forecast_panels):
@@ -584,7 +584,7 @@ def load_day(
     database_path: str,
     timezone_name: str,
     forecast_arrays: tuple[SolarArrayConfig, ...],
-    actuals_to_forecast: dict[str, str],
+    actuals_to_forecast: dict[str, int],
 ) -> pd.DataFrame:
     timezone = ZoneInfo(timezone_name)
     now = datetime.now(timezone)
@@ -720,7 +720,7 @@ def load_hourly_range(
     end_date: date,
     power_interval_minutes: int,
     forecast_arrays: tuple[SolarArrayConfig, ...],
-    actuals_to_forecast: dict[str, str],
+    actuals_to_forecast: dict[str, int],
 ) -> HourlyRangeData:
     if end_date < start_date:
         raise ValueError("End date must not be before first date")
@@ -772,7 +772,7 @@ def load_historical_energy(
     end_date: date,
     frequency: str,
     forecast_arrays: tuple[SolarArrayConfig, ...],
-    actuals_to_forecast: dict[str, str],
+    actuals_to_forecast: dict[str, int],
 ) -> pd.DataFrame:
     if end_date < start_date:
         raise ValueError("End date must not be before first date")
@@ -817,7 +817,7 @@ def load_daily_energy_frames(
     start_date: date,
     end_date: date,
     forecast_arrays: tuple[SolarArrayConfig, ...],
-    actuals_to_forecast: dict[str, str],
+    actuals_to_forecast: dict[str, int],
 ) -> list[pd.DataFrame]:
     daily_energy: list[pd.DataFrame] = []
     start_text = start_date.isoformat()
@@ -1044,7 +1044,7 @@ def average_telemetry_by_interval(
     samples: list[SigenStorModbusSample],
     timezone: tzinfo,
     power_interval_minutes: int,
-    actuals_to_forecast: dict[str, str],
+    actuals_to_forecast: dict[str, int],
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     if power_interval_minutes < 1:
         raise ValueError("Power interval must be at least one minute")
@@ -1204,7 +1204,7 @@ def load_actual_hourly(
 def load_actual_arrays_hourly(
     session: Session,
     day_start: datetime,
-    actuals_to_forecast: dict[str, str],
+    actuals_to_forecast: dict[str, int],
     *,
     fill_missing: bool = True,
 ) -> pd.DataFrame:
@@ -1282,12 +1282,18 @@ def aggregate_forecast(
         except (TypeError, ValueError):
             continue
         for array in forecast_arrays:
-            watt_hours = FORECAST_WATT_HOURS_READERS[array.panel](row)
+            watt_hours = FORECAST_WATT_HOURS_READERS[array.panel_id](row)
             if watt_hours is not None:
-                points.append({"timestamp": timestamp, "panel_id": array.panel, "watt_hours": watt_hours})
+                points.append(
+                    {
+                        "timestamp": timestamp,
+                        "panel_id": array.panel_id,
+                        "watt_hours": watt_hours,
+                    }
+                )
 
     hours = pd.DataFrame({"hour": [f"{index:02d}:00" for index in range(24)]})
-    forecast_columns = [forecast_column_name(array.panel) for array in forecast_arrays]
+    forecast_columns = [forecast_column_name(array.panel_id) for array in forecast_arrays]
     if not points:
         missing_value = 0.0 if fill_missing else float("nan")
         return hours.assign(
@@ -1310,16 +1316,16 @@ def aggregate_forecast(
     frame = frame.dropna(subset=["hour"])
     grouped = frame.pivot_table(index="hour", columns="panel_id", values="energy_kwh", aggfunc="sum", fill_value=0).reset_index()
     grouped = grouped.rename(columns={
-        array.panel: forecast_column_name(array.panel) for array in forecast_arrays
+        array.panel_id: forecast_column_name(array.panel_id) for array in forecast_arrays
     })
     for array in forecast_arrays:
-        column = forecast_column_name(array.panel)
+        column = forecast_column_name(array.panel_id)
         if column not in grouped:
             grouped[column] = float("nan")
     result = hours.merge(grouped[["hour", *forecast_columns]], on="hour", how="left")
     for array in forecast_arrays:
-        column = forecast_column_name(array.panel)
-        if array.panel in available_panels or fill_missing:
+        column = forecast_column_name(array.panel_id)
+        if array.panel_id in available_panels or fill_missing:
             result[column] = dataframe_column(result, column).fillna(0.0)
     result["forecast_total"] = result[forecast_columns].sum(axis=1, min_count=1)
     return result
@@ -1342,12 +1348,12 @@ def format_hour(value: datetime, day_start: datetime) -> str | None:
     return f"{index:02d}:00" if index is not None else None
 
 
-def actual_column_name(panel_id: str) -> str:
-    return f"actual_{panel_id}"
+def actual_column_name(panel_id: int) -> str:
+    return f"actual_panel_{panel_id}"
 
 
-def forecast_column_name(panel_id: str) -> str:
-    return f"forecast_{panel_id}"
+def forecast_column_name(panel_id: int) -> str:
+    return f"forecast_panel_{panel_id}"
 
 
 def interval_label(value: datetime, interval_minutes: int) -> str:

@@ -163,10 +163,12 @@ class SolarDatabase:
         watts = result.get("watts", {})
         watt_hours = result.get("watt_hours", {})
         daily = result.get("watt_hours_day", {})
-        prefix = array.panel
+        prefix = f"panel_{array.panel_id}"
         fields = (f"{prefix}_watts", f"{prefix}_watt_hours", f"{prefix}_watt_hours_day")
         if any(field not in ForecastSolarSample.__table__.c for field in fields):
-            raise ValueError(f"forecast panel {array.panel!r} is not declared in ForecastSolarSample")
+            raise ValueError(
+                f"forecast panel ID {array.panel_id!r} is not declared in ForecastSolarSample"
+            )
 
         rows = 0
         with self.sessions.begin() as session:

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
+from pathlib import Path
 
 from pymodbus.client import ModbusTcpClient
 
@@ -31,7 +32,7 @@ class RegisterBlock:
 
 
 def load_registers(
-    path: str,
+    path: str | Path,
     default_device_id: int,
     metrics: set[str] | None = None,
 ) -> list[RegisterBlock]:

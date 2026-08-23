@@ -11,4 +11,8 @@ if [ ! -f /config/sigen_register_map.json ]; then
     cp /app/sigen_register_map.json /config/sigen_register_map.json
 fi
 
+if [ ! -f /config/sigen_device_register_map.json ]; then
+    cp /app/sigen_device_register_map.json /config/sigen_device_register_map.json
+fi
+
 exec "$@"

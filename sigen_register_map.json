@@ -13,6 +13,8 @@
   { "metric": "plant_battery_charge_total_kwh"      , "address": 30200, "kind": "input", "unit": "kWh", "data_type": "u64", "scale": 100 , "cumulative": true , "words": 4, "device_id": 247 },
   { "metric": "plant_battery_discharge_total_kwh"   , "address": 30204, "kind": "input", "unit": "kWh", "data_type": "u64", "scale": 100 , "cumulative": true , "words": 4, "device_id": 247 },
   { "metric": "inverter_power_kw"                   , "address": 30587, "kind": "input", "unit": "kW" , "data_type": "s32", "scale": 1000, "cumulative": false, "words": 2, "device_id": 1 },
+  { "metric": "inverter_battery_rated_capacity"     , "address": 30548, "kind": "input", "unit": "kWh", "data_type": "u32", "scale": 100 , "cumulative": false, "words": 2, "device_id": 1 },
+  { "metric": "inverter_battery_available_discharge", "address": 30597, "kind": "input", "unit": "kWh", "data_type": "u32", "scale": 100 , "cumulative": false, "words": 2, "device_id": 1 },
   { "metric": "inverter_battery_power_kw"           , "address": 30599, "kind": "input", "unit": "kW" , "data_type": "s32", "scale": 1000, "cumulative": false, "words": 2, "device_id": 1 },
   { "metric": "inverter_battery_soc"                , "address": 30601, "kind": "input", "unit": "%"  , "data_type": "u16", "scale": 10  , "cumulative": false, "words": 1, "device_id": 1 },
   { "metric": "inverter_battery_avg_cell_voltage"   , "address": 30604, "kind": "input", "unit": "V"  , "data_type": "u16", "scale": 1000, "cumulative": false, "words": 1, "device_id": 1 },

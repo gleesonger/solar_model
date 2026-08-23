@@ -23,6 +23,7 @@ class SchedulerConfig:
 
 @dataclass(frozen=True)
 class SolarArrayConfig:
+    panel: str
     name: str
     latitude: float
     longitude: float
@@ -41,7 +42,7 @@ class ForecastConfig:
 
 @dataclass(frozen=True)
 class DashboardConfig:
-    pv_string_map: dict[str, str]
+    actuals_to_forecast: dict[str, str]
 
 
 @dataclass(frozen=True)
@@ -51,6 +52,13 @@ class ModbusConfig:
     timeout_seconds: float
     default_device_id: int
     register_map: str
+    device_register_map: str
+
+
+@dataclass(frozen=True)
+class ActualsConfig:
+    scheduler: SchedulerConfig
+    modbus: ModbusConfig
 
 
 @dataclass(frozen=True)
@@ -58,10 +66,9 @@ class Config:
     timezone: str
     logging: LoggingConfig
     database: DatabaseConfig
-    scheduler: SchedulerConfig
     forecast: ForecastConfig
     dashboard: DashboardConfig
-    modbus: ModbusConfig
+    actuals: ActualsConfig
 
 
 def load_config(path: str | Path = "config.yaml") -> Config:
@@ -72,19 +79,20 @@ def load_config(path: str | Path = "config.yaml") -> Config:
 
     try:
         arrays = tuple(SolarArrayConfig(**array) for array in values["forecast"]["arrays"])
-        raw_pv_string_map = values["dashboard"].get("pv_string_map", {})
-        if not isinstance(raw_pv_string_map, dict):
-            raise TypeError("dashboard.pv_string_map must be a mapping")
-        array_names = {array.name.casefold(): array.name for array in arrays}
-        pv_string_map = {
-            str(pv_string).casefold(): array_names[str(array_name).casefold()]
-            for pv_string, array_name in raw_pv_string_map.items()
+        dashboard_values = values.get("dashboard", {})
+        if not isinstance(dashboard_values, dict):
+            raise TypeError("dashboard must be a mapping")
+        raw_actuals_to_forecast = dashboard_values.get("actuals_to_forecast", {})
+        if not isinstance(raw_actuals_to_forecast, dict):
+            raise TypeError("dashboard.actuals_to_forecast must be a mapping")
+        actuals_to_forecast = {
+            str(actual).casefold(): str(panel_id).casefold()
+            for actual, panel_id in raw_actuals_to_forecast.items()
         }
         config = Config(
             timezone=str(values["timezone"]),
             logging=LoggingConfig(**values["logging"]),
             database=DatabaseConfig(**values["database"]),
-            scheduler=SchedulerConfig(**values["scheduler"]),
             forecast=ForecastConfig(
                 interval_seconds=int(values["forecast"]["interval_seconds"]),
                 timeout_seconds=float(values["forecast"]["timeout_seconds"]),
@@ -92,24 +100,41 @@ def load_config(path: str | Path = "config.yaml") -> Config:
                 arrays=arrays,
             ),
             dashboard=DashboardConfig(
-                pv_string_map=pv_string_map,
+                actuals_to_forecast=actuals_to_forecast,
             ),
-            modbus=ModbusConfig(
-                host=str(values["modbus"]["host"]),
-                port=int(values["modbus"]["port"]),
-                timeout_seconds=float(values["modbus"]["timeout_seconds"]),
-                default_device_id=int(values["modbus"]["default_device_id"]),
-                register_map=str(values["modbus"]["register_map"]),
+            actuals=ActualsConfig(
+                scheduler=SchedulerConfig(**values["actuals"]["scheduler"]),
+                modbus=ModbusConfig(
+                    host=str(values["actuals"]["modbus"]["host"]),
+                    port=int(values["actuals"]["modbus"]["port"]),
+                    timeout_seconds=float(values["actuals"]["modbus"]["timeout_seconds"]),
+                    default_device_id=int(values["actuals"]["modbus"]["default_device_id"]),
+                    register_map=str(values["actuals"]["modbus"]["register_map"]),
+                    device_register_map=str(
+                        values["actuals"]["modbus"].get(
+                            "device_register_map", "sigen_device_register_map.json"
+                        )
+                    ),
+                ),
             ),
         )
-        if config.scheduler.interval_seconds <= 0 or config.forecast.interval_seconds <= 0:
+        if config.actuals.scheduler.interval_seconds <= 0 or config.forecast.interval_seconds <= 0:
             raise ValueError("scheduler and forecast intervals must be greater than zero")
         if config.forecast.timeout_seconds <= 0 or not config.forecast.arrays:
             raise ValueError("forecast timeout must be greater than zero and arrays cannot be empty")
-        invalid_pv_strings = set(config.dashboard.pv_string_map) - {"pv1", "pv2", "pv3", "pv4"}
+        panel_ids = [array.panel for array in config.forecast.arrays]
+        invalid_panel_ids = set(panel_ids) - {"panel_1", "panel_2", "panel_3", "panel_4"}
+        if invalid_panel_ids:
+            raise ValueError(f"unsupported forecast panels: {', '.join(sorted(invalid_panel_ids))}")
+        if len(panel_ids) != len(set(panel_ids)):
+            raise ValueError("forecast panels must be unique")
+        invalid_pv_strings = set(config.dashboard.actuals_to_forecast) - {"pv1", "pv2", "pv3", "pv4"}
         if invalid_pv_strings:
             raise ValueError(f"unsupported PV strings: {', '.join(sorted(invalid_pv_strings))}")
-        if not 1 <= config.modbus.port <= 65535:
+        unknown_panel_ids = set(config.dashboard.actuals_to_forecast.values()) - set(panel_ids)
+        if unknown_panel_ids:
+            raise ValueError(f"dashboard mappings use unknown panels: {', '.join(sorted(unknown_panel_ids))}")
+        if not 1 <= config.actuals.modbus.port <= 65535:
             raise ValueError("Modbus port must be between 1 and 65535")
         return config
     except (KeyError, TypeError, ValueError) as error:

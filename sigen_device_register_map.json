@@ -1,0 +1,23 @@
+[
+  { "metric": "Inverter model"                 , "address": 30500, "kind": "input", "unit": ""   , "data_type": "string", "words": 15, "device_id": 1 },
+  { "metric": "Inverter serial number"         , "address": 30515, "kind": "input", "unit": ""   , "data_type": "string", "words": 10, "device_id": 1 },
+  { "metric": "Inverter firmware"              , "address": 30525, "kind": "input", "unit": ""   , "data_type": "string", "words": 15, "device_id": 1 },
+  { "metric": "Inverter rated power"           , "address": 30540, "kind": "input", "unit": "kW" , "data_type": "u32", "scale": 1000, "words": 2, "device_id": 1 },
+  { "metric": "Inverter max apparent power"    , "address": 30542, "kind": "input", "unit": "kVA", "data_type": "u32", "scale": 1000, "words": 2, "device_id": 1 },
+  { "metric": "Inverter max active power"      , "address": 30544, "kind": "input", "unit": "kW" , "data_type": "u32", "scale": 1000, "words": 2, "device_id": 1 },
+  { "metric": "Inverter max absorption power"  , "address": 30546, "kind": "input", "unit": "kW" , "data_type": "u32", "scale": 1000, "words": 2, "device_id": 1 },
+  { "metric": "Inverter battery capacity"      , "address": 30548, "kind": "input", "unit": "kWh", "data_type": "u32", "scale": 100 , "words": 2, "device_id": 1 },
+  { "metric": "Inverter battery charge power"  , "address": 30550, "kind": "input", "unit": "kW" , "data_type": "u32", "scale": 1000, "words": 2, "device_id": 1 },
+  { "metric": "Inverter battery discharge power", "address": 30552, "kind": "input", "unit": "kW" , "data_type": "u32", "scale": 1000, "words": 2, "device_id": 1 },
+  { "metric": "Rated grid voltage"             , "address": 31000, "kind": "input", "unit": "V"  , "data_type": "u16", "scale": 10  , "words": 1, "device_id": 1 },
+  { "metric": "Rated grid frequency"           , "address": 31001, "kind": "input", "unit": "Hz" , "data_type": "u16", "scale": 100 , "words": 1, "device_id": 1 },
+  { "metric": "Battery pack count"             , "address": 31024, "kind": "input", "unit": ""   , "data_type": "u16", "scale": 1   , "words": 1, "device_id": 1 },
+  { "metric": "PV string count"                , "address": 31025, "kind": "input", "unit": ""   , "data_type": "u16", "scale": 1   , "words": 1, "device_id": 1 },
+  { "metric": "MPPT count"                     , "address": 31026, "kind": "input", "unit": ""   , "data_type": "u16", "scale": 1   , "words": 1, "device_id": 1 },
+  { "metric": "System battery charge power"    , "address": 30068, "kind": "input", "unit": "kW" , "data_type": "u32", "scale": 1000, "words": 2, "device_id": 247 },
+  { "metric": "System battery discharge power" , "address": 30070, "kind": "input", "unit": "kW" , "data_type": "u32", "scale": 1000, "words": 2, "device_id": 247 },
+  { "metric": "System battery capacity"        , "address": 30083, "kind": "input", "unit": "kWh", "data_type": "u32", "scale": 100 , "words": 2, "device_id": 247 },
+  { "metric": "Battery charge cut-off SOC"     , "address": 30085, "kind": "input", "unit": "%"  , "data_type": "u16", "scale": 10  , "words": 1, "device_id": 247 },
+  { "metric": "Battery discharge cut-off SOC"  , "address": 30086, "kind": "input", "unit": "%"  , "data_type": "u16", "scale": 10  , "words": 1, "device_id": 247 },
+  { "metric": "Battery state of health"        , "address": 30087, "kind": "input", "unit": "%"  , "data_type": "u16", "scale": 10  , "words": 1, "device_id": 247 }
+]

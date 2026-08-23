@@ -6,35 +6,40 @@ logging:
 database:
   path: solar.db
 
-scheduler:
-  interval_seconds: 60
+
+
+dashboard:
+  actuals_to_forecast:
+    pv1: panel_1
+    pv2: panel_2
 
 forecast:
   interval_seconds: 3600
   timeout_seconds: 10
   endpoint: https://api.forecast.solar/estimate
   arrays:
-    - name: West
-      latitude: 53.4508401
-      longitude: -6.15367
-      declination: 35
-      azimuth: 112.5
-      peak_kw: 5.225
-    - name: East
+    - panel: panel_1
+      name: East
       latitude: 53.4508401
       longitude: -6.15367
       declination: 35
       azimuth: -67.5
       peak_kw: 6.175
+    - panel: panel_2
+      name: West
+      latitude: 53.4508401
+      longitude: -6.15367
+      declination: 35
+      azimuth: 112.5
+      peak_kw: 5.225
 
-dashboard:
-  pv_string_map:
-    pv1: East
-    pv2: West
-
-modbus:
-  host: 192.168.1.130
-  port: 502
-  timeout_seconds: 5
-  default_device_id: 247
-  register_map: sigen_register_map.json
+actuals:
+  scheduler:
+    interval_seconds: 60
+  modbus:
+    host: 192.168.1.130
+    port: 502
+    timeout_seconds: 5
+    default_device_id: 247
+    register_map: sigen_register_map.json
+    device_register_map: sigen_device_register_map.json

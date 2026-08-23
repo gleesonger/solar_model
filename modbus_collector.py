@@ -81,6 +81,11 @@ def decode_registers(raw: list[int], data_type: str) -> int:
     return value
 
 
+def decode_string(raw: list[int]) -> str:
+    payload = b"".join(word.to_bytes(2, "big") for word in raw)
+    return payload.split(b"\x00", 1)[0].decode("utf-8", errors="replace").strip()
+
+
 def read_block(client: ModbusTcpClient, kind: str, address: int, count: int, device_id: int):
     method = getattr(client, "read_holding_registers" if kind == "holding" else "read_input_registers")
     try:
@@ -89,8 +94,11 @@ def read_block(client: ModbusTcpClient, kind: str, address: int, count: int, dev
         return method(address=address, count=count, **{"slave": device_id})
 
 
-def read_registers(client: ModbusTcpClient, blocks: list[RegisterBlock]) -> dict[str, tuple[float, str, bool]]:
-    values: dict[str, tuple[float, str, bool]] = {}
+def read_registers(
+    client: ModbusTcpClient,
+    blocks: list[RegisterBlock],
+) -> dict[str, tuple[float | str, str, bool]]:
+    values: dict[str, tuple[float | str, str, bool]] = {}
     for block in blocks:
         result = read_block(client, block.kind, block.address, block.count, block.device_id)
         if result.isError():
@@ -103,14 +111,32 @@ def read_registers(client: ModbusTcpClient, blocks: list[RegisterBlock]) -> dict
                     f"short Modbus response for {definition.metric}: "
                     f"expected {definition.words} registers, got {len(raw_value)}"
                 )
-            values[definition.metric] = (decode_registers(raw_value, definition.data_type) / definition.scale, definition.unit, definition.cumulative)
+            value: float | str
+            if definition.data_type == "string":
+                value = decode_string(raw_value)
+            else:
+                value = decode_registers(raw_value, definition.data_type) / definition.scale
+            values[definition.metric] = (value, definition.unit, definition.cumulative)
     return values
 
 
-def collect_once(client: ModbusTcpClient, database, registers: list[RegisterBlock], previous: dict[str, float], timezone_name: str) -> bool:
+def collect_once(
+    client: ModbusTcpClient,
+    database,
+    registers: list[RegisterBlock],
+    previous: dict[str, float],
+    timezone_name: str,
+    device_registers: list[RegisterBlock] | None = None,
+) -> bool:
     try:
-        values = read_registers(client, registers)
-        database.save_modbus_sample(values, previous, timestamps(timezone_name=timezone_name))
+        readings = read_registers(client, registers)
+        values: dict[str, tuple[float, str, bool]] = {}
+        for metric, (value, unit, cumulative) in readings.items():
+            if isinstance(value, str):
+                raise ValueError(f"electrical metric {metric!r} returned text")
+            values[metric] = (value, unit, cumulative)
+        collected = timestamps(timezone_name=timezone_name)
+        database.save_modbus_sample(values, previous, collected)
         power = {metric: reading[0] for metric, reading in values.items() if metric in {
             "plant_pv_power_kw", "plant_load_power_kw", "plant_battery_power_kw", "plant_grid_power_kw"
         }}
@@ -123,6 +149,16 @@ def collect_once(client: ModbusTcpClient, database, registers: list[RegisterBloc
             max(grid, 0.0),
             max(-grid, 0.0),
         )
+        if device_registers is not None:
+            try:
+                changed = database.save_device_info(
+                    read_registers(client, device_registers),
+                    collected,
+                )
+                if changed:
+                    LOGGER.info("device information updated: %s values", changed)
+            except Exception:
+                LOGGER.exception("Device information collection failed; electrical sample retained")
         return True
     except Exception:
         LOGGER.exception("Modbus interval failed; interval skipped")

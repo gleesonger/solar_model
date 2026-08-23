@@ -11,6 +11,7 @@ from zoneinfo import ZoneInfo
 import pandas as pd
 from nicegui import ui
 from nicegui.elements.column import Column
+from nicegui.elements.echart import EChart
 from nicegui.elements.label import Label
 from nicegui.elements.table import Table
 from sqlalchemy import create_engine, func, select
@@ -73,6 +74,28 @@ class DashboardElements:
     live_status_label: Label | None = None
     updated_at_label: Label | None = None
     live_timestamp: str | None = None
+    hourly_range_label: Label | None = None
+    hourly_charts: HourlyCharts | None = None
+    historical_range_label: Label | None = None
+    historical_charts: HistoricalCharts | None = None
+    system_table: Table | None = None
+
+
+@dataclass(frozen=True)
+class HourlyCharts:
+    energy: EChart
+    power_title: Label
+    power: EChart
+    battery: EChart
+    array_energy: EChart
+
+
+@dataclass(frozen=True)
+class HistoricalCharts:
+    energy_title: Label
+    energy: EChart
+    array_energy_title: Label
+    array_energy: EChart
 
 
 @dataclass
@@ -100,7 +123,7 @@ def main() -> None:
         state = DashboardState(hourly_start=today, hourly_end=today)
         elements = DashboardElements()
         with ui.column().classes("w-full max-w-7xl mx-auto p-4") as container:
-            render_dashboard(
+            refresh_dashboard_data = render_dashboard(
                 container,
                 database_path,
                 timezone_name,
@@ -115,15 +138,7 @@ def main() -> None:
         )
         ui.timer(
             60,
-            lambda: render_dashboard(
-                container,
-                database_path,
-                timezone_name,
-                forecast_arrays,
-                actuals_to_forecast,
-                state,
-                elements,
-            ),
+            refresh_dashboard_data,
         )
 
     ui.run(
@@ -142,38 +157,38 @@ def render_dashboard(
     actuals_to_forecast: dict[str, int],
     state: DashboardState,
     elements: DashboardElements,
-) -> None:
+) -> Callable[[], None]:
     container.clear()
-    with container:
-        with ui.row().classes("w-full items-center justify-between"):
-            ui.label("Solar dashboard").classes("text-2xl font-bold")
-            ui.button(
-                "Refresh",
-                on_click=lambda: render_dashboard(
-                    container,
-                    database_path,
-                    timezone_name,
-                    forecast_arrays,
-                    actuals_to_forecast,
-                    state,
-                    elements,
-                ),
-                icon="refresh",
-            )
-        updated_at = datetime.now(ZoneInfo(timezone_name)).strftime("%Y-%m-%d %H:%M:%S %Z")
-        elements.updated_at_label = ui.label(
-            f"Last updated: {updated_at}"
-        ).classes("text-sm text-gray-600")
+    timezone = ZoneInfo(timezone_name)
+
+    def render_live_data() -> None:
         try:
-            today = datetime.now(ZoneInfo(timezone_name)).date()
-            historical_start = historical_start_date(
-                today, state.historical_count, state.historical_unit
-            )
             data = load_day(
-                database_path, timezone_name, forecast_arrays, actuals_to_forecast
+                database_path,
+                timezone_name,
+                forecast_arrays,
+                actuals_to_forecast,
             ).copy()
             telemetry = load_telemetry(database_path, timezone_name)
             live_power = load_live_power(database_path)
+        except Exception as error:
+            ui.label(f"Unable to load Live/Today data: {error}").classes("text-red-600")
+            return
+
+        summary_latest = {
+            **live_power.values,
+            "inverter_today": telemetry.latest["inverter_today"],
+        }
+        elements.live_table = render_live_today(data, summary_latest)
+        elements.live_status_label = ui.label().classes("text-sm mt-1")
+        update_live_status(
+            elements.live_status_label,
+            live_power.collected_at_utc,
+        )
+        elements.live_timestamp = live_power.collected_at_utc
+
+    def render_hourly_data() -> None:
+        try:
             hourly_range = load_hourly_range(
                 database_path,
                 timezone_name,
@@ -182,6 +197,31 @@ def render_dashboard(
                 state.power_interval_minutes,
                 forecast_arrays,
                 actuals_to_forecast,
+            )
+        except Exception as error:
+            ui.label(f"Unable to load hourly data: {error}").classes("text-red-600")
+            return
+
+        elements.hourly_range_label = ui.label(
+            f"Hourly averages from {state.hourly_start:%d %b %Y} "
+            f"to {state.hourly_end:%d %b %Y}, inclusive"
+        ).classes("text-sm text-gray-600 mb-2")
+        elements.hourly_charts = render_data_by_hour(
+            hourly_range.energy,
+            hourly_range.power,
+            hourly_range.battery,
+            forecast_arrays,
+            actuals_to_forecast,
+            state.power_interval_minutes,
+        )
+
+    def render_historical_data() -> None:
+        try:
+            today = datetime.now(timezone).date()
+            historical_start = historical_start_date(
+                today,
+                state.historical_count,
+                state.historical_unit,
             )
             historical = load_historical_energy(
                 database_path,
@@ -192,10 +232,168 @@ def render_dashboard(
                 forecast_arrays,
                 actuals_to_forecast,
             )
+        except Exception as error:
+            ui.label(f"Unable to load historical data: {error}").classes("text-red-600")
+            return
+
+        elements.historical_range_label = ui.label(
+            f"Total energy grouped by {state.historical_frequency}: "
+            f"{historical_start:%d %b %Y} to {today:%d %b %Y}, inclusive"
+        ).classes("text-sm text-gray-600 mb-2")
+        elements.historical_charts = render_historical(
+            historical,
+            state.historical_frequency,
+            forecast_arrays,
+            actuals_to_forecast,
+        )
+
+    def render_system_data() -> None:
+        try:
             device_information = load_device_information(database_path)
         except Exception as error:
-            ui.label(f"Unable to load database: {error}").classes("text-red-600")
+            ui.label(f"Unable to load system information: {error}").classes("text-red-600")
             return
+        elements.system_table = render_system_information(device_information)
+
+    def update_live_data() -> None:
+        data = load_day(
+            database_path,
+            timezone_name,
+            forecast_arrays,
+            actuals_to_forecast,
+        ).copy()
+        telemetry = load_telemetry(database_path, timezone_name)
+        live_power = load_live_power(database_path)
+        summary_latest = {
+            **live_power.values,
+            "inverter_today": telemetry.latest["inverter_today"],
+        }
+        if elements.live_table is not None:
+            elements.live_table.rows = summary_rows(data, summary_latest)
+        if elements.live_status_label is not None:
+            update_live_status(
+                elements.live_status_label,
+                live_power.collected_at_utc,
+            )
+        elements.live_timestamp = live_power.collected_at_utc
+
+    def update_hourly_data() -> None:
+        hourly_range = load_hourly_range(
+            database_path,
+            timezone_name,
+            state.hourly_start,
+            state.hourly_end,
+            state.power_interval_minutes,
+            forecast_arrays,
+            actuals_to_forecast,
+        )
+        if elements.hourly_range_label is not None:
+            elements.hourly_range_label.set_text(
+                f"Hourly averages from {state.hourly_start:%d %b %Y} "
+                f"to {state.hourly_end:%d %b %Y}, inclusive"
+            )
+        charts = elements.hourly_charts
+        if charts is not None:
+            minute_label = "minute" if state.power_interval_minutes == 1 else "minutes"
+            charts.power_title.set_text(
+                f"Average power over {state.power_interval_minutes} "
+                f"{minute_label} (kW)"
+            )
+            update_chart(
+                charts.energy,
+                energy_chart_options(hourly_range.energy, "hour"),
+            )
+            update_chart(
+                charts.power,
+                power_chart_options(
+                    hourly_range.power,
+                    forecast_arrays,
+                    actuals_to_forecast,
+                ),
+            )
+            update_chart(
+                charts.battery,
+                battery_chart_options(hourly_range.battery),
+            )
+            update_chart(
+                charts.array_energy,
+                array_energy_chart_options(
+                    hourly_range.energy,
+                    "hour",
+                    forecast_arrays,
+                    actuals_to_forecast,
+                ),
+            )
+
+    def update_historical_data() -> None:
+        today = datetime.now(timezone).date()
+        historical_start = historical_start_date(
+            today,
+            state.historical_count,
+            state.historical_unit,
+        )
+        historical = load_historical_energy(
+            database_path,
+            timezone_name,
+            historical_start,
+            today,
+            state.historical_frequency,
+            forecast_arrays,
+            actuals_to_forecast,
+        )
+        if elements.historical_range_label is not None:
+            elements.historical_range_label.set_text(
+                f"Total energy grouped by {state.historical_frequency}: "
+                f"{historical_start:%d %b %Y} to {today:%d %b %Y}, inclusive"
+            )
+        charts = elements.historical_charts
+        if charts is not None:
+            charts.energy_title.set_text(
+                f"Energy by {state.historical_frequency} (kWh)"
+            )
+            charts.array_energy_title.set_text(
+                "Solar energy by array and "
+                f"{state.historical_frequency} (kWh)"
+            )
+            update_chart(
+                charts.energy,
+                energy_chart_options(historical, "period"),
+            )
+            update_chart(
+                charts.array_energy,
+                array_energy_chart_options(
+                    historical,
+                    "period",
+                    forecast_arrays,
+                    actuals_to_forecast,
+                ),
+            )
+
+    def update_system_data() -> None:
+        if elements.system_table is not None:
+            elements.system_table.rows = load_device_information(database_path)
+
+    def refresh_data() -> None:
+        try:
+            update_live_data()
+            update_hourly_data()
+            update_historical_data()
+            update_system_data()
+        except Exception as error:
+            ui.notify(f"Unable to refresh dashboard data: {error}", type="negative")
+            return
+        updated_at = datetime.now(timezone).strftime("%Y-%m-%d %H:%M:%S %Z")
+        if elements.updated_at_label is not None:
+            elements.updated_at_label.set_text(f"Last updated: {updated_at}")
+
+    with container:
+        with ui.row().classes("w-full items-center justify-between"):
+            ui.label("Solar dashboard").classes("text-2xl font-bold")
+            ui.button("Refresh", on_click=refresh_data, icon="refresh")
+        updated_at = datetime.now(timezone).strftime("%Y-%m-%d %H:%M:%S %Z")
+        elements.updated_at_label = ui.label(
+            f"Last updated: {updated_at}"
+        ).classes("text-sm text-gray-600")
 
         with ui.tabs(
             on_change=lambda event: setattr(state, "active_tab", str(event.value)),
@@ -210,26 +408,20 @@ def render_dashboard(
             "Historical": historical_tab,
             "System Info": system_info_tab,
         }.get(state.active_tab, live_today_tab)
+
         with ui.tab_panels(tabs, value=selected_tab).classes("w-full"):
             with ui.tab_panel(live_today_tab).classes("px-0"):
-                summary_latest = {
-                    **live_power.values,
-                    "inverter_today": telemetry.latest["inverter_today"],
-                }
-                elements.live_table = render_live_today(data, summary_latest)
-                elements.live_status_label = ui.label().classes("text-sm mt-1")
-                update_live_status(
-                    elements.live_status_label,
-                    live_power.collected_at_utc,
-                )
-                elements.live_timestamp = live_power.collected_at_utc
+                render_live_data()
+
             with ui.tab_panel(data_tab).classes("px-0"):
                 with ui.row().classes("w-full items-end gap-3"):
                     start_input = ui.input(
-                        "First date", value=state.hourly_start.isoformat()
+                        "First date",
+                        value=state.hourly_start.isoformat(),
                     ).props("type=date outlined dense")
                     end_input = ui.input(
-                        "End date", value=state.hourly_end.isoformat()
+                        "End date",
+                        value=state.hourly_end.isoformat(),
                     ).props("type=date outlined dense")
 
                     def apply_date_range() -> None:
@@ -240,53 +432,70 @@ def render_dashboard(
                             ui.notify("Enter valid first and end dates", type="negative")
                             return
                         if start > end:
-                            ui.notify("First date must not be after end date", type="negative")
+                            ui.notify(
+                                "First date must not be after end date",
+                                type="negative",
+                            )
                             return
                         state.hourly_start = start
                         state.hourly_end = end
-                        state.active_tab = "Data by Hour"
-                        render_dashboard(
-                            container,
-                            database_path,
-                            timezone_name,
-                            forecast_arrays,
-                            actuals_to_forecast,
-                            state,
-                            elements,
-                        )
+                        try:
+                            update_hourly_data()
+                        except Exception as error:
+                            ui.notify(
+                                f"Unable to update hourly data: {error}",
+                                type="negative",
+                            )
 
                     ui.button("Apply", on_click=apply_date_range, icon="date_range")
-                ui.label(
-                    f"Hourly averages from {state.hourly_start:%d %b %Y} "
-                    f"to {state.hourly_end:%d %b %Y}, inclusive"
-                ).classes("text-sm text-gray-600 mb-2")
 
-                def apply_power_interval(minutes: int) -> None:
-                    state.power_interval_minutes = minutes
-                    state.active_tab = "Data by Hour"
-                    render_dashboard(
-                        container,
-                        database_path,
-                        timezone_name,
-                        forecast_arrays,
-                        actuals_to_forecast,
-                        state,
-                        elements,
+                with ui.row().classes("w-full items-end gap-3 mt-4"):
+                    power_interval_input = ui.number(
+                        "Average over (minutes)",
+                        value=state.power_interval_minutes,
+                        min=1,
+                        step=1,
+                    ).props("outlined dense").classes("w-48")
+
+                    def apply_power_interval() -> None:
+                        try:
+                            raw_minutes = float(power_interval_input.value)
+                            minutes = int(raw_minutes)
+                        except (TypeError, ValueError):
+                            ui.notify(
+                                "Power interval must be a positive whole number",
+                                type="negative",
+                            )
+                            return
+                        if minutes < 1 or raw_minutes != minutes:
+                            ui.notify(
+                                "Power interval must be a positive whole number",
+                                type="negative",
+                            )
+                            return
+                        state.power_interval_minutes = minutes
+                        try:
+                            update_hourly_data()
+                        except Exception as error:
+                            ui.notify(
+                                f"Unable to update hourly data: {error}",
+                                type="negative",
+                            )
+
+                    ui.button(
+                        "Apply",
+                        on_click=apply_power_interval,
+                        icon="schedule",
                     )
+                render_hourly_data()
 
-                render_data_by_hour(
-                    hourly_range.energy,
-                    hourly_range.power,
-                    hourly_range.battery,
-                    forecast_arrays,
-                    actuals_to_forecast,
-                    state.power_interval_minutes,
-                    apply_power_interval,
-                )
             with ui.tab_panel(historical_tab).classes("px-0"):
                 with ui.row().classes("w-full items-end gap-3"):
                     historical_count_input = ui.number(
-                        "Last", value=state.historical_count, min=1, step=1
+                        "Last",
+                        value=state.historical_count,
+                        min=1,
+                        step=1,
                     ).props("outlined dense").classes("w-28")
                     historical_unit_input = ui.select(
                         ["days", "weeks", "months", "years"],
@@ -304,51 +513,57 @@ def render_dashboard(
                             raw_count = float(historical_count_input.value)
                             count = int(raw_count)
                         except (TypeError, ValueError):
-                            ui.notify("Last must be a positive whole number", type="negative")
+                            ui.notify(
+                                "Last must be a positive whole number",
+                                type="negative",
+                            )
                             return
                         if count < 1 or raw_count != count:
-                            ui.notify("Last must be a positive whole number", type="negative")
+                            ui.notify(
+                                "Last must be a positive whole number",
+                                type="negative",
+                            )
                             return
                         unit = str(historical_unit_input.value)
                         frequency = str(historical_frequency_input.value)
                         if unit not in {"days", "weeks", "months", "years"}:
                             ui.notify("Select a valid period", type="negative")
                             return
-                        if frequency not in {"day", "week", "month", "season", "year"}:
+                        if frequency not in {
+                            "day",
+                            "week",
+                            "month",
+                            "season",
+                            "year",
+                        }:
                             ui.notify("Select a valid grouping", type="negative")
                             return
                         state.historical_count = count
                         state.historical_unit = unit
                         state.historical_frequency = frequency
-                        state.active_tab = "Historical"
-                        render_dashboard(
-                            container,
-                            database_path,
-                            timezone_name,
-                            forecast_arrays,
-                            actuals_to_forecast,
-                            state,
-                            elements,
-                        )
+                        try:
+                            update_historical_data()
+                        except Exception as error:
+                            ui.notify(
+                                f"Unable to update historical data: {error}",
+                                type="negative",
+                            )
 
-                    ui.button("Apply", on_click=apply_historical_range, icon="date_range")
-                ui.label(
-                    f"Total energy grouped by {state.historical_frequency}: "
-                    f"{historical_start:%d %b %Y} to {today:%d %b %Y}, inclusive"
-                ).classes("text-sm text-gray-600 mb-2")
-                render_historical(
-                    historical,
-                    state.historical_frequency,
-                    forecast_arrays,
-                    actuals_to_forecast,
-                )
+                    ui.button(
+                        "Apply",
+                        on_click=apply_historical_range,
+                        icon="date_range",
+                    )
+                render_historical_data()
+
             with ui.tab_panel(system_info_tab).classes("px-0"):
-                render_system_information(device_information)
+                render_system_data()
 
+    return refresh_data
 
-def render_system_information(device_information: list[dict[str, str]]) -> None:
+def render_system_information(device_information: list[dict[str, str]]) -> Table:
     ui.label("System information").classes("text-lg font-semibold")
-    ui.table(
+    return ui.table(
         columns=[
             {"name": "variable", "label": "Variable", "field": "variable", "align": "left"},
             {"name": "value", "label": "Value", "field": "value", "align": "right"},
@@ -380,108 +595,35 @@ def render_data_by_hour(
     forecast_arrays: tuple[SolarArrayConfig, ...],
     actuals_to_forecast: dict[str, int],
     power_interval_minutes: int,
-    on_power_interval_change: Callable[[int], None],
-) -> None:
-    render_energy_chart(data, "hour", "Average hourly energy (kWh)")
+) -> HourlyCharts:
+    energy_chart = render_energy_chart(data, "hour", "Average hourly energy (kWh)")
 
-    with ui.row().classes("w-full items-end gap-3 mt-4"):
-        power_interval_input = ui.number(
-            "Average over (minutes)",
-            value=power_interval_minutes,
-            min=1,
-            step=1,
-        ).props("outlined dense").classes("w-48")
-
-        def apply_interval() -> None:
-            try:
-                raw_minutes = float(power_interval_input.value)
-                minutes = int(raw_minutes)
-            except (TypeError, ValueError):
-                ui.notify("Power interval must be a positive whole number", type="negative")
-                return
-            if minutes < 1 or raw_minutes != minutes:
-                ui.notify("Power interval must be a positive whole number", type="negative")
-                return
-            on_power_interval_change(minutes)
-
-        ui.button("Apply", on_click=apply_interval, icon="schedule")
     minute_label = "minute" if power_interval_minutes == 1 else "minutes"
-    ui.label(
+    power_title = ui.label(
         f"Average power over {power_interval_minutes} {minute_label} (kW)"
     ).classes("text-lg font-semibold")
-    mapped_panels = set(actuals_to_forecast.values())
-    power_series: list[tuple[str, str, str | None]] = [
-        ("Solar", "solar", None),
-        *[
-            (
-                f"Solar - {array.name}",
-                actual_column_name(array.panel_id),
-                PANEL_COLORS[index % len(PANEL_COLORS)],
-            )
-            for index, array in enumerate(forecast_arrays)
-            if array.panel_id in mapped_panels
-        ],
-        ("Load", "load", None),
-        ("Battery", "battery", None),
-        ("Inverter", "inverter", None),
-        ("Grid Imported", "grid_import", None),
-        ("Grid Exported", "grid_export", None),
-    ]
-    ui.echart({
-        "tooltip": {"trigger": "axis"},
-        "legend": {"data": [label for label, _, _ in power_series]},
-        "xAxis": {"type": "category", "data": dataframe_column(power_hourly, "time").tolist()},
-        "yAxis": {"type": "value", "name": "kW"},
-        "series": [
-            {
-                "name": label,
-                "type": "line",
-                "showSymbol": False,
-                "connectNulls": False,
-                "data": chart_values(dataframe_column(power_hourly, column)),
-                **(
-                    {"lineStyle": {"color": color}, "itemStyle": {"color": color}}
-                    if color is not None
-                    else {}
-                ),
-            }
-            for label, column, color in power_series
-        ],
-    }).classes("w-full h-96")
+    power_chart = ui.echart(
+        power_chart_options(power_hourly, forecast_arrays, actuals_to_forecast)
+    ).classes("w-full h-96")
 
     ui.label("Average battery energy and state of charge by hour").classes("text-lg font-semibold mt-4")
-    ui.echart({
-        "tooltip": {"trigger": "axis"},
-        "legend": {"data": ["Available energy", "State of charge"]},
-        "xAxis": {"type": "category", "data": dataframe_column(battery_hourly, "time").tolist()},
-        "yAxis": [
-            {"type": "value", "name": "kWh"},
-            {"type": "value", "name": "%", "min": 0, "max": 100},
-        ],
-        "series": [
-            {
-                "name": "Available energy",
-                "type": "line",
-                "showSymbol": False,
-                "yAxisIndex": 0,
-                "data": chart_values(dataframe_column(battery_hourly, "available_energy_kwh")),
-            },
-            {
-                "name": "State of charge",
-                "type": "line",
-                "showSymbol": False,
-                "yAxisIndex": 1,
-                "data": chart_values(dataframe_column(battery_hourly, "soc_percent")),
-            },
-        ],
-    }).classes("w-full h-96")
+    battery_chart = ui.echart(
+        battery_chart_options(battery_hourly)
+    ).classes("w-full h-96")
 
-    render_array_energy_chart(
+    array_energy_chart = render_array_energy_chart(
         data,
         "hour",
         "Average hourly solar energy by array (kWh)",
         forecast_arrays,
         actuals_to_forecast,
+    )
+    return HourlyCharts(
+        energy=energy_chart,
+        power_title=power_title,
+        power=power_chart,
+        battery=battery_chart,
+        array_energy=array_energy_chart,
     )
 
 
@@ -490,20 +632,39 @@ def render_historical(
     frequency: str,
     forecast_arrays: tuple[SolarArrayConfig, ...],
     actuals_to_forecast: dict[str, int],
-) -> None:
-    render_energy_chart(data, "period", f"Energy by {frequency} (kWh)")
-    render_array_energy_chart(
-        data,
-        "period",
-        f"Solar energy by array and {frequency} (kWh)",
-        forecast_arrays,
-        actuals_to_forecast,
+) -> HistoricalCharts:
+    energy_title = ui.label(
+        f"Energy by {frequency} (kWh)"
+    ).classes("text-lg font-semibold mt-4")
+    energy_chart = ui.echart(
+        energy_chart_options(data, "period")
+    ).classes("w-full h-96")
+    array_energy_title = ui.label(
+        f"Solar energy by array and {frequency} (kWh)"
+    ).classes("text-lg font-semibold mt-4")
+    array_energy_chart = ui.echart(
+        array_energy_chart_options(
+            data,
+            "period",
+            forecast_arrays,
+            actuals_to_forecast,
+        )
+    ).classes("w-full h-96")
+    return HistoricalCharts(
+        energy_title=energy_title,
+        energy=energy_chart,
+        array_energy_title=array_energy_title,
+        array_energy=array_energy_chart,
     )
 
 
-def render_energy_chart(data: pd.DataFrame, category_column: str, title: str) -> None:
+def render_energy_chart(data: pd.DataFrame, category_column: str, title: str) -> EChart:
     ui.label(title).classes("text-lg font-semibold mt-4")
-    ui.echart({
+    return ui.echart(energy_chart_options(data, category_column)).classes("w-full h-96")
+
+
+def energy_chart_options(data: pd.DataFrame, category_column: str) -> dict[str, Any]:
+    return {
         "tooltip": {"trigger": "axis"},
         "legend": {
             "data": [
@@ -523,7 +684,7 @@ def render_energy_chart(data: pd.DataFrame, category_column: str, title: str) ->
             {"name": "Grid Imported", "type": "bar", "data": chart_values(dataframe_column(data, "grid_import"))},
             {"name": "Grid Exported", "type": "bar", "data": chart_values(dataframe_column(data, "grid_export"))},
         ],
-    }).classes("w-full h-96")
+    }
 
 
 def render_array_energy_chart(
@@ -532,8 +693,24 @@ def render_array_energy_chart(
     title: str,
     forecast_arrays: tuple[SolarArrayConfig, ...],
     actuals_to_forecast: dict[str, int],
-) -> None:
+) -> EChart:
     ui.label(title).classes("text-lg font-semibold mt-4")
+    return ui.echart(
+        array_energy_chart_options(
+            data,
+            category_column,
+            forecast_arrays,
+            actuals_to_forecast,
+        )
+    ).classes("w-full h-96")
+
+
+def array_energy_chart_options(
+    data: pd.DataFrame,
+    category_column: str,
+    forecast_arrays: tuple[SolarArrayConfig, ...],
+    actuals_to_forecast: dict[str, int],
+) -> dict[str, Any]:
     panel_names = {array.panel_id: array.name for array in forecast_arrays}
     forecast_panels = [array.panel_id for array in forecast_arrays]
     mapped_panels = set(actuals_to_forecast.values())
@@ -571,13 +748,101 @@ def render_array_energy_chart(
                 },
             },
         ])
-    ui.echart({
+    return {
         "tooltip": {"trigger": "axis"},
         "legend": {"data": [series["name"] for series in array_series]},
         "xAxis": {"type": "category", "data": dataframe_column(data, category_column).tolist()},
         "yAxis": {"type": "value", "name": "kWh"},
         "series": array_series,
-    }).classes("w-full h-96")
+    }
+
+
+def power_chart_options(
+    power_data: pd.DataFrame,
+    forecast_arrays: tuple[SolarArrayConfig, ...],
+    actuals_to_forecast: dict[str, int],
+) -> dict[str, Any]:
+    mapped_panels = set(actuals_to_forecast.values())
+    power_series: list[tuple[str, str, str | None]] = [
+        ("Solar", "solar", None),
+        *[
+            (
+                f"Solar - {array.name}",
+                actual_column_name(array.panel_id),
+                PANEL_COLORS[index % len(PANEL_COLORS)],
+            )
+            for index, array in enumerate(forecast_arrays)
+            if array.panel_id in mapped_panels
+        ],
+        ("Load", "load", None),
+        ("Battery", "battery", None),
+        ("Inverter", "inverter", None),
+        ("Grid Imported", "grid_import", None),
+        ("Grid Exported", "grid_export", None),
+    ]
+    return {
+        "tooltip": {"trigger": "axis"},
+        "legend": {"data": [label for label, _, _ in power_series]},
+        "xAxis": {
+            "type": "category",
+            "data": dataframe_column(power_data, "time").tolist(),
+        },
+        "yAxis": {"type": "value", "name": "kW"},
+        "series": [
+            {
+                "name": label,
+                "type": "line",
+                "showSymbol": False,
+                "connectNulls": False,
+                "data": chart_values(dataframe_column(power_data, column)),
+                **(
+                    {"lineStyle": {"color": color}, "itemStyle": {"color": color}}
+                    if color is not None
+                    else {}
+                ),
+            }
+            for label, column, color in power_series
+        ],
+    }
+
+
+def battery_chart_options(battery_data: pd.DataFrame) -> dict[str, Any]:
+    return {
+        "tooltip": {"trigger": "axis"},
+        "legend": {"data": ["Available energy", "State of charge"]},
+        "xAxis": {
+            "type": "category",
+            "data": dataframe_column(battery_data, "time").tolist(),
+        },
+        "yAxis": [
+            {"type": "value", "name": "kWh"},
+            {"type": "value", "name": "%", "min": 0, "max": 100},
+        ],
+        "series": [
+            {
+                "name": "Available energy",
+                "type": "line",
+                "showSymbol": False,
+                "yAxisIndex": 0,
+                "data": chart_values(
+                    dataframe_column(battery_data, "available_energy_kwh")
+                ),
+            },
+            {
+                "name": "State of charge",
+                "type": "line",
+                "showSymbol": False,
+                "yAxisIndex": 1,
+                "data": chart_values(dataframe_column(battery_data, "soc_percent")),
+            },
+        ],
+    }
+
+
+def update_chart(chart: EChart, options: dict[str, Any]) -> None:
+    chart.options.clear()
+    chart.options.update(options)
+    chart.update()
 
 
 def load_day(

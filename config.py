@@ -42,6 +42,7 @@ class ForecastConfig:
 
 @dataclass(frozen=True)
 class DashboardConfig:
+    port: int
     actuals_to_forecast: dict[str, str]
 
 
@@ -109,6 +110,7 @@ def load_config(path: str | Path = "config.yaml") -> Config:
                 arrays=arrays,
             ),
             dashboard=DashboardConfig(
+                port=int(dashboard_values.get("port", 8080)),
                 actuals_to_forecast=actuals_to_forecast,
             ),
             actuals=ActualsConfig(
@@ -152,6 +154,8 @@ def load_config(path: str | Path = "config.yaml") -> Config:
             raise ValueError(f"dashboard mappings use unknown panels: {', '.join(sorted(unknown_panel_ids))}")
         if not 1 <= config.actuals.modbus.port <= 65535:
             raise ValueError("Modbus port must be between 1 and 65535")
+        if not 1 <= config.dashboard.port <= 65535:
+            raise ValueError("Dashboard port must be between 1 and 65535")
         return config
     except (KeyError, TypeError, ValueError) as error:
         raise ValueError(f"invalid configuration in {path}: {error}") from error

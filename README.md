@@ -66,6 +66,6 @@ Install the requirements and start the NiceGUI dashboard with:
 python main_dashboard.py
 ```
 
-It listens on port `8080` by default; set `DASHBOARD_PORT` to change it. The dashboard updates the `Latest (kW)` cells in place from `sigenstor_live` every five seconds, without rebuilding the page. The remaining current-day, forecast, chart, and device data stays on the minute refresh. Mapped PV-string voltage and current readings provide the per-panel actual energy and power values. The battery chart uses the inverter's Modbus reading for available discharge energy; battery energy is not calculated from state of charge.
+It listens on `dashboard.port` from `config.yaml` (`8080` by default); `DASHBOARD_PORT` can override the configured value. The dashboard updates the `Latest (kW)` cells in place from `sigenstor_live` every five seconds, without rebuilding the page. The remaining current-day, forecast, chart, and device data stays on the minute refresh. Mapped PV-string voltage and current readings provide the per-panel actual energy and power values. The battery chart uses the inverter's Modbus reading for available discharge energy; battery energy is not calculated from state of charge.
 
 The Docker image starts the minute collector, live collector, and dashboard. Publish port `8080` when running the container, for example `docker run -p 8080:8080 -v solar-config:/config solar-model`.

@@ -128,7 +128,7 @@ def main() -> None:
 
     ui.run(
         host=os.getenv("DASHBOARD_HOST", "0.0.0.0"),
-        port=int(os.getenv("DASHBOARD_PORT", "8080")),
+        port=int(os.getenv("DASHBOARD_PORT", str(config.dashboard.port))),
         title="Solar dashboard",
         reload=False,
     )

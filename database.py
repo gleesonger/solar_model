@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
-from sqlalchemy import Float, Index, Integer, String, create_engine, inspect, select
+from sqlalchemy import Float, Index, Integer, String, Table, create_engine, inspect, select
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
 
@@ -178,7 +178,7 @@ def open_database(path: str | Path) -> SolarDatabase:
 
 
 def _add_missing_columns(engine: Engine, model: type[Base]) -> None:
-    table = model.__table__
+    table = cast(Table, model.__table__)
     existing_columns = {column["name"] for column in inspect(engine).get_columns(table.name)}
     missing_columns = [column for column in table.columns if column.name not in existing_columns]
     if not missing_columns:
@@ -194,7 +194,8 @@ def _add_missing_columns(engine: Engine, model: type[Base]) -> None:
 
 
 def _drop_columns(engine: Engine, model: type[Base], column_names: tuple[str, ...]) -> None:
-    table_name = model.__table__.name
+    table = cast(Table, model.__table__)
+    table_name = table.name
     existing_columns = {column["name"] for column in inspect(engine).get_columns(table_name)}
     columns_to_drop = [name for name in column_names if name in existing_columns]
     if not columns_to_drop:

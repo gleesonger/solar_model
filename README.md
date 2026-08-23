@@ -24,6 +24,8 @@ The arrays are parameterized in `config.yaml`:
 
 The API returns cumulative `watt_hours` values for forecast timestamps and daily totals. Forecast.Solar public access may return hourly data; 15-minute data depends on the account plan.
 
+`dashboard.pv_string_map` associates inverter PV inputs with forecast arrays. The dashboard calculates each mapped array's actual DC energy from its string voltage and current samples. For example, `pv1: East` compares inverter string PV1 with the East forecast array.
+
 ## Modbus register map
 
 Sigenergy register addresses and scaling are firmware/device dependent. The collector reads contiguous groups. The supplied `sigen_register_map.json` contains the documented plant and inverter metrics used by this project.
@@ -46,3 +48,13 @@ Use `input` or `holding` for `kind`. Addresses are passed to pymodbus as zero-ba
 The requested device defaults are Modbus TCP host `192.168.1.130` and port `502`. The supplied map uses the Sigenergy plant unit ID `247` and inverter unit ID `1`; set explicit `device_id` values in `sigen_register_map.json` when your topology differs. Set `database.path` in `config.yaml` to change the SQLite path.
 
 The database uses explicit SQLAlchemy models and wide tables: `modbus_samples_wide` has one row per Modbus sample with one column per metric, and `forecast_samples_wide` has one row per forecast timestamp with columns for each solar array. Each forecast scan creates a collection GUID; every array in that scan uses the same GUID, and the GUID plus forecast timestamp identifies the shared wide row. Modbus column names include their units, for example `plant_pv_power_kw` and `inverter_battery_soc_percent`; cumulative metrics also have a `_period` column. Both tables store UTC/local timestamps.
+
+## Dashboard
+
+Install the requirements and start the NiceGUI dashboard with:
+
+```powershell
+python dashboard.py
+```
+
+It listens on port `8080` by default; set `DASHBOARD_PORT` to change it. The dashboard shows the current local day from midnight through the following midnight. Modbus provides plant PV totals, so West/East actual chart values are allocated estimates based on their forecast shares. Battery energy is positive while charging and negative while discharging.

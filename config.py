@@ -40,6 +40,11 @@ class ForecastConfig:
 
 
 @dataclass(frozen=True)
+class DashboardConfig:
+    pv_string_map: dict[str, str]
+
+
+@dataclass(frozen=True)
 class ModbusConfig:
     host: str
     port: int
@@ -55,6 +60,7 @@ class Config:
     database: DatabaseConfig
     scheduler: SchedulerConfig
     forecast: ForecastConfig
+    dashboard: DashboardConfig
     modbus: ModbusConfig
 
 
@@ -66,6 +72,14 @@ def load_config(path: str | Path = "config.yaml") -> Config:
 
     try:
         arrays = tuple(SolarArrayConfig(**array) for array in values["forecast"]["arrays"])
+        raw_pv_string_map = values["dashboard"].get("pv_string_map", {})
+        if not isinstance(raw_pv_string_map, dict):
+            raise TypeError("dashboard.pv_string_map must be a mapping")
+        array_names = {array.name.casefold(): array.name for array in arrays}
+        pv_string_map = {
+            str(pv_string).casefold(): array_names[str(array_name).casefold()]
+            for pv_string, array_name in raw_pv_string_map.items()
+        }
         config = Config(
             timezone=str(values["timezone"]),
             logging=LoggingConfig(**values["logging"]),
@@ -76,6 +90,9 @@ def load_config(path: str | Path = "config.yaml") -> Config:
                 timeout_seconds=float(values["forecast"]["timeout_seconds"]),
                 endpoint=str(values["forecast"]["endpoint"]),
                 arrays=arrays,
+            ),
+            dashboard=DashboardConfig(
+                pv_string_map=pv_string_map,
             ),
             modbus=ModbusConfig(
                 host=str(values["modbus"]["host"]),
@@ -89,6 +106,9 @@ def load_config(path: str | Path = "config.yaml") -> Config:
             raise ValueError("scheduler and forecast intervals must be greater than zero")
         if config.forecast.timeout_seconds <= 0 or not config.forecast.arrays:
             raise ValueError("forecast timeout must be greater than zero and arrays cannot be empty")
+        invalid_pv_strings = set(config.dashboard.pv_string_map) - {"pv1", "pv2", "pv3", "pv4"}
+        if invalid_pv_strings:
+            raise ValueError(f"unsupported PV strings: {', '.join(sorted(invalid_pv_strings))}")
         if not 1 <= config.modbus.port <= 65535:
             raise ValueError("Modbus port must be between 1 and 65535")
         return config

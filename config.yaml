@@ -27,6 +27,11 @@ forecast:
       azimuth: -67.5
       peak_kw: 6.175
 
+dashboard:
+  pv_string_map:
+    pv1: East
+    pv2: West
+
 modbus:
   host: 192.168.1.130
   port: 502

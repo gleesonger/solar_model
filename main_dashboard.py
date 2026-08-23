@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import datetime, timedelta, tzinfo
 from pathlib import Path
 from typing import Any, cast
@@ -34,12 +35,53 @@ FORECAST_WATT_HOURS_READERS: dict[str, ForecastWattHoursReader] = {
 PANEL_COLORS = ("#5470c6", "#91cc75", "#fac858", "#ee6666")
 
 
+@dataclass(frozen=True)
+class TelemetryData:
+    power_15m: pd.DataFrame
+    battery_15m: pd.DataFrame
+    latest: dict[str, float | None]
+
+
 def main() -> None:
     config = load_config()
     database_path = config.database.path
     timezone_name = config.timezone
     forecast_arrays = config.forecast.arrays
     actuals_to_forecast = config.dashboard.actuals_to_forecast
+
+    ui.add_css(
+        """
+        .solar-tabs {
+            background: #e2e8f0;
+            border: 1px solid #94a3b8;
+            border-radius: 0.75rem;
+            box-shadow: 0 1px 3px rgb(15 23 42 / 15%);
+            padding: 0.25rem;
+        }
+        .solar-tabs .q-tab {
+            border-radius: 0.5rem;
+            font-weight: 700;
+            opacity: 1;
+            transition: background-color 150ms ease, color 150ms ease;
+        }
+        .solar-tabs .q-tab:not(.q-tab--active) {
+            background: #f8fafc;
+            color: #334155 !important;
+        }
+        .solar-tabs .q-tab:not(.q-tab--active):hover {
+            background: #cbd5e1;
+            color: #0f172a !important;
+        }
+        .solar-tabs .q-tab.q-tab--active {
+            background: #2563eb;
+            color: #ffffff !important;
+        }
+        .solar-tabs .q-tab__indicator {
+            background: #fbbf24 !important;
+            height: 4px;
+        }
+        """
+    )
 
     @ui.page("/")
     def page() -> None:
@@ -84,200 +126,186 @@ def render_dashboard(
             data = load_day(
                 database_path, timezone_name, forecast_arrays, actuals_to_forecast
             ).copy()
-            power_15m, battery_15m, latest = load_telemetry(database_path, timezone_name)
+            telemetry = load_telemetry(database_path, timezone_name)
             device_information = load_device_information(database_path)
         except Exception as error:
             ui.label(f"Unable to load database: {error}").classes("text-red-600")
             return
 
-        summary_columns = [
-            {"name": "metric", "label": "", "field": "metric", "align": "left"},
-            {"name": "latest", "label": "Latest (kW)", "field": "latest", "align": "right"},
-            {"name": "today", "label": "Today (kWh)", "field": "today", "align": "right"},
-            {"name": "forecast", "label": "Forecast (kWh)", "field": "forecast", "align": "right"},
-        ]
-        ui.table(
-            columns=summary_columns,
-            rows=summary_rows(data, latest),
-            row_key="metric",
-        ).props("dense flat bordered").classes("w-full max-w-3xl")
+        with ui.tabs().classes("solar-tabs w-full") as tabs:
+            live_today_tab = ui.tab("Live/Today")
+            data_tab = ui.tab("Data by Hour")
+            system_info_tab = ui.tab("System Info")
+        with ui.tab_panels(tabs, value=live_today_tab).classes("w-full"):
+            with ui.tab_panel(live_today_tab).classes("px-0"):
+                render_live_today(data, telemetry.latest)
+            with ui.tab_panel(data_tab).classes("px-0"):
+                render_data_by_hour(
+                    data,
+                    telemetry.power_15m,
+                    telemetry.battery_15m,
+                    forecast_arrays,
+                    actuals_to_forecast,
+                )
+            with ui.tab_panel(system_info_tab).classes("px-0"):
+                render_system_information(device_information)
 
-        ui.label("System information").classes("text-lg font-semibold mt-4")
-        ui.table(
-            columns=[
-                {"name": "variable", "label": "Variable", "field": "variable", "align": "left"},
-                {"name": "value", "label": "Value", "field": "value", "align": "right"},
-                {"name": "unit", "label": "Unit", "field": "unit", "align": "left"},
-            ],
-            rows=device_information,
-            row_key="variable",
-        ).props("dense flat bordered").classes("w-full max-w-3xl")
 
-        ui.label("Hourly PV energy (kWh)").classes("text-lg font-semibold")
-        panel_names = {array.panel: array.name for array in forecast_arrays}
-        forecast_panels = [array.panel for array in forecast_arrays]
-        mapped_panels = set(actuals_to_forecast.values())
-        ui.echart({
-            "tooltip": {"trigger": "axis"},
-            "legend": {
-                "data": [
-                    "Solar (Actual)",
-                    "Solar (Forecast)",
-                    "Load",
-                    "Grid Imported",
-                    "Grid Exported",
-                ]
+def render_system_information(device_information: list[dict[str, str]]) -> None:
+    ui.label("System information").classes("text-lg font-semibold")
+    ui.table(
+        columns=[
+            {"name": "variable", "label": "Variable", "field": "variable", "align": "left"},
+            {"name": "value", "label": "Value", "field": "value", "align": "right"},
+            {"name": "unit", "label": "Unit", "field": "unit", "align": "left"},
+        ],
+        rows=device_information,
+        row_key="variable",
+    ).props("dense flat bordered").classes("w-full max-w-3xl")
+
+
+def render_live_today(data: pd.DataFrame, latest: dict[str, float | None]) -> None:
+    summary_columns = [
+        {"name": "metric", "label": "", "field": "metric", "align": "left"},
+        {"name": "latest", "label": "Latest (kW)", "field": "latest", "align": "right"},
+        {"name": "today", "label": "Today (kWh)", "field": "today", "align": "right"},
+        {"name": "forecast", "label": "Forecast (kWh)", "field": "forecast", "align": "right"},
+    ]
+    ui.table(
+        columns=summary_columns,
+        rows=summary_rows(data, latest),
+        row_key="metric",
+    ).props("dense flat bordered").classes("w-full max-w-3xl")
+
+
+def render_data_by_hour(
+    data: pd.DataFrame,
+    power_15m: pd.DataFrame,
+    battery_15m: pd.DataFrame,
+    forecast_arrays: tuple[SolarArrayConfig, ...],
+    actuals_to_forecast: dict[str, str],
+) -> None:
+    ui.label("Hourly PV energy (kWh)").classes("text-lg font-semibold mt-4")
+    panel_names = {array.panel: array.name for array in forecast_arrays}
+    forecast_panels = [array.panel for array in forecast_arrays]
+    mapped_panels = set(actuals_to_forecast.values())
+    ui.echart({
+        "tooltip": {"trigger": "axis"},
+        "legend": {
+            "data": [
+                "Solar (Actual)",
+                "Solar (Forecast)",
+                "Load",
+                "Grid Imported",
+                "Grid Exported",
+            ]
+        },
+        "xAxis": {"type": "category", "data": dataframe_column(data, "hour").tolist()},
+        "yAxis": {"type": "value", "name": "kWh"},
+        "series": [
+            {"name": "Solar (Actual)", "type": "bar", "data": chart_values(dataframe_column(data, "solar"))},
+            {"name": "Solar (Forecast)", "type": "bar", "data": chart_values(dataframe_column(data, "forecast_total"))},
+            {"name": "Load", "type": "bar", "data": chart_values(dataframe_column(data, "load"))},
+            {"name": "Grid Imported", "type": "bar", "data": chart_values(dataframe_column(data, "grid_import"))},
+            {"name": "Grid Exported", "type": "bar", "data": chart_values(dataframe_column(data, "grid_export"))},
+        ],
+    }).classes("w-full h-96")
+
+    ui.label("15-minute average power (kW)").classes("text-lg font-semibold mt-4")
+    power_series = [
+        ("Solar", "solar"),
+        ("Load", "load"),
+        ("Battery", "battery"),
+        ("Inverter", "inverter"),
+        ("Grid Imported", "grid_import"),
+        ("Grid Exported", "grid_export"),
+    ]
+    ui.echart({
+        "tooltip": {"trigger": "axis"},
+        "legend": {"data": [label for label, _ in power_series]},
+        "xAxis": {"type": "category", "data": dataframe_column(power_15m, "time").tolist()},
+        "yAxis": {"type": "value", "name": "kW"},
+        "series": [
+            {
+                "name": label,
+                "type": "line",
+                "showSymbol": False,
+                "connectNulls": False,
+                "data": chart_values(dataframe_column(power_15m, column)),
+            }
+            for label, column in power_series
+        ],
+    }).classes("w-full h-96")
+
+    ui.label("Battery energy and state of charge").classes("text-lg font-semibold mt-4")
+    ui.echart({
+        "tooltip": {"trigger": "axis"},
+        "legend": {"data": ["Available energy", "State of charge"]},
+        "xAxis": {"type": "category", "data": dataframe_column(battery_15m, "time").tolist()},
+        "yAxis": [
+            {"type": "value", "name": "kWh"},
+            {"type": "value", "name": "%", "min": 0, "max": 100},
+        ],
+        "series": [
+            {
+                "name": "Available energy",
+                "type": "line",
+                "showSymbol": False,
+                "yAxisIndex": 0,
+                "data": chart_values(dataframe_column(battery_15m, "available_energy_kwh")),
             },
-            "xAxis": {"type": "category", "data": dataframe_column(data, "hour").tolist()},
-            "yAxis": {"type": "value", "name": "kWh"},
-            "series": [
-                {"name": "Solar (Actual)", "type": "bar", "data": chart_values(dataframe_column(data, "solar"))},
-                {"name": "Solar (Forecast)", "type": "bar", "data": chart_values(dataframe_column(data, "forecast_total"))},
-                {"name": "Load", "type": "bar", "data": chart_values(dataframe_column(data, "load"))},
-                {"name": "Grid Imported", "type": "bar", "data": chart_values(dataframe_column(data, "grid_import"))},
-                {"name": "Grid Exported", "type": "bar", "data": chart_values(dataframe_column(data, "grid_export"))},
-            ],
-        }).classes("w-full h-96")
+            {
+                "name": "State of charge",
+                "type": "line",
+                "showSymbol": False,
+                "yAxisIndex": 1,
+                "data": chart_values(dataframe_column(battery_15m, "soc_percent")),
+            },
+        ],
+    }).classes("w-full h-96")
 
-        ui.label("15-minute average power (kW)").classes("text-lg font-semibold mt-4")
-        power_series = [
-            ("Solar", "solar"),
-            ("Load", "load"),
-            ("Battery", "battery"),
-            ("Inverter", "inverter"),
-            ("Grid Imported", "grid_import"),
-            ("Grid Exported", "grid_export"),
-        ]
-        ui.echart({
-            "tooltip": {"trigger": "axis"},
-            "legend": {"data": [label for label, _ in power_series]},
-            "xAxis": {"type": "category", "data": dataframe_column(power_15m, "time").tolist()},
-            "yAxis": {"type": "value", "name": "kW"},
-            "series": [
-                {
-                    "name": label,
-                    "type": "line",
-                    "showSymbol": False,
-                    "connectNulls": False,
-                    "data": chart_values(dataframe_column(power_15m, column)),
-                }
-                for label, column in power_series
-            ],
-        }).classes("w-full h-96")
-
-        ui.label("Battery energy and state of charge").classes("text-lg font-semibold mt-4")
-        ui.echart({
-            "tooltip": {"trigger": "axis"},
-            "legend": {"data": ["Available energy", "Rated capacity", "State of charge"]},
-            "xAxis": {"type": "category", "data": dataframe_column(battery_15m, "time").tolist()},
-            "yAxis": [
-                {"type": "value", "name": "kWh"},
-                {"type": "value", "name": "%", "min": 0, "max": 100},
-            ],
-            "series": [
-                {
-                    "name": "Available energy",
-                    "type": "line",
-                    "showSymbol": False,
-                    "yAxisIndex": 0,
-                    "data": chart_values(dataframe_column(battery_15m, "available_energy_kwh")),
-                },
-                {
-                    "name": "Rated capacity",
-                    "type": "line",
-                    "showSymbol": False,
-                    "yAxisIndex": 0,
-                    "data": chart_values(dataframe_column(battery_15m, "rated_capacity_kwh")),
-                },
-                {
-                    "name": "State of charge",
-                    "type": "line",
-                    "showSymbol": False,
-                    "yAxisIndex": 1,
-                    "data": chart_values(dataframe_column(battery_15m, "soc_percent")),
-                },
-            ],
-        }).classes("w-full h-96")
-
-        ui.label("Hourly solar energy by array (kWh)").classes("text-lg font-semibold mt-4")
-        array_series: list[dict[str, Any]] = []
-        for panel_index, panel_id in enumerate(forecast_panels):
-            panel_name = panel_names[panel_id]
-            panel_color = PANEL_COLORS[panel_index % len(PANEL_COLORS)]
-            actual_values = (
-                chart_values(dataframe_column(data, actual_column_name(panel_id)))
-                if panel_id in mapped_panels
-                else [None] * len(data)
-            )
-            array_series.extend([
-                {
-                    "name": f"{panel_name} (Actual)",
-                    "type": "bar",
-                    "data": actual_values,
-                    "itemStyle": {"color": panel_color},
-                },
-                {
-                    "name": f"{panel_name} (Forecast)",
-                    "type": "bar",
-                    "data": chart_values(dataframe_column(data, forecast_column_name(panel_id))),
-                    "itemStyle": {
-                        "color": panel_color,
-                        "decal": {
-                            "symbol": "rect",
-                            "symbolSize": 1,
-                            "color": "rgba(0, 0, 0, 0.35)",
-                            "backgroundColor": "rgba(0, 0, 0, 0)",
-                            "dashArrayX": [1, 0],
-                            "dashArrayY": [3, 4],
-                            "rotation": -0.7853981633974483,
-                        },
+    ui.label("Hourly solar energy by array (kWh)").classes("text-lg font-semibold mt-4")
+    array_series: list[dict[str, Any]] = []
+    for panel_index, panel_id in enumerate(forecast_panels):
+        panel_name = panel_names[panel_id]
+        panel_color = PANEL_COLORS[panel_index % len(PANEL_COLORS)]
+        actual_values = (
+            chart_values(dataframe_column(data, actual_column_name(panel_id)))
+            if panel_id in mapped_panels
+            else [None] * len(data)
+        )
+        array_series.extend([
+            {
+                "name": f"{panel_name} (Actual)",
+                "type": "bar",
+                "data": actual_values,
+                "itemStyle": {"color": panel_color},
+            },
+            {
+                "name": f"{panel_name} (Forecast)",
+                "type": "bar",
+                "data": chart_values(dataframe_column(data, forecast_column_name(panel_id))),
+                "itemStyle": {
+                    "color": panel_color,
+                    "decal": {
+                        "symbol": "rect",
+                        "symbolSize": 1,
+                        "color": "rgba(0, 0, 0, 0.35)",
+                        "backgroundColor": "rgba(0, 0, 0, 0)",
+                        "dashArrayX": [1, 0],
+                        "dashArrayY": [3, 4],
+                        "rotation": -0.7853981633974483,
                     },
                 },
-            ])
-        ui.echart({
-            "tooltip": {"trigger": "axis"},
-            "legend": {"data": [series["name"] for series in array_series]},
-            "xAxis": {"type": "category", "data": dataframe_column(data, "hour").tolist()},
-            "yAxis": {"type": "value", "name": "kWh"},
-            "series": array_series,
-        }).classes("w-full h-96")
-
-        table_columns = [
-            "hour",
-            "solar",
-            "forecast_total",
-            "load",
-            "battery",
-            "grid_import",
-            "grid_export",
-        ]
-        table_labels = {
-            "hour": "Hour",
-            "solar": "Solar (Actual)",
-            "forecast_total": "Solar (Forecast)",
-            "load": "Load",
-            "battery": "Battery (+ charge / - discharge)",
-            "grid_import": "Grid import",
-            "grid_export": "Grid export",
-        }
-        table_data = cast(pd.DataFrame, data[table_columns]).copy()
-        table_rows = dataframe_rows(table_data)
-        total: dict[str, Any] = {"hour": "Total"}
-        total.update({
-            column: round(float(dataframe_column(data, column).sum()), 3)
-            for column in table_columns
-            if column != "hour"
-        })
-        table_rows.append(total)
-        ui.label("Hourly energy (kWh)").classes("text-lg font-semibold mt-4")
-        ui.table(
-            columns=[
-                {"name": column, "label": table_labels[column], "field": column, "align": "right" if column != "hour" else "left"}
-                for column in table_columns
-            ],
-            rows=table_rows,
-            row_key="hour",
-        ).classes("w-full")
+            },
+        ])
+    ui.echart({
+        "tooltip": {"trigger": "axis"},
+        "legend": {"data": [series["name"] for series in array_series]},
+        "xAxis": {"type": "category", "data": dataframe_column(data, "hour").tolist()},
+        "yAxis": {"type": "value", "name": "kWh"},
+        "series": array_series,
+    }).classes("w-full h-96")
 
 
 def load_day(
@@ -307,7 +335,7 @@ def load_day(
 def load_telemetry(
     database_path: str,
     timezone_name: str,
-) -> tuple[pd.DataFrame, pd.DataFrame, dict[str, float | None]]:
+) -> TelemetryData:
     timezone = ZoneInfo(timezone_name)
     day_start = datetime.now(timezone).replace(hour=0, minute=0, second=0, microsecond=0)
     engine = create_engine(f"sqlite:///{Path(database_path)}", future=True)
@@ -349,7 +377,6 @@ def load_telemetry(
 
         battery_values = {
             "available_energy_kwh": sample.inverter_battery_available_discharge_kwh,
-            "rated_capacity_kwh": sample.inverter_battery_rated_capacity_kwh,
             "soc_percent": sample.plant_battery_soc_percent,
         }
         for name, value in battery_values.items():
@@ -369,7 +396,7 @@ def load_telemetry(
             power_row[name] = power_totals.get(key, 0.0) / count if count else None
         power_rows.append(power_row)
         battery_row: dict[str, Any] = {"time": bucket}
-        for name in ("available_energy_kwh", "rated_capacity_kwh", "soc_percent"):
+        for name in ("available_energy_kwh", "soc_percent"):
             key = (bucket, name)
             count = battery_counts.get(key, 0)
             battery_row[name] = battery_totals.get(key, 0.0) / count if count else None
@@ -386,7 +413,11 @@ def load_telemetry(
         "grid_import": max(latest_grid, 0.0) if latest_grid is not None else None,
         "grid_export": max(-latest_grid, 0.0) if latest_grid is not None else None,
     }
-    return pd.DataFrame(power_rows), pd.DataFrame(battery_rows), latest
+    return TelemetryData(
+        power_15m=pd.DataFrame(power_rows),
+        battery_15m=pd.DataFrame(battery_rows),
+        latest=latest,
+    )
 
 
 def load_device_information(database_path: str) -> list[dict[str, str]]:
@@ -642,11 +673,6 @@ def chart_values(values: pd.Series) -> list[float | None]:
 
 def dataframe_column(frame: pd.DataFrame, name: str) -> pd.Series:
     return cast(pd.Series, frame[name])
-
-
-def dataframe_rows(frame: pd.DataFrame) -> list[dict[str, Any]]:
-    rows = frame.round(3).to_dict(orient="records")
-    return [{key: (None if pd.isna(value) else value) for key, value in row.items()} for row in rows]
 
 
 if __name__ == "__main__":

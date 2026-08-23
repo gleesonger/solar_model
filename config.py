@@ -62,6 +62,11 @@ class ActualsConfig:
 
 
 @dataclass(frozen=True)
+class LiveConfig:
+    scheduler: SchedulerConfig
+
+
+@dataclass(frozen=True)
 class Config:
     timezone: str
     logging: LoggingConfig
@@ -69,6 +74,7 @@ class Config:
     forecast: ForecastConfig
     dashboard: DashboardConfig
     actuals: ActualsConfig
+    live: LiveConfig
 
 
 def load_config(path: str | Path = "config.yaml") -> Config:
@@ -89,6 +95,9 @@ def load_config(path: str | Path = "config.yaml") -> Config:
             str(actual).casefold(): str(panel_id).casefold()
             for actual, panel_id in raw_actuals_to_forecast.items()
         }
+        live_values = values.get("live", {"scheduler": {"interval_seconds": 5}})
+        if not isinstance(live_values, dict):
+            raise TypeError("live must be a mapping")
         config = Config(
             timezone=str(values["timezone"]),
             logging=LoggingConfig(**values["logging"]),
@@ -117,9 +126,16 @@ def load_config(path: str | Path = "config.yaml") -> Config:
                     ),
                 ),
             ),
+            live=LiveConfig(
+                scheduler=SchedulerConfig(**live_values["scheduler"]),
+            ),
         )
-        if config.actuals.scheduler.interval_seconds <= 0 or config.forecast.interval_seconds <= 0:
-            raise ValueError("scheduler and forecast intervals must be greater than zero")
+        if (
+            config.actuals.scheduler.interval_seconds <= 0
+            or config.live.scheduler.interval_seconds <= 0
+            or config.forecast.interval_seconds <= 0
+        ):
+            raise ValueError("scheduler, live, and forecast intervals must be greater than zero")
         if config.forecast.timeout_seconds <= 0 or not config.forecast.arrays:
             raise ValueError("forecast timeout must be greater than zero and arrays cannot be empty")
         panel_ids = [array.panel for array in config.forecast.arrays]

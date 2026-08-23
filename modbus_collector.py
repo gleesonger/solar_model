@@ -30,9 +30,21 @@ class RegisterBlock:
     registers: tuple[Register, ...]
 
 
-def load_registers(path: str, default_device_id: int) -> list[RegisterBlock]:
+def load_registers(
+    path: str,
+    default_device_id: int,
+    metrics: set[str] | None = None,
+) -> list[RegisterBlock]:
     with open(path, encoding="utf-8") as file:
         definitions = json.load(file)
+    if metrics is not None:
+        available_metrics = {str(definition.get("metric")) for definition in definitions}
+        missing_metrics = metrics - available_metrics
+        if missing_metrics:
+            raise ValueError(f"register map is missing metrics: {', '.join(sorted(missing_metrics))}")
+        definitions = [
+            definition for definition in definitions if definition.get("metric") in metrics
+        ]
     registers = [Register(**definition) for definition in definitions]
     if not registers:
         raise ValueError(f"{path} contains no registers")
@@ -158,8 +170,8 @@ def collect_once(
                 if changed:
                     LOGGER.info("device information updated: %s values", changed)
             except Exception:
-                LOGGER.exception("Device information collection failed; electrical sample retained")
+                LOGGER.info("Device information collection failed; electrical sample retained")
         return True
     except Exception:
-        LOGGER.exception("Modbus interval failed; interval skipped")
+        LOGGER.info("Modbus interval failed; interval skipped")
         return False

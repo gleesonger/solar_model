@@ -7,11 +7,17 @@ import time
 from pathlib import Path
 from types import FrameType
 
+from config import load_config
+from database import open_database
+
 
 def main() -> int:
     app_directory = Path(__file__).resolve().parent
+    database = open_database(load_config().database.path)
+    database.close()
     processes = [
         subprocess.Popen([sys.executable, str(app_directory / "main_data_collection.py")]),
+        subprocess.Popen([sys.executable, str(app_directory / "main_live_collection.py")]),
         subprocess.Popen([sys.executable, str(app_directory / "main_dashboard.py")]),
     ]
     stopping = False

@@ -45,6 +45,13 @@ SUMMARY_LATEST_KEYS = {
     "Grid-Imported": "grid_import",
     "Grid-Exported": "grid_export",
 }
+HOURLY_PERIODS = ("Today", "7 Days", "30 Days", "365 Days", "Lifetime")
+HOURLY_PERIOD_DAYS = {
+    "Today": 1,
+    "7 Days": 7,
+    "30 Days": 30,
+    "365 Days": 365,
+}
 
 
 @dataclass(frozen=True)
@@ -89,6 +96,7 @@ class HourlyCharts:
     energy: EChart
     power_title: Label
     power: EChart
+    battery_title: Label
     battery: EChart
     array_energy: EChart
 
@@ -105,8 +113,12 @@ class HistoricalCharts:
 class DashboardState:
     hourly_start: date
     hourly_end: date
-    power_interval_minutes: int = 5
-    historical_count: int = 14
+    hourly_period: str = "Today"
+    hourly_dates_valid: bool = True
+    power_interval_minutes: int = 60
+    time_zoom_start: float = 0.0
+    time_zoom_end: float = 100.0
+    historical_count: int = 7
     historical_unit: str = "days"
     historical_frequency: str = "day"
     active_tab: str = "Recent"
@@ -223,7 +235,7 @@ def render_dashboard(
         )
         elements.live_timestamp = live_power.collected_at_utc
 
-    def render_hourly_data() -> None:
+    def render_hourly_data(on_time_zoom: Callable[[Any], None]) -> None:
         try:
             hourly_range = load_hourly_range(
                 database_path,
@@ -249,6 +261,9 @@ def render_dashboard(
             forecast_arrays,
             actuals_to_forecast,
             state.power_interval_minutes,
+            state.time_zoom_start,
+            state.time_zoom_end,
+            on_time_zoom,
         )
 
     def render_historical_data() -> None:
@@ -335,16 +350,7 @@ def render_dashboard(
             )
         elements.live_timestamp = live_power.collected_at_utc
 
-    def update_hourly_data() -> None:
-        hourly_range = load_hourly_range(
-            database_path,
-            timezone_name,
-            state.hourly_start,
-            state.hourly_end,
-            state.power_interval_minutes,
-            forecast_arrays,
-            actuals_to_forecast,
-        )
+    def display_hourly_data(hourly_range: HourlyRangeData) -> None:
         if elements.hourly_range_label is not None:
             elements.hourly_range_label.set_text(
                 f"Hourly averages from {state.hourly_start:%d %b %Y} "
@@ -352,10 +358,12 @@ def render_dashboard(
             )
         charts = elements.hourly_charts
         if charts is not None:
-            minute_label = "minute" if state.power_interval_minutes == 1 else "minutes"
             charts.power_title.set_text(
-                f"Average power over {state.power_interval_minutes} "
-                f"{minute_label} (kW)"
+                f"Average power by {time_group_label(state.power_interval_minutes)} (kW)"
+            )
+            charts.battery_title.set_text(
+                "Average battery energy and state of charge by "
+                f"{time_group_label(state.power_interval_minutes)}"
             )
             update_chart(
                 charts.energy,
@@ -367,11 +375,17 @@ def render_dashboard(
                     hourly_range.power,
                     forecast_arrays,
                     actuals_to_forecast,
+                    state.time_zoom_start,
+                    state.time_zoom_end,
                 ),
             )
             update_chart(
                 charts.battery,
-                battery_chart_options(hourly_range.battery),
+                battery_chart_options(
+                    hourly_range.battery,
+                    state.time_zoom_start,
+                    state.time_zoom_end,
+                ),
             )
             update_chart(
                 charts.array_energy,
@@ -382,6 +396,55 @@ def render_dashboard(
                     actuals_to_forecast,
                 ),
             )
+
+    def update_hourly_data() -> None:
+        if not state.hourly_dates_valid or state.hourly_end < state.hourly_start:
+            blank_hourly_data()
+            return
+        display_hourly_data(load_hourly_range(
+            database_path,
+            timezone_name,
+            state.hourly_start,
+            state.hourly_end,
+            state.power_interval_minutes,
+            forecast_arrays,
+            actuals_to_forecast,
+        ))
+
+    def update_time_zoom(event: Any) -> None:
+        zoom_range = data_zoom_range(event)
+        if zoom_range is None:
+            return
+        if zoom_ranges_match(
+            zoom_range,
+            (state.time_zoom_start, state.time_zoom_end),
+        ):
+            return
+        state.time_zoom_start, state.time_zoom_end = zoom_range
+        interval = power_interval_for_zoom(*zoom_range)
+        if interval != state.power_interval_minutes:
+            state.power_interval_minutes = interval
+            update_hourly_data()
+            return
+        charts = elements.hourly_charts
+        if charts is None:
+            return
+        source = getattr(event, "sender", None)
+        for chart in (charts.power, charts.battery):
+            if chart is not source:
+                chart.run_chart_method(
+                    "dispatchAction",
+                    {"type": "dataZoom", "start": zoom_range[0], "end": zoom_range[1]},
+                )
+
+    def blank_hourly_data() -> None:
+        display_hourly_data(empty_hourly_range(
+            state.power_interval_minutes,
+            forecast_arrays,
+            actuals_to_forecast,
+        ))
+        if elements.hourly_range_label is not None:
+            elements.hourly_range_label.set_text("Select a valid date range")
 
     def update_historical_data() -> None:
         today = datetime.now(timezone).date()
@@ -481,71 +544,124 @@ def render_dashboard(
                         "End date",
                         value=state.hourly_end.isoformat(),
                     ).props("type=date outlined dense")
+                    updating_date_inputs = False
 
-                    def apply_date_range() -> None:
+                    def select_hourly_range(
+                        start: date,
+                        end: date,
+                        period: str,
+                    ) -> None:
+                        nonlocal updating_date_inputs
+                        state.hourly_start = start
+                        state.hourly_end = end
+                        state.hourly_period = period
+                        state.hourly_dates_valid = True
+                        state.power_interval_minutes = 60
+                        state.time_zoom_start = 0.0
+                        state.time_zoom_end = 100.0
+                        updating_date_inputs = True
+                        try:
+                            start_input.set_value(start.isoformat())
+                            end_input.set_value(end.isoformat())
+                        finally:
+                            updating_date_inputs = False
+                        period_button.set_text(period)
+                        try:
+                            update_hourly_data()
+                        except Exception as error:
+                            ui.notify(
+                                f"Unable to update hourly data: {error}",
+                                type="negative",
+                            )
+
+                    def date_range_changed() -> None:
+                        if updating_date_inputs:
+                            return
                         try:
                             start = date.fromisoformat(str(start_input.value))
                             end = date.fromisoformat(str(end_input.value))
                         except ValueError:
-                            ui.notify("Enter valid first and end dates", type="negative")
+                            state.hourly_dates_valid = False
+                            blank_hourly_data()
                             return
                         if start > end:
-                            ui.notify(
-                                "First date must not be after end date",
-                                type="negative",
-                            )
+                            state.hourly_start = start
+                            state.hourly_end = end
+                            state.hourly_period = "Custom"
+                            state.hourly_dates_valid = False
+                            period_button.set_text("Custom")
+                            blank_hourly_data()
                             return
-                        state.hourly_start = start
-                        state.hourly_end = end
-                        try:
-                            update_hourly_data()
-                        except Exception as error:
-                            ui.notify(
-                                f"Unable to update hourly data: {error}",
-                                type="negative",
-                            )
+                        select_hourly_range(
+                            start,
+                            end,
+                            hourly_period_name(start, end),
+                        )
 
-                    ui.button("Apply", on_click=apply_date_range, icon="date_range")
-
-                with ui.row().classes("w-full items-end gap-3 mt-4"):
-                    power_interval_input = ui.number(
-                        "Average over (minutes)",
-                        value=state.power_interval_minutes,
-                        min=1,
-                        step=1,
-                    ).props("outlined dense").classes("w-48")
-
-                    def apply_power_interval() -> None:
-                        try:
-                            raw_minutes = float(power_interval_input.value)
-                            minutes = int(raw_minutes)
-                        except (TypeError, ValueError):
-                            ui.notify(
-                                "Power interval must be a positive whole number",
-                                type="negative",
-                            )
-                            return
-                        if minutes < 1 or raw_minutes != minutes:
-                            ui.notify(
-                                "Power interval must be a positive whole number",
-                                type="negative",
-                            )
-                            return
-                        state.power_interval_minutes = minutes
-                        try:
-                            update_hourly_data()
-                        except Exception as error:
-                            ui.notify(
-                                f"Unable to update hourly data: {error}",
-                                type="negative",
-                            )
-
-                    ui.button(
-                        "Apply",
-                        on_click=apply_power_interval,
-                        icon="schedule",
+                def select_period_at_today(period: str, today: date) -> None:
+                    lifetime_start = (
+                        load_lifetime_start_date(database_path, today)
+                        if period == "Lifetime"
+                        else today
                     )
-                render_hourly_data()
+                    start, end = hourly_period_range(
+                        period,
+                        today,
+                        lifetime_start,
+                    )
+                    select_hourly_range(start, end, period)
+
+                def select_centre_period() -> None:
+                    today = datetime.now(timezone).date()
+                    if not state.hourly_dates_valid:
+                        select_period_at_today("Today", today)
+                        return
+                    if state.hourly_end != today:
+                        if state.hourly_period in HOURLY_PERIODS:
+                            select_period_at_today(state.hourly_period, today)
+                        else:
+                            span_days = (state.hourly_end - state.hourly_start).days + 1
+                            select_hourly_range(
+                                today - timedelta(days=span_days - 1),
+                                today,
+                                state.hourly_period,
+                            )
+                        return
+                    select_period_at_today(
+                        next_hourly_period(state.hourly_period),
+                        today,
+                    )
+
+                def move_hourly_period(direction: int) -> None:
+                    today = datetime.now(timezone).date()
+                    if not state.hourly_dates_valid:
+                        select_period_at_today("Today", today)
+                        return
+                    span_days = (state.hourly_end - state.hourly_start).days + 1
+                    start = state.hourly_start + timedelta(days=direction * span_days)
+                    end = state.hourly_end + timedelta(days=direction * span_days)
+                    if end > today:
+                        end = today
+                        start = today - timedelta(days=span_days - 1)
+                    select_hourly_range(start, end, state.hourly_period)
+
+                with ui.row().classes("items-center gap-2 mt-2"):
+                    ui.button(
+                        "<",
+                        on_click=lambda: move_hourly_period(-1),
+                    ).props("dense outline")
+                    period_button = ui.button(
+                        state.hourly_period,
+                        on_click=select_centre_period,
+                    ).props("dense outline").classes("min-w-24")
+                    ui.button(
+                        ">",
+                        on_click=lambda: move_hourly_period(1),
+                    ).props("dense outline")
+                start_input.on_value_change(date_range_changed)
+                end_input.on_value_change(date_range_changed)
+
+                render_hourly_data(update_time_zoom)
 
             with ui.tab_panel(historical_tab).classes("px-0"):
                 with ui.row().classes("w-full items-end gap-3"):
@@ -699,21 +815,38 @@ def render_data_by_hour(
     forecast_arrays: tuple[SolarArrayConfig, ...],
     actuals_to_forecast: dict[str, int],
     power_interval_minutes: int,
+    zoom_start: float,
+    zoom_end: float,
+    on_time_zoom: Callable[[Any], None],
 ) -> HourlyCharts:
     energy_chart = render_energy_chart(data, "hour", "Average hourly energy (kWh)")
 
-    minute_label = "minute" if power_interval_minutes == 1 else "minutes"
     power_title = ui.label(
-        f"Average power over {power_interval_minutes} {minute_label} (kW)"
+        f"Average power by {time_group_label(power_interval_minutes)} (kW)"
     ).classes("text-lg font-semibold")
+    ui.label(
+        "Pinch with two fingers (or use the mouse wheel or range slider) to zoom. "
+        "Detail changes automatically from hourly to 15-minute to one-minute data."
+    ).classes("text-sm text-gray-600")
     power_chart = ui.echart(
-        power_chart_options(power_hourly, forecast_arrays, actuals_to_forecast)
+        power_chart_options(
+            power_hourly,
+            forecast_arrays,
+            actuals_to_forecast,
+            zoom_start,
+            zoom_end,
+        )
     ).classes("w-full h-96")
+    bind_time_zoom(power_chart, on_time_zoom)
 
-    ui.label("Average battery energy and state of charge by hour").classes("text-lg font-semibold mt-4")
+    battery_title = ui.label(
+        "Average battery energy and state of charge by "
+        f"{time_group_label(power_interval_minutes)}"
+    ).classes("text-lg font-semibold mt-4")
     battery_chart = ui.echart(
-        battery_chart_options(battery_hourly)
+        battery_chart_options(battery_hourly, zoom_start, zoom_end)
     ).classes("w-full h-96")
+    bind_time_zoom(battery_chart, on_time_zoom)
 
     array_energy_chart = render_array_energy_chart(
         data,
@@ -726,6 +859,7 @@ def render_data_by_hour(
         energy=energy_chart,
         power_title=power_title,
         power=power_chart,
+        battery_title=battery_title,
         battery=battery_chart,
         array_energy=array_energy_chart,
     )
@@ -865,6 +999,8 @@ def power_chart_options(
     power_data: pd.DataFrame,
     forecast_arrays: tuple[SolarArrayConfig, ...],
     actuals_to_forecast: dict[str, int],
+    zoom_start: float = 0.0,
+    zoom_end: float = 100.0,
 ) -> dict[str, Any]:
     mapped_panels = set(actuals_to_forecast.values())
     power_series: list[tuple[str, str, str | None]] = [
@@ -887,6 +1023,8 @@ def power_chart_options(
     return {
         "tooltip": {"trigger": "axis"},
         "legend": {"data": [label for label, _, _ in power_series]},
+        "grid": time_chart_grid(),
+        "dataZoom": time_data_zoom_options(zoom_start, zoom_end),
         "xAxis": {
             "type": "category",
             "data": dataframe_column(power_data, "time").tolist(),
@@ -910,10 +1048,16 @@ def power_chart_options(
     }
 
 
-def battery_chart_options(battery_data: pd.DataFrame) -> dict[str, Any]:
+def battery_chart_options(
+    battery_data: pd.DataFrame,
+    zoom_start: float = 0.0,
+    zoom_end: float = 100.0,
+) -> dict[str, Any]:
     return {
         "tooltip": {"trigger": "axis"},
         "legend": {"data": ["Available energy", "State of charge"]},
+        "grid": time_chart_grid(),
+        "dataZoom": time_data_zoom_options(zoom_start, zoom_end),
         "xAxis": {
             "type": "category",
             "data": dataframe_column(battery_data, "time").tolist(),
@@ -941,6 +1085,85 @@ def battery_chart_options(battery_data: pd.DataFrame) -> dict[str, Any]:
             },
         ],
     }
+
+
+def time_chart_grid() -> dict[str, Any]:
+    return {"left": "3%", "right": "4%", "bottom": 56, "containLabel": True}
+
+
+def time_data_zoom_options(zoom_start: float, zoom_end: float) -> list[dict[str, Any]]:
+    return [
+        {
+            "type": "inside",
+            "xAxisIndex": 0,
+            "start": zoom_start,
+            "end": zoom_end,
+            "filterMode": "none",
+        },
+        {
+            "type": "slider",
+            "xAxisIndex": 0,
+            "start": zoom_start,
+            "end": zoom_end,
+            "bottom": 8,
+            "height": 22,
+            "filterMode": "none",
+        },
+    ]
+
+
+def bind_time_zoom(chart: EChart, on_time_zoom: Callable[[Any], None]) -> None:
+    chart.on(
+        "chart:datazoom",
+        on_time_zoom,
+        args=["start", "end", "batch"],
+        throttle=0.3,
+    )
+
+
+def data_zoom_range(event: Any) -> tuple[float, float] | None:
+    args = getattr(event, "args", event)
+    if isinstance(args, (list, tuple)) and len(args) == 1:
+        args = args[0]
+    if not isinstance(args, dict):
+        return None
+    values = args
+    if values.get("start") is None or values.get("end") is None:
+        batch = values.get("batch")
+        if isinstance(batch, list) and batch and isinstance(batch[0], dict):
+            values = batch[0]
+    try:
+        start = float(values["start"])
+        end = float(values["end"])
+    except (KeyError, TypeError, ValueError):
+        return None
+    start = min(100.0, max(0.0, start))
+    end = min(100.0, max(0.0, end))
+    return (start, end) if start < end else None
+
+
+def power_interval_for_zoom(zoom_start: float, zoom_end: float) -> int:
+    visible_minutes = (zoom_end - zoom_start) / 100 * 24 * 60
+    if visible_minutes > 18 * 60:
+        return 60
+    if visible_minutes > 3 * 60:
+        return 15
+    return 1
+
+
+def zoom_ranges_match(
+    first: tuple[float, float],
+    second: tuple[float, float],
+) -> bool:
+    return all(abs(left - right) < 0.01 for left, right in zip(first, second))
+
+
+def time_group_label(minutes: int) -> str:
+    if minutes == 60:
+        return "hour"
+    if minutes == 1:
+        return "minute"
+    return f"{minutes} minutes"
 
 
 def update_chart(chart: EChart, options: dict[str, Any]) -> None:
@@ -992,6 +1215,35 @@ def load_recent_daily_energy(
     )
     daily["period"] = dataframe_column(daily, "date")
     return daily.sort_values("date", ascending=False).reset_index(drop=True)
+
+
+def load_lifetime_start_date(database_path: str, fallback: date) -> date:
+    engine = create_engine(f"sqlite:///{Path(database_path)}", future=True)
+    try:
+        with Session(engine) as session:
+            actual_start = session.scalar(
+                select(func.min(func.substr(
+                    SigenStorModbusSample.collected_at_local,
+                    1,
+                    10,
+                )))
+            )
+            forecast_start = session.scalar(
+                select(func.min(func.substr(
+                    ForecastSolarSample.collected_at_local,
+                    1,
+                    10,
+                )))
+            )
+    finally:
+        engine.dispose()
+
+    starts = [
+        date.fromisoformat(str(value))
+        for value in (actual_start, forecast_start)
+        if value is not None
+    ]
+    return min(starts, default=fallback)
 
 
 def load_recent_monthly_energy(
@@ -1291,6 +1543,71 @@ def human_readable_age(age_seconds: float) -> str:
     return f"{days} day{'s' if days != 1 else ''} ago"
 
 
+def empty_hourly_range(
+    power_interval_minutes: int,
+    forecast_arrays: tuple[SolarArrayConfig, ...],
+    actuals_to_forecast: dict[str, int],
+) -> HourlyRangeData:
+    hours = [f"{hour:02d}:00" for hour in range(24)]
+    actual_columns = {
+        actual_column_name(panel_id)
+        for panel_id in actuals_to_forecast.values()
+    }
+    forecast_columns = {
+        forecast_column_name(array.panel_id)
+        for array in forecast_arrays
+    }
+
+    def empty_frame(
+        axis: str,
+        labels: list[str],
+        columns: set[str],
+    ) -> pd.DataFrame:
+        return pd.DataFrame({
+            axis: labels,
+            **{column: [None] * len(labels) for column in sorted(columns)},
+        })
+
+    energy = empty_frame(
+        "hour",
+        hours,
+        {
+            "solar",
+            "forecast_total",
+            "load",
+            "grid_import",
+            "grid_export",
+            *actual_columns,
+            *forecast_columns,
+        },
+    )
+    power = empty_frame(
+        "time",
+        [
+            minute_of_day_label(minute)
+            for minute in range(0, 24 * 60, power_interval_minutes)
+        ],
+        {
+            "solar",
+            "load",
+            "battery",
+            "inverter",
+            "grid_import",
+            "grid_export",
+            *actual_columns,
+        },
+    )
+    battery = empty_frame(
+        "time",
+        [
+            minute_of_day_label(minute)
+            for minute in range(0, 24 * 60, power_interval_minutes)
+        ],
+        {"available_energy_kwh", "soc_percent"},
+    )
+    return HourlyRangeData(energy=energy, power=power, battery=battery)
+
+
 def load_hourly_range(
     database_path: str,
     timezone_name: str,
@@ -1471,6 +1788,38 @@ def historical_start_date(end_date: date, count: int, unit: str) -> date:
     if unit == "years":
         return shift_date_by_months(end_date, -12 * count) + timedelta(days=1)
     raise ValueError(f"Unsupported historical period: {unit}")
+
+
+def hourly_period_name(start_date: date, end_date: date) -> str:
+    days = (end_date - start_date).days + 1
+    return next(
+        (
+            period
+            for period, period_days in HOURLY_PERIOD_DAYS.items()
+            if period_days == days
+        ),
+        "Custom",
+    )
+
+
+def next_hourly_period(period: str) -> str:
+    if period not in HOURLY_PERIODS:
+        return "Today"
+    index = HOURLY_PERIODS.index(period)
+    return HOURLY_PERIODS[(index + 1) % len(HOURLY_PERIODS)]
+
+
+def hourly_period_range(
+    period: str,
+    end_date: date,
+    lifetime_start: date,
+) -> tuple[date, date]:
+    if period == "Lifetime":
+        return min(lifetime_start, end_date), end_date
+    days = HOURLY_PERIOD_DAYS.get(period)
+    if days is None:
+        raise ValueError(f"Unsupported hourly period: {period}")
+    return end_date - timedelta(days=days - 1), end_date
 
 
 def shift_date_by_months(value: date, months: int) -> date:
@@ -1660,7 +2009,6 @@ def average_telemetry_by_interval(
         timestamp = parse_time(sample.collected_at_local, timezone)
         day = timestamp.date().isoformat()
         power_bucket = interval_label(timestamp, power_interval_minutes)
-        battery_bucket = f"{timestamp.hour:02d}:00"
         grid_power = sample.plant_grid_power_kw
         values: dict[str, float | None] = {
             "solar": sample.plant_pv_power_kw,
@@ -1682,8 +2030,7 @@ def average_telemetry_by_interval(
         for name, value in values.items():
             if value is None:
                 continue
-            bucket = battery_bucket if name in battery_names else power_bucket
-            key = (day, bucket, name)
+            key = (day, power_bucket, name)
             daily_totals[key] = daily_totals.get(key, 0.0) + value
             daily_counts[key] = daily_counts.get(key, 0) + 1
 
@@ -1711,7 +2058,7 @@ def average_telemetry_by_interval(
         minute_of_day_label(minute)
         for minute in range(0, 24 * 60, power_interval_minutes)
     ]
-    battery_buckets = [f"{hour:02d}:00" for hour in range(24)]
+    battery_buckets = power_buckets
     return build_frame(power_names, power_buckets), build_frame(battery_names, battery_buckets)
 
 

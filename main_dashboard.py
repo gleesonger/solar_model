@@ -71,6 +71,9 @@ class LivePowerData:
 @dataclass
 class DashboardElements:
     live_table: Table | None = None
+    battery_status_label: Label | None = None
+    recent_daily_table: Table | None = None
+    recent_monthly_table: Table | None = None
     live_status_label: Label | None = None
     updated_at_label: Label | None = None
     live_timestamp: str | None = None
@@ -106,7 +109,7 @@ class DashboardState:
     historical_count: int = 14
     historical_unit: str = "days"
     historical_frequency: str = "day"
-    active_tab: str = "Live/Today"
+    active_tab: str = "Recent"
 
 
 def main() -> None:
@@ -119,6 +122,12 @@ def main() -> None:
 
     @ui.page("/")
     def page() -> None:
+        ui.add_css("""
+            .q-table thead th {
+                background-color: #0070C0 !important;
+                color: #ffffff !important;
+            }
+        """)
         today = datetime.now(ZoneInfo(timezone_name)).date()
         state = DashboardState(hourly_start=today, hourly_end=today)
         elements = DashboardElements()
@@ -171,8 +180,22 @@ def render_dashboard(
             ).copy()
             telemetry = load_telemetry(database_path, timezone_name)
             live_power = load_live_power(database_path)
+            recent_daily = load_recent_daily_energy(
+                database_path,
+                timezone_name,
+                datetime.now(timezone).date(),
+                7,
+                forecast_arrays,
+            )
+            recent_monthly = load_recent_monthly_energy(
+                database_path,
+                timezone_name,
+                datetime.now(timezone).date(),
+                12,
+                forecast_arrays,
+            )
         except Exception as error:
-            ui.label(f"Unable to load Live/Today data: {error}").classes("text-red-600")
+            ui.label(f"Unable to load Recent data: {error}").classes("text-red-600")
             return
 
         summary_latest = {
@@ -180,6 +203,19 @@ def render_dashboard(
             "inverter_today": telemetry.latest["inverter_today"],
         }
         elements.live_table = render_live_today(data, summary_latest)
+        elements.battery_status_label = ui.label(
+            battery_status_text(telemetry.latest)
+        ).classes("text-sm font-medium mt-1")
+        elements.recent_daily_table = render_energy_summary_table(
+            recent_daily,
+            "Past 7 days (kWh)",
+            "Date",
+        )
+        elements.recent_monthly_table = render_energy_summary_table(
+            recent_monthly,
+            "Past 12 months (kWh)",
+            "Month",
+        )
         elements.live_status_label = ui.label().classes("text-sm mt-1")
         update_live_status(
             elements.live_status_label,
@@ -264,12 +300,34 @@ def render_dashboard(
         ).copy()
         telemetry = load_telemetry(database_path, timezone_name)
         live_power = load_live_power(database_path)
+        recent_daily = load_recent_daily_energy(
+            database_path,
+            timezone_name,
+            datetime.now(timezone).date(),
+            7,
+            forecast_arrays,
+        )
+        recent_monthly = load_recent_monthly_energy(
+            database_path,
+            timezone_name,
+            datetime.now(timezone).date(),
+            12,
+            forecast_arrays,
+        )
         summary_latest = {
             **live_power.values,
             "inverter_today": telemetry.latest["inverter_today"],
         }
         if elements.live_table is not None:
             elements.live_table.rows = summary_rows(data, summary_latest)
+        if elements.battery_status_label is not None:
+            elements.battery_status_label.set_text(
+                battery_status_text(telemetry.latest)
+            )
+        if elements.recent_daily_table is not None:
+            elements.recent_daily_table.rows = energy_summary_rows(recent_daily)
+        if elements.recent_monthly_table is not None:
+            elements.recent_monthly_table.rows = energy_summary_rows(recent_monthly)
         if elements.live_status_label is not None:
             update_live_status(
                 elements.live_status_label,
@@ -398,12 +456,12 @@ def render_dashboard(
         with ui.tabs(
             on_change=lambda event: setattr(state, "active_tab", str(event.value)),
         ).classes("solar-tabs w-full") as tabs:
-            live_today_tab = ui.tab("Live/Today")
+            live_today_tab = ui.tab("Recent")
             data_tab = ui.tab("Data by Hour")
             historical_tab = ui.tab("Historical")
             system_info_tab = ui.tab("System Info")
         selected_tab = {
-            "Live/Today": live_today_tab,
+            "Recent": live_today_tab,
             "Data by Hour": data_tab,
             "Historical": historical_tab,
             "System Info": system_info_tab,
@@ -575,6 +633,7 @@ def render_system_information(device_information: list[dict[str, str]]) -> Table
 
 
 def render_live_today(data: pd.DataFrame, latest: dict[str, float | None]) -> Table:
+    ui.label("Live / Today").classes("text-base font-semibold")
     summary_columns = [
         {"name": "metric", "label": "", "field": "metric", "align": "left"},
         {"name": "latest", "label": "Latest (kW)", "field": "latest", "align": "right"},
@@ -585,7 +644,52 @@ def render_live_today(data: pd.DataFrame, latest: dict[str, float | None]) -> Ta
         columns=summary_columns,
         rows=summary_rows(data, latest),
         row_key="metric",
-    ).props("dense flat bordered").classes("w-full max-w-3xl")
+    ).props("dense flat bordered").classes("max-w-full").style("width: fit-content")
+
+
+def render_energy_summary_table(
+    data: pd.DataFrame,
+    title: str,
+    period_label: str,
+) -> Table:
+    ui.label(title).classes("text-base font-semibold mt-4")
+    return ui.table(
+        columns=[
+            {
+                "name": "period",
+                "label": period_label,
+                "field": "period",
+                "align": "left",
+            },
+            {
+                "name": "solar_actual",
+                "label": "Solar Actual",
+                "field": "solar_actual",
+                "align": "right",
+            },
+            {
+                "name": "solar_forecast",
+                "label": "Solar Forecast",
+                "field": "solar_forecast",
+                "align": "right",
+            },
+            {"name": "load", "label": "Load", "field": "load", "align": "right"},
+            {
+                "name": "grid_import",
+                "label": "Grid Import",
+                "field": "grid_import",
+                "align": "right",
+            },
+            {
+                "name": "grid_export",
+                "label": "Grid Export",
+                "field": "grid_export",
+                "align": "right",
+            },
+        ],
+        rows=energy_summary_rows(data),
+        row_key="period",
+    ).props("dense flat bordered").classes("max-w-full").style("width: fit-content")
 
 
 def render_data_by_hour(
@@ -867,6 +971,215 @@ def load_day(
     forecast = aggregate_forecast(forecast_rows, day_start, forecast_arrays)
     hourly = actual.merge(actual_by_array, on="hour", how="left").merge(forecast, on="hour", how="left").fillna(0.0)
     return hourly
+
+
+def load_recent_daily_energy(
+    database_path: str,
+    timezone_name: str,
+    end_date: date,
+    days: int,
+    forecast_arrays: tuple[SolarArrayConfig, ...],
+) -> pd.DataFrame:
+    if days < 1:
+        raise ValueError("Recent daily period must contain at least one day")
+    start_date = end_date - timedelta(days=days - 1)
+    daily = load_daily_energy_totals(
+        database_path,
+        timezone_name,
+        start_date,
+        end_date,
+        forecast_arrays,
+    )
+    daily["period"] = dataframe_column(daily, "date")
+    return daily.sort_values("date", ascending=False).reset_index(drop=True)
+
+
+def load_recent_monthly_energy(
+    database_path: str,
+    timezone_name: str,
+    end_date: date,
+    months: int,
+    forecast_arrays: tuple[SolarArrayConfig, ...],
+) -> pd.DataFrame:
+    if months < 1:
+        raise ValueError("Recent monthly period must contain at least one month")
+    current_month = end_date.replace(day=1)
+    start_date = shift_date_by_months(current_month, -(months - 1))
+    daily = load_daily_energy_totals(
+        database_path,
+        timezone_name,
+        start_date,
+        end_date,
+        forecast_arrays,
+    )
+    value_columns = [
+        "solar_actual",
+        "solar_forecast",
+        "load",
+        "grid_import",
+        "grid_export",
+    ]
+    daily["month"] = dataframe_column(daily, "date").map(
+        lambda value: str(value)[:7]
+    )
+    totals = cast(
+        pd.DataFrame,
+        daily.groupby("month", as_index=False)[value_columns].sum(min_count=1),
+    )
+    rows: list[dict[str, Any]] = []
+    for months_ago in range(months):
+        month = shift_date_by_months(current_month, -months_ago)
+        month_key = month.strftime("%Y-%m")
+        matching = totals.loc[dataframe_column(totals, "month") == month_key]
+        row: dict[str, Any] = {
+            "date": month_key,
+            "period": month.strftime("%b %Y"),
+        }
+        for column in value_columns:
+            row[column] = (
+                dataframe_column(matching, column).iloc[0]
+                if not matching.empty
+                else float("nan")
+            )
+        rows.append(row)
+    return pd.DataFrame(rows)
+
+
+def load_daily_energy_totals(
+    database_path: str,
+    timezone_name: str,
+    start_date: date,
+    end_date: date,
+    forecast_arrays: tuple[SolarArrayConfig, ...],
+) -> pd.DataFrame:
+    if end_date < start_date:
+        raise ValueError("End date must not be before first date")
+
+    timezone = ZoneInfo(timezone_name)
+    current_time = datetime.now(timezone)
+    start_text = start_date.isoformat()
+    end_text = end_date.isoformat()
+    engine = create_engine(f"sqlite:///{Path(database_path)}", future=True)
+    try:
+        with Session(engine) as session:
+            actual_date = func.substr(
+                SigenStorModbusSample.collected_at_local,
+                1,
+                10,
+            ).label("date")
+            actual_rows = session.execute(
+                select(
+                    actual_date,
+                    func.sum(
+                        SigenStorModbusSample.plant_pv_total_kwh_period
+                    ).label("solar_actual"),
+                    func.sum(
+                        SigenStorModbusSample.plant_load_total_kwh_period
+                    ).label("load"),
+                    func.sum(
+                        SigenStorModbusSample.plant_grid_import_total_kwh_period
+                    ).label("grid_import"),
+                    func.sum(
+                        SigenStorModbusSample.plant_grid_export_total_kwh_period
+                    ).label("grid_export"),
+                )
+                .where(actual_date >= start_text)
+                .where(actual_date <= end_text)
+                .where(
+                    func.substr(
+                        SigenStorModbusSample.collected_at_local,
+                        12,
+                        8,
+                    )
+                    != "00:00:00"
+                )
+                .group_by(actual_date)
+            ).mappings().all()
+
+            forecast_date = func.substr(
+                ForecastSolarSample.collected_at_local,
+                1,
+                10,
+            ).label("date")
+            collections = session.execute(
+                select(
+                    forecast_date,
+                    ForecastSolarSample.collection_guid,
+                    ForecastSolarSample.collected_at_utc,
+                )
+                .where(ForecastSolarSample.collection_guid.is_not(None))
+                .where(forecast_date >= start_text)
+                .where(forecast_date <= end_text)
+                .distinct()
+                .order_by(forecast_date, ForecastSolarSample.collected_at_utc)
+            ).all()
+            first_guid_by_date: dict[str, str] = {}
+            for collection_date, collection_guid, _ in collections:
+                if collection_guid is not None:
+                    first_guid_by_date.setdefault(
+                        str(collection_date),
+                        str(collection_guid),
+                    )
+            selected_guids = set(first_guid_by_date.values())
+            forecast_rows = (
+                list(session.scalars(
+                    select(ForecastSolarSample)
+                    .where(ForecastSolarSample.collection_guid.in_(selected_guids))
+                    .order_by(ForecastSolarSample.forecast_time)
+                ).all())
+                if selected_guids
+                else []
+            )
+    finally:
+        engine.dispose()
+
+    actual_by_date = {str(row["date"]): row for row in actual_rows}
+    forecast_rows_by_guid: dict[str, list[ForecastSolarSample]] = {}
+    for forecast_row in forecast_rows:
+        if forecast_row.collection_guid is not None:
+            forecast_rows_by_guid.setdefault(
+                forecast_row.collection_guid,
+                [],
+            ).append(forecast_row)
+
+    rows: list[dict[str, Any]] = []
+    number_of_days = (end_date - start_date).days + 1
+    for day_offset in range(number_of_days):
+        selected_date = start_date + timedelta(days=day_offset)
+        selected_text = selected_date.isoformat()
+        actual = actual_by_date.get(selected_text, {})
+        day_start = datetime(
+            selected_date.year,
+            selected_date.month,
+            selected_date.day,
+            tzinfo=timezone,
+        )
+        selected_guid = first_guid_by_date.get(selected_text)
+        selected_forecast_rows = (
+            forecast_rows_by_guid.get(selected_guid, [])
+            if selected_guid is not None
+            else []
+        )
+        forecast = aggregate_forecast(
+            selected_forecast_rows,
+            day_start,
+            forecast_arrays,
+            fill_missing=False,
+        )
+        if selected_date == current_time.date():
+            forecast = scale_forecast_to_elapsed_time(forecast, current_time)
+        rows.append({
+            "date": selected_text,
+            "solar_actual": actual.get("solar_actual"),
+            "solar_forecast": dataframe_column(
+                forecast,
+                "forecast_total",
+            ).sum(min_count=1),
+            "load": actual.get("load"),
+            "grid_import": actual.get("grid_import"),
+            "grid_export": actual.get("grid_export"),
+        })
+    return pd.DataFrame(rows)
 
 
 def load_live_power(database_path: str) -> LivePowerData:
@@ -1284,6 +1597,20 @@ def load_telemetry(
         "load": latest_sample.plant_load_power_kw if latest_sample is not None else None,
         "grid_import": max(latest_grid, 0.0) if latest_grid is not None else None,
         "grid_export": max(-latest_grid, 0.0) if latest_grid is not None else None,
+        "battery_available_energy_kwh": (
+            latest_sample.inverter_battery_available_discharge_kwh
+            if latest_sample is not None
+            else None
+        ),
+        "battery_soc_percent": (
+            (
+                latest_sample.plant_battery_soc_percent
+                if latest_sample.plant_battery_soc_percent is not None
+                else latest_sample.inverter_battery_soc_percent
+            )
+            if latest_sample is not None
+            else None
+        ),
     }
     return TelemetryData(
         power_15m=pd.DataFrame(power_rows),
@@ -1529,6 +1856,35 @@ def load_actual_arrays_hourly(
     return hours
 
 
+def scale_forecast_to_elapsed_time(
+    forecast: pd.DataFrame,
+    current_time: datetime,
+) -> pd.DataFrame:
+    elapsed_hour_fraction = (
+        current_time.minute * 60
+        + current_time.second
+        + current_time.microsecond / 1_000_000
+    ) / 3_600
+
+    def hour_weight(hour_label: object) -> float:
+        hour = int(str(hour_label).split(":", maxsplit=1)[0])
+        if hour < current_time.hour:
+            return 1.0
+        if hour == current_time.hour:
+            return elapsed_hour_fraction
+        return 0.0
+
+    scaled = forecast.copy()
+    weights = dataframe_column(scaled, "hour").map(hour_weight)
+    for column in scaled.columns:
+        if column.startswith("forecast_"):
+            scaled[column] = pd.to_numeric(
+                dataframe_column(scaled, column),
+                errors="coerce",
+            ) * weights
+    return scaled
+
+
 def aggregate_forecast(
     rows: list[ForecastSolarSample],
     day_start: datetime,
@@ -1635,6 +1991,32 @@ def minute_of_day_label(minute_of_day: int) -> str:
 def quarter_hour_label(value: datetime) -> str:
     minute = value.minute // 15 * 15
     return f"{value.hour:02d}:{minute:02d}"
+
+
+def battery_status_text(latest: dict[str, float | None]) -> str:
+    energy = format_dashboard_number(latest["battery_available_energy_kwh"])
+    soc = format_dashboard_number(latest["battery_soc_percent"])
+    return f"Battery: {energy} kWh available, {soc}% SoC"
+
+
+def energy_summary_rows(data: pd.DataFrame) -> list[dict[str, str]]:
+    value_columns = (
+        "solar_actual",
+        "solar_forecast",
+        "load",
+        "grid_import",
+        "grid_export",
+    )
+    return [
+        {
+            "period": str(row["period"]),
+            **{
+                column: format_dashboard_number(row[column])
+                for column in value_columns
+            },
+        }
+        for row in data.to_dict(orient="records")
+    ]
 
 
 def summary_rows(

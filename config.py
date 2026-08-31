@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import logging
+import math
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlparse
@@ -53,6 +55,20 @@ class DashboardConfig:
 
 
 @dataclass(frozen=True)
+class TariffRule:
+    days: tuple[str, ...]
+    start_time: str
+    end_time: str
+    rate: float
+
+
+@dataclass(frozen=True)
+class TariffsConfig:
+    import_: tuple[TariffRule, ...]
+    export: tuple[TariffRule, ...]
+
+
+@dataclass(frozen=True)
 class ModbusConfig:
     host: str
     port: int
@@ -75,6 +91,7 @@ class Config:
     database: DatabaseConfig
     forecast: ForecastConfig
     dashboard: DashboardConfig
+    tariffs: TariffsConfig
     actuals: ActualsConfig
 
 
@@ -87,7 +104,11 @@ def load_config(path: str | Path = "config.yaml") -> Config:
         config = dacite.from_dict(
             data_class=Config,
             data=raw_config,
-            config=dacite.Config(cast=[tuple], type_hooks={Path: source_path}),
+            config=dacite.Config(
+                cast=[tuple],
+                type_hooks={Path: source_path},
+                convert_key=lambda field_name: field_name.removesuffix("_"),
+            ),
         )
         validate_config(config)
         return config
@@ -113,6 +134,10 @@ def validate_config(config: Config) -> None:
 
     if config.logging.level not in logging.getLevelNamesMapping():
         raise ValueError(f"logging.level is not valid: {config.logging.level}")
+
+    validate_tariff_rules("import", config.tariffs.import_)
+
+    validate_tariff_rules("export", config.tariffs.export)
 
     endpoint = urlparse(config.forecast.endpoint)
     if endpoint.scheme not in {"http", "https"} or not endpoint.netloc:
@@ -174,3 +199,76 @@ def validate_config(config: Config) -> None:
     ):
         if not register_map.is_file():
             raise ValueError(f"register map does not exist: {register_map}")
+
+
+WEEKDAYS = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
+
+
+def tariff_time_minutes(value: str, *, allow_end_of_day: bool = False) -> int:
+    if allow_end_of_day and value == "24:00":
+        return 24 * 60
+    if not re.fullmatch(r"(?:[01]\d|2[0-3]):[0-5]\d", value):
+        maximum = "24:00" if allow_end_of_day else "23:59"
+        raise ValueError(
+            f"tariff time must use HH:MM from 00:00 to {maximum}: {value!r}"
+        )
+    hours, minutes = value.split(":")
+    return int(hours) * 60 + int(minutes)
+
+
+def tariff_rule_matches(
+    rule: TariffRule,
+    weekday_index: int,
+    minute_of_day: int,
+) -> bool:
+    start_minute = tariff_time_minutes(rule.start_time)
+    end_minute = tariff_time_minutes(rule.end_time, allow_end_of_day=True)
+    weekday = WEEKDAYS[weekday_index]
+    if start_minute == end_minute:
+        return weekday in rule.days
+    if start_minute < end_minute:
+        return weekday in rule.days and start_minute <= minute_of_day < end_minute
+    previous_weekday = WEEKDAYS[(weekday_index - 1) % len(WEEKDAYS)]
+    return (
+        weekday in rule.days and minute_of_day >= start_minute
+    ) or (
+        previous_weekday in rule.days and minute_of_day < end_minute
+    )
+
+
+def validate_tariff_rules(direction: str, rules: tuple[TariffRule, ...]) -> None:
+    if not rules:
+        raise ValueError(f"tariffs.{direction} must contain at least one rule")
+
+    for rule in rules:
+        if not rule.days:
+            raise ValueError(f"tariffs.{direction} rules must specify one or more days")
+
+        invalid_days = set(rule.days) - set(WEEKDAYS)
+        if invalid_days:
+            raise ValueError(
+                f"tariffs.{direction} uses invalid days: {', '.join(sorted(invalid_days))}"
+            )
+
+        if len(rule.days) != len(set(rule.days)):
+            raise ValueError(f"tariffs.{direction} rules must not repeat days")
+
+        tariff_time_minutes(rule.start_time)
+
+        tariff_time_minutes(rule.end_time, allow_end_of_day=True)
+
+        if not math.isfinite(rule.rate) or rule.rate < 0:
+            raise ValueError(f"tariffs.{direction} rates must be finite and non-negative")
+
+    for weekday_index, day in enumerate(WEEKDAYS):
+        for minute_of_day in range(24 * 60):
+            matching_rules = [
+                rule
+                for rule in rules
+                if tariff_rule_matches(rule, weekday_index, minute_of_day)
+            ]
+            if len(matching_rules) != 1:
+                raise ValueError(
+                    f"tariffs.{direction} must have exactly one rule for "
+                    f"{day} {minute_of_day // 60:02d}:{minute_of_day % 60:02d}"
+                )

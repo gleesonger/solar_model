@@ -5,6 +5,7 @@ from pathlib import Path
 from nicegui import app, ui
 
 from config import load_config
+from database import open_database
 from dashboard.layout import DashboardLayout, render_dashboard_styles
 from dashboard.live import LIVE_COLLECTION_INTERVAL_SECONDS, LivePowerCollector
 from common import LOGGER, configure_logging, source_path
@@ -14,6 +15,8 @@ CONFIG_PATH = source_path("config.yaml")
 def main() -> None:
     config = load_config(CONFIG_PATH)
     configure_logging(config.logging.level)
+    database = open_database(config.database.path)
+    database.close()
     LOGGER.info("Dashboard server starting on %s:%s", config.dashboard.host, config.dashboard.port)
 
     live_collector = LivePowerCollector(

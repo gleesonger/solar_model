@@ -219,6 +219,10 @@ def render_energy_summary_table(dataframe: pd.DataFrame, title: str, period_labe
         {"name": "load", "label": "Load", "field": "load", "align": "right"},
         {"name": "grid_import", "label": "Grid Import", "field": "grid_import", "align": "right"},
         {"name": "grid_export", "label": "Grid Export", "field": "grid_export", "align": "right"},
+        {"name": "grid_import_cost", "label": "Import Cost", "field": "grid_import_cost", "align": "right"},
+        {"name": "grid_export_revenue", "label": "Export Revenue", "field": "grid_export_revenue", "align": "right"},
+        {"name": "net_cost", "label": "Net Cost", "field": "net_cost", "align": "right"},
+        {"name": "no_solar_battery_import_cost", "label": "No Solar Cost", "field": "no_solar_battery_import_cost", "align": "right"},
     ]
     return ui.table(columns=columns, rows=data.energy_summary_rows(dataframe), row_key="period").props(
         "dense flat bordered"

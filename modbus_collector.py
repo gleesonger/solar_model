@@ -7,6 +7,7 @@ from pathlib import Path
 from pymodbus.client import ModbusTcpClient
 
 from common import LOGGER, timestamps
+from config import TariffsConfig
 
 
 @dataclass(frozen=True)
@@ -139,6 +140,7 @@ def collect_once(
     registers: list[RegisterBlock],
     previous: dict[str, float],
     timezone_name: str,
+    tariffs: TariffsConfig,
     device_registers: list[RegisterBlock] | None = None,
 ) -> bool:
     try:
@@ -149,7 +151,7 @@ def collect_once(
                 raise ValueError(f"electrical metric {metric!r} returned text")
             values[metric] = (value, unit, cumulative)
         collected = timestamps(timezone_name=timezone_name)
-        database.save_modbus_sample(values, previous, collected)
+        database.save_modbus_sample(values, previous, collected, tariffs)
         power = {metric: reading[0] for metric, reading in values.items() if metric in {
             "plant_pv_power_kw", "plant_load_power_kw", "plant_battery_power_kw", "plant_grid_power_kw"
         }}

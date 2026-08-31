@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 import re
+from datetime import datetime
 from pathlib import Path
 from typing import Any, cast
 
@@ -9,8 +10,9 @@ from sqlalchemy import Float, Index, Integer, String, Table, create_engine, insp
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
 
-from config import SolarArrayConfig
+from config import SolarArrayConfig, TariffsConfig
 from datasheets import SIGENSTOR_MODEL_SPECIFICATIONS
+from economics import economic_period_values
 
 
 def column_name(metric: str, unit: str) -> str:
@@ -47,6 +49,12 @@ class SigenStorModbusSample(Base):
     plant_grid_import_total_kwh_period: Mapped[float | None] = mapped_column(Float)
     plant_grid_export_total_kwh: Mapped[float | None] = mapped_column(Float)
     plant_grid_export_total_kwh_period: Mapped[float | None] = mapped_column(Float)
+    import_rate: Mapped[float | None] = mapped_column(Float)
+    export_rate: Mapped[float | None] = mapped_column(Float)
+    grid_import_cost_period: Mapped[float | None] = mapped_column(Float)
+    grid_export_revenue_period: Mapped[float | None] = mapped_column(Float)
+    net_cost_period: Mapped[float | None] = mapped_column(Float)
+    no_solar_battery_import_cost_period: Mapped[float | None] = mapped_column(Float)
     plant_battery_charge_total_kwh: Mapped[float | None] = mapped_column(Float)
     plant_battery_charge_total_kwh_period: Mapped[float | None] = mapped_column(Float)
     plant_battery_discharge_total_kwh: Mapped[float | None] = mapped_column(Float)
@@ -181,7 +189,13 @@ class SolarDatabase:
                 rows += 1
         return rows
 
-    def save_modbus_sample(self, values: dict[str, tuple[float, str, bool]], previous: dict[str, float], collected: tuple[str, str]) -> None:
+    def save_modbus_sample(
+        self,
+        values: dict[str, tuple[float, str, bool]],
+        previous: dict[str, float],
+        collected: tuple[str, str],
+        tariffs: TariffsConfig,
+    ) -> None:
         row: dict[str, Any] = {
             "collected_at_utc": collected[0],
             "collected_at_local": collected[1],
@@ -193,6 +207,13 @@ class SolarDatabase:
             row[name] = value
             if cumulative:
                 row[f"{name}_period"] = value - previous[name] if name in previous and value >= previous[name] else None
+        row.update(economic_period_values(
+            row.get("plant_grid_import_total_kwh_period"),
+            row.get("plant_grid_export_total_kwh_period"),
+            row.get("plant_load_total_kwh_period"),
+            tariffs,
+            datetime.fromisoformat(collected[1]),
+        ))
         with self.sessions.begin() as session:
             session.add(SigenStorModbusSample(**row))
         previous.update({column_name(metric, unit): value for metric, (value, unit, _) in values.items()})

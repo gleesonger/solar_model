@@ -18,6 +18,32 @@ Configuration loading is strict: every documented field must be present, unknown
 
 SQLite schema creation and all database writes are handled by `database.py`. The collectors only fetch, decode, and pass records to that module.
 
+## Tariffs and economics
+
+Configure one or more time-of-use rules for both directions under `tariffs`. `start_time` and `end_time` use strict 24-hour `HH:MM` format. `end_time` may also be `24:00` for midnight at the end of that day; `start_time` must be from `00:00` through `23:59`. A rule applies from its start time inclusive until its end time exclusive, using the local configured timezone. A rule may cross midnight; its `days` names the day on which it starts. Equal start and end times describe a full 24-hour day. Every weekday/minute must be covered by exactly one import rule and one export rule.
+
+```yaml
+tariffs:
+  import:
+    - days: [Mon, Tue, Wed, Thu, Fri]
+      start_time: "07:00"
+      end_time: "23:00"
+      rate: 0.35
+  export:
+    - days: [Mon, Tue, Wed, Thu, Fri, Sat, Sun]
+      start_time: "00:00"
+      end_time: "00:00"
+      rate: 0.10
+```
+
+For each new actual sample, the collector stores the selected import and export rates, import cost, export revenue, net cost (`import - export`), and the positive import cost that would have applied without solar or battery (`load × import rate`). These values are not retroactively recalculated when rates change; the Recent tables aggregate the values stored with each sample.
+
+To backfill an older database using the current tariff configuration, run the one-off migration. It drops the obsolete `sigenstor_live` table and recalculates every sample using the current rules, so make a database backup first.
+
+```powershell
+python migrate_tariff_history.py M:\media-server\config\solar-model\solar.db
+```
+
 ## Forecast
 
 The arrays are parameterized in `config.yaml`:

@@ -44,7 +44,18 @@ ENERGY_SUMMARY_COLUMNS = (
     "load",
     "grid_import",
     "grid_export",
+    "grid_import_cost",
+    "grid_export_revenue",
+    "net_cost",
+    "no_solar_battery_import_cost",
 )
+
+CURRENCY_SUMMARY_COLUMNS = frozenset({
+    "grid_import_cost",
+    "grid_export_revenue",
+    "net_cost",
+    "no_solar_battery_import_cost",
+})
 
 def load_day(
     database_path: str,
@@ -212,6 +223,18 @@ def load_daily_energy_totals(
                     func.sum(
                         SigenStorModbusSample.plant_grid_export_total_kwh_period
                     ).label("grid_export"),
+                    func.sum(
+                        SigenStorModbusSample.grid_import_cost_period
+                    ).label("grid_import_cost"),
+                    func.sum(
+                        SigenStorModbusSample.grid_export_revenue_period
+                    ).label("grid_export_revenue"),
+                    func.sum(
+                        SigenStorModbusSample.net_cost_period
+                    ).label("net_cost"),
+                    func.sum(
+                        SigenStorModbusSample.no_solar_battery_import_cost_period
+                    ).label("no_solar_battery_import_cost"),
                 )
                 .where(actual_date >= start_text)
                 .where(actual_date <= end_text)
@@ -308,6 +331,12 @@ def load_daily_energy_totals(
             "load": actual.get("load"),
             "grid_import": actual.get("grid_import"),
             "grid_export": actual.get("grid_export"),
+            "grid_import_cost": actual.get("grid_import_cost"),
+            "grid_export_revenue": actual.get("grid_export_revenue"),
+            "net_cost": actual.get("net_cost"),
+            "no_solar_battery_import_cost": actual.get(
+                "no_solar_battery_import_cost"
+            ),
         })
     return pd.DataFrame(rows)
 
@@ -1152,19 +1181,16 @@ def battery_status_text(latest: dict[str, float | None]) -> str:
 
 
 def energy_summary_rows(data: pd.DataFrame) -> list[dict[str, str]]:
-    value_columns = (
-        "solar_actual",
-        "solar_forecast",
-        "load",
-        "grid_import",
-        "grid_export",
-    )
     return [
         {
             "period": str(row["period"]),
             **{
-                column: format_dashboard_number(row[column])
-                for column in value_columns
+                column: (
+                    format_currency(row[column])
+                    if column in CURRENCY_SUMMARY_COLUMNS
+                    else format_dashboard_number(row[column])
+                )
+                for column in ENERGY_SUMMARY_COLUMNS
             },
         }
         for row in data.to_dict(orient="records")
@@ -1226,6 +1252,12 @@ def format_dashboard_number(value: float | None) -> str:
         return "—"
     rounded = round(float(value), 1)
     return f"{0.0 if rounded == 0 else rounded:.1f}"
+
+
+def format_currency(value: float | None) -> str:
+    if value is None or pd.isna(value):
+        return "â€”"
+    return f"{float(value):.2f}"
 
 
 def chart_values(values: pd.Series) -> list[float | None]:

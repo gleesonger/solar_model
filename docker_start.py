@@ -16,8 +16,8 @@ def main() -> int:
     database = open_database(load_config().database.path)
     database.close()
     processes = [
-        subprocess.Popen([sys.executable, str(app_directory / "main_data_collection.py")]),
-        subprocess.Popen([sys.executable, str(app_directory / "main_dashboard.py")]),
+        subprocess.Popen([sys.executable, "main_data_collection.py"],cwd=app_directory),
+        subprocess.Popen([sys.executable, "main_dashboard.py"],cwd=app_directory),
     ]
     stopping = False
 

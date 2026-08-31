@@ -5,21 +5,23 @@ from zoneinfo import ZoneInfo
 
 from nicegui import ui
 
+from config import Config
+
 from . import charts, data
-from .models import DashboardContext, DashboardElements, DashboardState
+from .models import DashboardElements, DashboardState
 
 
 class HistoricalTab:
     def __init__(
         self,
-        context: DashboardContext,
+        config: Config,
         state: DashboardState,
         elements: DashboardElements,
     ) -> None:
-        self.context = context
+        self.config = config
         self.state = state
         self.elements = elements
-        self.timezone = ZoneInfo(context.timezone_name)
+        self.timezone = ZoneInfo(config.timezone)
 
     def render_historical_tab(self) -> None:
         with ui.row().classes("w-full items-end gap-3"):
@@ -73,8 +75,8 @@ class HistoricalTab:
         self.elements.historical_charts = charts.render_historical_charts(
             historical,
             self.state.historical_frequency,
-            self.context.forecast_arrays,
-            self.context.actuals_to_forecast,
+            self.config.forecast.arrays,
+            self.config.dashboard.actuals_to_forecast,
         )
 
     def refresh_historical_tab(self) -> None:
@@ -94,8 +96,8 @@ class HistoricalTab:
             charts.array_energy_chart_options(
                 historical,
                 "period",
-                self.context.forecast_arrays,
-                self.context.actuals_to_forecast,
+                self.config.forecast.arrays,
+                self.config.dashboard.actuals_to_forecast,
             ),
         )
 
@@ -110,13 +112,13 @@ class HistoricalTab:
         start = data.historical_start_date(today, self.state.historical_count, self.state.historical_unit)
         return (
             data.load_historical_energy(
-                self.context.database_path,
-                self.context.timezone_name,
+                self.config.database.path,
+                self.config.timezone,
                 start,
                 today,
                 self.state.historical_frequency,
-                self.context.forecast_arrays,
-                self.context.actuals_to_forecast,
+                self.config.forecast.arrays,
+                self.config.dashboard.actuals_to_forecast,
             ),
             start,
             today,

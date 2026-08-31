@@ -8,9 +8,6 @@ from nicegui.elements.echart import EChart
 from nicegui.elements.label import Label
 from nicegui.elements.table import Table
 
-from config import SolarArrayConfig
-
-
 PANEL_COLORS = ("#5470c6", "#91cc75", "#fac858", "#ee6666")
 SUMMARY_LATEST_KEYS = {
     "Solar": "solar",
@@ -27,14 +24,6 @@ HOURLY_PERIOD_DAYS = {
     "30 Days": 30,
     "365 Days": 365,
 }
-
-
-@dataclass(frozen=True)
-class DashboardContext:
-    database_path: str
-    timezone_name: str
-    forecast_arrays: tuple[SolarArrayConfig, ...]
-    actuals_to_forecast: dict[str, int]
 
 
 @dataclass(frozen=True)

@@ -9,26 +9,26 @@ from nicegui import ui
 from nicegui.elements.label import Label
 from nicegui.elements.table import Table
 
-from config import SolarArrayConfig
+from config import Config, SolarArrayConfig
 
 from . import data
 from .live import LivePowerCollector
-from .models import DashboardContext, DashboardElements, DashboardState, LivePowerData
+from .models import DashboardElements, DashboardState, LivePowerData
 
 
 class RecentTab:
     def __init__(
         self,
-        context: DashboardContext,
+        config: Config,
         state: DashboardState,
         elements: DashboardElements,
         live_collector: LivePowerCollector,
     ) -> None:
-        self.context = context
+        self.config = config
         self.state = state
         self.elements = elements
         self.live_collector = live_collector
-        self.timezone = ZoneInfo(context.timezone_name)
+        self.timezone = ZoneInfo(config.timezone)
 
     def render_recent_tab(self) -> None:
         try:
@@ -45,7 +45,7 @@ class RecentTab:
         self.elements.live_table = render_live_today_table(
             day,
             latest,
-            self.context.forecast_arrays,
+            self.config.forecast.arrays,
         )
         self.elements.battery_status_label = ui.label(
             data.battery_status_text(telemetry.latest)
@@ -65,7 +65,7 @@ class RecentTab:
             self.elements.live_table.rows = data.summary_rows(
                 day,
                 latest,
-                self.context.forecast_arrays,
+                self.config.forecast.arrays,
             )
         if self.elements.battery_status_label is not None:
             self.elements.battery_status_label.set_text(data.battery_status_text(telemetry.latest))
@@ -105,29 +105,29 @@ class RecentTab:
         today = datetime.now(self.timezone).date()
         return (
             data.load_day(
-                self.context.database_path,
-                self.context.timezone_name,
-                self.context.forecast_arrays,
-                self.context.actuals_to_forecast,
+                self.config.database.path,
+                self.config.timezone,
+                self.config.forecast.arrays,
+                self.config.dashboard.actuals_to_forecast,
             ).copy(),
             data.load_telemetry(
-                self.context.database_path,
-                self.context.timezone_name,
+                self.config.database.path,
+                self.config.timezone,
             ),
             self.live_collector.snapshot(),
             data.load_recent_daily_energy(
-                self.context.database_path,
-                self.context.timezone_name,
+                self.config.database.path,
+                self.config.timezone,
                 today,
                 7,
-                self.context.forecast_arrays,
+                self.config.forecast.arrays,
             ),
             data.load_recent_monthly_energy(
-                self.context.database_path,
-                self.context.timezone_name,
+                self.config.database.path,
+                self.config.timezone,
                 today,
                 12,
-                self.context.forecast_arrays,
+                self.config.forecast.arrays,
             ),
         )
 

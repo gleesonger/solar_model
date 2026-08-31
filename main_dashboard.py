@@ -1,16 +1,13 @@
 from __future__ import annotations
 
 import os
-from datetime import datetime
 from pathlib import Path
-from zoneinfo import ZoneInfo
 
 from nicegui import app, ui
 
 from config import load_config
 from dashboard.layout import DashboardLayout, render_dashboard_styles
 from dashboard.live import LivePowerCollector
-from dashboard.models import DashboardContext, DashboardState
 from common import source_path
 
 CONFIG_PATH = source_path("config.yaml")
@@ -18,12 +15,6 @@ CONFIG_PATH = source_path("config.yaml")
 def main() -> None:
     config = load_config(CONFIG_PATH)
 
-    context = DashboardContext(
-        database_path=config.database.path,
-        timezone_name=config.timezone,
-        forecast_arrays=config.forecast.arrays,
-        actuals_to_forecast=config.dashboard.actuals_to_forecast,
-    )
     live_collector = LivePowerCollector(
         config.actuals.modbus,
         config.timezone,
@@ -36,10 +27,8 @@ def main() -> None:
     @ui.page("/")
     def render_dashboard_page() -> None:
         render_dashboard_styles()
-        today = datetime.now(ZoneInfo(context.timezone_name)).date()
         layout = DashboardLayout(
-            context,
-            DashboardState(hourly_start=today, hourly_end=today),
+            config,
             live_collector,
         )
         with ui.column().classes("w-full max-w-7xl mx-auto p-4") as container:

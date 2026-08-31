@@ -6,10 +6,12 @@ from zoneinfo import ZoneInfo
 from nicegui import ui
 from nicegui.elements.column import Column
 
+from config import Config
+
 from .historical import HistoricalTab
 from .hourly import HourlyTab
 from .live import LivePowerCollector
-from .models import DashboardContext, DashboardElements, DashboardState
+from .models import DashboardElements, DashboardState
 from .recent import RecentTab
 from .system_info import SystemInfoTab
 
@@ -17,18 +19,19 @@ from .system_info import SystemInfoTab
 class DashboardLayout:
     def __init__(
         self,
-        context: DashboardContext,
-        state: DashboardState,
+        config: Config,
         live_collector: LivePowerCollector,
     ) -> None:
-        self.context = context
-        self.state = state
+        self.config = config
         self.elements = DashboardElements()
-        self.timezone = ZoneInfo(context.timezone_name)
-        self.recent_tab = RecentTab(context, state, self.elements, live_collector)
-        self.hourly_tab = HourlyTab(context, state, self.elements)
-        self.historical_tab = HistoricalTab(context, state, self.elements)
-        self.system_info_tab = SystemInfoTab(context, self.elements)
+        self.timezone = ZoneInfo(config.timezone)
+        today = datetime.now(self.timezone).date()
+        self.state = DashboardState(hourly_start=today, hourly_end=today)
+
+        self.recent_tab = RecentTab(config, self.state, self.elements, live_collector)
+        self.hourly_tab = HourlyTab(config, self.state, self.elements)
+        self.historical_tab = HistoricalTab(config, self.state, self.elements)
+        self.system_info_tab = SystemInfoTab(config, self.elements)
 
     def render_dashboard_layout(self, container: Column) -> None:
         container.clear()

@@ -3,26 +3,28 @@ from __future__ import annotations
 from nicegui import ui
 from nicegui.elements.table import Table
 
+from config import Config
+
 from . import data
-from .models import DashboardContext, DashboardElements
+from .models import DashboardElements
 
 
 class SystemInfoTab:
-    def __init__(self, context: DashboardContext, elements: DashboardElements) -> None:
-        self.context = context
+    def __init__(self, config: Config, elements: DashboardElements) -> None:
+        self.config = config
         self.elements = elements
 
     def render_system_info_tab(self) -> None:
         try:
             self.elements.system_table = render_system_information(
-                data.load_device_information(self.context.database_path)
+                data.load_device_information(self.config.database.path)
             )
         except Exception as error:
             ui.label(f"Unable to load system information: {error}").classes("text-red-600")
 
     def refresh_system_info_tab(self) -> None:
         if self.elements.system_table is not None:
-            self.elements.system_table.rows = data.load_device_information(self.context.database_path)
+            self.elements.system_table.rows = data.load_device_information(self.config.database.path)
 
 
 def render_system_information(device_information: list[dict[str, str]]) -> Table:

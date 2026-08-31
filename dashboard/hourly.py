@@ -6,9 +6,10 @@ from zoneinfo import ZoneInfo
 
 from nicegui import ui
 
+from config import Config
+
 from . import charts, data
 from .models import (
-    DashboardContext,
     DashboardElements,
     DashboardState,
     HOURLY_PERIODS,
@@ -18,14 +19,14 @@ from .models import (
 class HourlyTab:
     def __init__(
         self,
-        context: DashboardContext,
+        config: Config,
         state: DashboardState,
         elements: DashboardElements,
     ) -> None:
-        self.context = context
+        self.config = config
         self.state = state
         self.elements = elements
-        self.timezone = ZoneInfo(context.timezone_name)
+        self.timezone = ZoneInfo(config.timezone)
 
     def render_hourly_tab(self) -> None:
         with ui.row().classes("w-full items-end gap-3"):
@@ -77,7 +78,7 @@ class HourlyTab:
 
         def select_period_at_today(period: str, today: date) -> None:
             lifetime_start = (
-                data.load_lifetime_start_date(self.context.database_path, today)
+                data.load_lifetime_start_date(self.config.database.path, today)
                 if period == "Lifetime"
                 else today
             )
@@ -130,8 +131,8 @@ class HourlyTab:
             hourly_range.energy,
             hourly_range.power,
             hourly_range.battery,
-            self.context.forecast_arrays,
-            self.context.actuals_to_forecast,
+            self.config.forecast.arrays,
+            self.config.dashboard.actuals_to_forecast,
             self.state.power_interval_minutes,
             self.state.time_zoom_start,
             self.state.time_zoom_end,
@@ -152,13 +153,13 @@ class HourlyTab:
 
     def _load_hourly_range(self):
         return data.load_hourly_range(
-            self.context.database_path,
-            self.context.timezone_name,
+            self.config.database.path,
+            self.config.timezone,
             self.state.hourly_start,
             self.state.hourly_end,
             self.state.power_interval_minutes,
-            self.context.forecast_arrays,
-            self.context.actuals_to_forecast,
+            self.config.forecast.arrays,
+            self.config.dashboard.actuals_to_forecast,
         )
 
     def _display_hourly_range(self, hourly_range: data.HourlyRangeData) -> None:
@@ -179,8 +180,8 @@ class HourlyTab:
             chart_elements.power,
             charts.power_chart_options(
                 hourly_range.power,
-                self.context.forecast_arrays,
-                self.context.actuals_to_forecast,
+                self.config.forecast.arrays,
+                self.config.dashboard.actuals_to_forecast,
                 self.state.time_zoom_start,
                 self.state.time_zoom_end,
             ),
@@ -191,16 +192,16 @@ class HourlyTab:
             charts.array_energy_chart_options(
                 hourly_range.energy,
                 "hour",
-                self.context.forecast_arrays,
-                self.context.actuals_to_forecast,
+                self.config.forecast.arrays,
+                self.config.dashboard.actuals_to_forecast,
             ),
         )
 
     def _blank_hourly_tab(self) -> None:
         self._display_hourly_range(data.empty_hourly_range(
             self.state.power_interval_minutes,
-            self.context.forecast_arrays,
-            self.context.actuals_to_forecast,
+            self.config.forecast.arrays,
+            self.config.dashboard.actuals_to_forecast,
         ))
         if self.elements.hourly_range_label is not None:
             self.elements.hourly_range_label.set_text("Select a valid date range")

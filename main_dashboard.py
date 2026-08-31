@@ -10,10 +10,8 @@ from dashboard.layout import DashboardLayout, render_dashboard_styles
 from dashboard.live import LIVE_COLLECTION_INTERVAL_SECONDS, LivePowerCollector
 from common import LOGGER, configure_logging, source_path
 
-CONFIG_PATH = source_path("config.yaml")
-
 def main() -> None:
-    config = load_config(CONFIG_PATH)
+    config = load_config()
     configure_logging(config.logging.level)
     database = open_database(config.database.path)
     database.close()

@@ -1,0 +1,1226 @@
+"""Data access and calculations shared by dashboard tabs."""
+
+from __future__ import annotations
+
+from collections.abc import Callable
+from datetime import date, datetime, timedelta, tzinfo
+from pathlib import Path
+from typing import Any, cast
+from zoneinfo import ZoneInfo
+
+import pandas as pd
+from sqlalchemy import create_engine, func, select
+from sqlalchemy.exc import OperationalError
+from sqlalchemy.orm import Session
+
+from config import SolarArrayConfig
+from database import ForecastSolarSample, SigenStorDevice, SigenStorLive, SigenStorModbusSample
+from .models import (
+    HOURLY_PERIOD_DAYS,
+    HOURLY_PERIODS,
+    HourlyRangeData,
+    LivePowerData,
+    SUMMARY_LATEST_KEYS,
+    TelemetryData,
+)
+
+PvStringReader = Callable[[SigenStorModbusSample], tuple[float | None, float | None]]
+ForecastWattHoursReader = Callable[[ForecastSolarSample], float | None]
+
+PV_STRING_READERS: dict[str, PvStringReader] = {
+    "pv1": lambda row: (row.inverter_pv1_voltage_volts, row.inverter_pv1_current_amps),
+    "pv2": lambda row: (row.inverter_pv2_voltage_volts, row.inverter_pv2_current_amps),
+    "pv3": lambda row: (row.inverter_pv3_voltage_volts, row.inverter_pv3_current_amps),
+    "pv4": lambda row: (row.inverter_pv4_voltage_volts, row.inverter_pv4_current_amps),
+}
+
+FORECAST_WATT_HOURS_READERS: dict[int, ForecastWattHoursReader] = {
+    1: lambda row: row.panel_1_watt_hours,
+    2: lambda row: row.panel_2_watt_hours,
+    3: lambda row: row.panel_3_watt_hours,
+    4: lambda row: row.panel_4_watt_hours,
+}
+
+def load_day(
+    database_path: str,
+    timezone_name: str,
+    forecast_arrays: tuple[SolarArrayConfig, ...],
+    actuals_to_forecast: dict[str, int],
+) -> pd.DataFrame:
+    timezone = ZoneInfo(timezone_name)
+    now = datetime.now(timezone)
+    day_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+
+    engine = create_engine(f"sqlite:///{Path(database_path)}", future=True)
+    try:
+        with Session(engine) as session:
+            forecast_rows = load_forecast_for_day(session, day_start)
+            actual = load_actual_hourly(session, day_start)
+            actual_by_array = load_actual_arrays_hourly(session, day_start, actuals_to_forecast)
+    finally:
+        engine.dispose()
+
+    forecast = aggregate_forecast(forecast_rows, day_start, forecast_arrays)
+    hourly = actual.merge(actual_by_array, on="hour", how="left").merge(forecast, on="hour", how="left").fillna(0.0)
+    return hourly
+
+
+def load_recent_daily_energy(
+    database_path: str,
+    timezone_name: str,
+    end_date: date,
+    days: int,
+    forecast_arrays: tuple[SolarArrayConfig, ...],
+) -> pd.DataFrame:
+    if days < 1:
+        raise ValueError("Recent daily period must contain at least one day")
+    start_date = end_date - timedelta(days=days - 1)
+    daily = load_daily_energy_totals(
+        database_path,
+        timezone_name,
+        start_date,
+        end_date,
+        forecast_arrays,
+    )
+    daily["period"] = dataframe_column(daily, "date")
+    return daily.sort_values("date", ascending=False).reset_index(drop=True)
+
+
+def load_lifetime_start_date(database_path: str, fallback: date) -> date:
+    engine = create_engine(f"sqlite:///{Path(database_path)}", future=True)
+    try:
+        with Session(engine) as session:
+            actual_start = session.scalar(
+                select(func.min(func.substr(
+                    SigenStorModbusSample.collected_at_local,
+                    1,
+                    10,
+                )))
+            )
+            forecast_start = session.scalar(
+                select(func.min(func.substr(
+                    ForecastSolarSample.collected_at_local,
+                    1,
+                    10,
+                )))
+            )
+    finally:
+        engine.dispose()
+
+    starts = [
+        date.fromisoformat(str(value))
+        for value in (actual_start, forecast_start)
+        if value is not None
+    ]
+    return min(starts, default=fallback)
+
+
+def load_recent_monthly_energy(
+    database_path: str,
+    timezone_name: str,
+    end_date: date,
+    months: int,
+    forecast_arrays: tuple[SolarArrayConfig, ...],
+) -> pd.DataFrame:
+    if months < 1:
+        raise ValueError("Recent monthly period must contain at least one month")
+    current_month = end_date.replace(day=1)
+    start_date = shift_date_by_months(current_month, -(months - 1))
+    daily = load_daily_energy_totals(
+        database_path,
+        timezone_name,
+        start_date,
+        end_date,
+        forecast_arrays,
+    )
+    value_columns = [
+        "solar_actual",
+        "solar_forecast",
+        "load",
+        "grid_import",
+        "grid_export",
+    ]
+    daily["month"] = dataframe_column(daily, "date").map(
+        lambda value: str(value)[:7]
+    )
+    totals = cast(
+        pd.DataFrame,
+        daily.groupby("month", as_index=False)[value_columns].sum(min_count=1),
+    )
+    rows: list[dict[str, Any]] = []
+    for months_ago in range(months):
+        month = shift_date_by_months(current_month, -months_ago)
+        month_key = month.strftime("%Y-%m")
+        matching = totals.loc[dataframe_column(totals, "month") == month_key]
+        row: dict[str, Any] = {
+            "date": month_key,
+            "period": month.strftime("%b %Y"),
+        }
+        for column in value_columns:
+            row[column] = (
+                dataframe_column(matching, column).iloc[0]
+                if not matching.empty
+                else float("nan")
+            )
+        rows.append(row)
+    return pd.DataFrame(rows)
+
+
+def load_daily_energy_totals(
+    database_path: str,
+    timezone_name: str,
+    start_date: date,
+    end_date: date,
+    forecast_arrays: tuple[SolarArrayConfig, ...],
+) -> pd.DataFrame:
+    if end_date < start_date:
+        raise ValueError("End date must not be before first date")
+
+    timezone = ZoneInfo(timezone_name)
+    current_time = datetime.now(timezone)
+    start_text = start_date.isoformat()
+    end_text = end_date.isoformat()
+    engine = create_engine(f"sqlite:///{Path(database_path)}", future=True)
+    try:
+        with Session(engine) as session:
+            actual_date = func.substr(
+                SigenStorModbusSample.collected_at_local,
+                1,
+                10,
+            ).label("date")
+            actual_rows = session.execute(
+                select(
+                    actual_date,
+                    func.sum(
+                        SigenStorModbusSample.plant_pv_total_kwh_period
+                    ).label("solar_actual"),
+                    func.sum(
+                        SigenStorModbusSample.plant_load_total_kwh_period
+                    ).label("load"),
+                    func.sum(
+                        SigenStorModbusSample.plant_grid_import_total_kwh_period
+                    ).label("grid_import"),
+                    func.sum(
+                        SigenStorModbusSample.plant_grid_export_total_kwh_period
+                    ).label("grid_export"),
+                )
+                .where(actual_date >= start_text)
+                .where(actual_date <= end_text)
+                .where(
+                    func.substr(
+                        SigenStorModbusSample.collected_at_local,
+                        12,
+                        8,
+                    )
+                    != "00:00:00"
+                )
+                .group_by(actual_date)
+            ).mappings().all()
+
+            forecast_date = func.substr(
+                ForecastSolarSample.collected_at_local,
+                1,
+                10,
+            ).label("date")
+            collections = session.execute(
+                select(
+                    forecast_date,
+                    ForecastSolarSample.collection_guid,
+                    ForecastSolarSample.collected_at_utc,
+                )
+                .where(ForecastSolarSample.collection_guid.is_not(None))
+                .where(forecast_date >= start_text)
+                .where(forecast_date <= end_text)
+                .distinct()
+                .order_by(forecast_date, ForecastSolarSample.collected_at_utc)
+            ).all()
+            first_guid_by_date: dict[str, str] = {}
+            for collection_date, collection_guid, _ in collections:
+                if collection_guid is not None:
+                    first_guid_by_date.setdefault(
+                        str(collection_date),
+                        str(collection_guid),
+                    )
+            selected_guids = set(first_guid_by_date.values())
+            forecast_rows = (
+                list(session.scalars(
+                    select(ForecastSolarSample)
+                    .where(ForecastSolarSample.collection_guid.in_(selected_guids))
+                    .order_by(ForecastSolarSample.forecast_time)
+                ).all())
+                if selected_guids
+                else []
+            )
+    finally:
+        engine.dispose()
+
+    actual_by_date = {str(row["date"]): row for row in actual_rows}
+    forecast_rows_by_guid: dict[str, list[ForecastSolarSample]] = {}
+    for forecast_row in forecast_rows:
+        if forecast_row.collection_guid is not None:
+            forecast_rows_by_guid.setdefault(
+                forecast_row.collection_guid,
+                [],
+            ).append(forecast_row)
+
+    rows: list[dict[str, Any]] = []
+    number_of_days = (end_date - start_date).days + 1
+    for day_offset in range(number_of_days):
+        selected_date = start_date + timedelta(days=day_offset)
+        selected_text = selected_date.isoformat()
+        actual = actual_by_date.get(selected_text, {})
+        day_start = datetime(
+            selected_date.year,
+            selected_date.month,
+            selected_date.day,
+            tzinfo=timezone,
+        )
+        selected_guid = first_guid_by_date.get(selected_text)
+        selected_forecast_rows = (
+            forecast_rows_by_guid.get(selected_guid, [])
+            if selected_guid is not None
+            else []
+        )
+        forecast = aggregate_forecast(
+            selected_forecast_rows,
+            day_start,
+            forecast_arrays,
+            fill_missing=False,
+        )
+        if selected_date == current_time.date():
+            forecast = scale_forecast_to_elapsed_time(forecast, current_time)
+        rows.append({
+            "date": selected_text,
+            "solar_actual": actual.get("solar_actual"),
+            "solar_forecast": dataframe_column(
+                forecast,
+                "forecast_total",
+            ).sum(min_count=1),
+            "load": actual.get("load"),
+            "grid_import": actual.get("grid_import"),
+            "grid_export": actual.get("grid_export"),
+        })
+    return pd.DataFrame(rows)
+
+
+def load_live_power(database_path: str) -> LivePowerData:
+    empty_values: dict[str, float | None] = {
+        key: None for key in SUMMARY_LATEST_KEYS.values()
+    }
+    engine = create_engine(f"sqlite:///{Path(database_path)}", future=True)
+    try:
+        try:
+            with Session(engine) as session:
+                row = session.scalar(select(SigenStorLive).limit(1))
+        except OperationalError:
+            row = None
+    finally:
+        engine.dispose()
+
+    if row is None:
+        return LivePowerData(None, None, empty_values)
+    grid_power = row.plant_grid_power_kw
+    return LivePowerData(
+        collected_at_utc=row.collected_at_utc,
+        collected_at_local=row.collected_at_local,
+        values={
+            "solar": row.plant_pv_power_kw,
+            "battery": row.plant_battery_power_kw,
+            "inverter": row.inverter_power_kw,
+            "load": row.plant_load_power_kw,
+            "grid_import": max(grid_power, 0.0) if grid_power is not None else None,
+            "grid_export": max(-grid_power, 0.0) if grid_power is not None else None,
+        },
+    )
+
+
+def human_readable_age(age_seconds: float) -> str:
+    seconds = max(0, int(age_seconds))
+    if seconds < 5:
+        return "just now"
+    if seconds < 60:
+        return f"{seconds} seconds ago"
+    if seconds < 3_600:
+        minutes = seconds // 60
+        return f"{minutes} minute{'s' if minutes != 1 else ''} ago"
+    if seconds < 86_400:
+        hours = seconds // 3_600
+        return f"{hours} hour{'s' if hours != 1 else ''} ago"
+    days = seconds // 86_400
+    return f"{days} day{'s' if days != 1 else ''} ago"
+
+
+def empty_hourly_range(
+    power_interval_minutes: int,
+    forecast_arrays: tuple[SolarArrayConfig, ...],
+    actuals_to_forecast: dict[str, int],
+) -> HourlyRangeData:
+    hours = [f"{hour:02d}:00" for hour in range(24)]
+    actual_columns = {
+        actual_column_name(panel_id)
+        for panel_id in actuals_to_forecast.values()
+    }
+    forecast_columns = {
+        forecast_column_name(array.panel_id)
+        for array in forecast_arrays
+    }
+
+    def empty_frame(
+        axis: str,
+        labels: list[str],
+        columns: set[str],
+    ) -> pd.DataFrame:
+        return pd.DataFrame({
+            axis: labels,
+            **{column: [None] * len(labels) for column in sorted(columns)},
+        })
+
+    energy = empty_frame(
+        "hour",
+        hours,
+        {
+            "solar",
+            "forecast_total",
+            "load",
+            "grid_import",
+            "grid_export",
+            *actual_columns,
+            *forecast_columns,
+        },
+    )
+    power = empty_frame(
+        "time",
+        [
+            minute_of_day_label(minute)
+            for minute in range(0, 24 * 60, power_interval_minutes)
+        ],
+        {
+            "solar",
+            "load",
+            "battery",
+            "inverter",
+            "grid_import",
+            "grid_export",
+            *actual_columns,
+        },
+    )
+    battery = empty_frame(
+        "time",
+        [
+            minute_of_day_label(minute)
+            for minute in range(0, 24 * 60, power_interval_minutes)
+        ],
+        {"available_energy_kwh", "soc_percent"},
+    )
+    return HourlyRangeData(energy=energy, power=power, battery=battery)
+
+
+def load_hourly_range(
+    database_path: str,
+    timezone_name: str,
+    start_date: date,
+    end_date: date,
+    power_interval_minutes: int,
+    forecast_arrays: tuple[SolarArrayConfig, ...],
+    actuals_to_forecast: dict[str, int],
+) -> HourlyRangeData:
+    if end_date < start_date:
+        raise ValueError("End date must not be before first date")
+    if power_interval_minutes < 1:
+        raise ValueError("Power interval must be at least one minute")
+
+    timezone = ZoneInfo(timezone_name)
+    daily_energy: list[pd.DataFrame] = []
+    engine = create_engine(f"sqlite:///{Path(database_path)}", future=True)
+    try:
+        with Session(engine) as session:
+            selected_samples = list(session.scalars(
+                select(SigenStorModbusSample)
+                .where(
+                    func.substr(SigenStorModbusSample.collected_at_local, 1, 10)
+                    >= start_date.isoformat()
+                )
+                .where(
+                    func.substr(SigenStorModbusSample.collected_at_local, 1, 10)
+                    <= end_date.isoformat()
+                )
+                .order_by(SigenStorModbusSample.collected_at_utc)
+            ).all())
+            daily_energy = load_daily_energy_frames(
+                session,
+                timezone,
+                start_date,
+                end_date,
+                forecast_arrays,
+                actuals_to_forecast,
+            )
+    finally:
+        engine.dispose()
+
+    energy = average_daily_hourly_energy(daily_energy)
+    power, battery = average_telemetry_by_interval(
+        selected_samples,
+        timezone,
+        power_interval_minutes,
+        actuals_to_forecast,
+    )
+    return HourlyRangeData(energy=energy, power=power, battery=battery)
+
+
+def load_historical_energy(
+    database_path: str,
+    timezone_name: str,
+    start_date: date,
+    end_date: date,
+    frequency: str,
+    forecast_arrays: tuple[SolarArrayConfig, ...],
+    actuals_to_forecast: dict[str, int],
+) -> pd.DataFrame:
+    if end_date < start_date:
+        raise ValueError("End date must not be before first date")
+    if frequency not in {"day", "week", "month", "season", "year"}:
+        raise ValueError(f"Unsupported historical frequency: {frequency}")
+
+    timezone = ZoneInfo(timezone_name)
+    engine = create_engine(f"sqlite:///{Path(database_path)}", future=True)
+    try:
+        with Session(engine) as session:
+            daily_frames = load_daily_energy_frames(
+                session,
+                timezone,
+                start_date,
+                end_date,
+                forecast_arrays,
+                actuals_to_forecast,
+            )
+    finally:
+        engine.dispose()
+
+    combined = pd.concat(daily_frames, ignore_index=True)
+    value_columns = [column for column in combined.columns if column not in {"date", "hour"}]
+    for column in value_columns:
+        combined[column] = pd.to_numeric(combined[column], errors="coerce")
+    combined["bucket_start"] = dataframe_column(combined, "date").map(
+        lambda value: historical_bucket_start(date.fromisoformat(str(value)), frequency)
+    )
+    grouped = cast(
+        pd.DataFrame,
+        combined.groupby("bucket_start", as_index=False)[value_columns].sum(min_count=1),
+    )
+    grouped["period"] = dataframe_column(grouped, "bucket_start").map(
+        lambda value: historical_bucket_label(value, frequency)
+    )
+    return cast(pd.DataFrame, grouped[["period", *value_columns]])
+
+
+def load_daily_energy_frames(
+    session: Session,
+    timezone: tzinfo,
+    start_date: date,
+    end_date: date,
+    forecast_arrays: tuple[SolarArrayConfig, ...],
+    actuals_to_forecast: dict[str, int],
+) -> list[pd.DataFrame]:
+    daily_energy: list[pd.DataFrame] = []
+    start_text = start_date.isoformat()
+    end_text = end_date.isoformat()
+    actual_dates = set(session.scalars(
+        select(func.substr(SigenStorModbusSample.collected_at_local, 1, 10))
+        .where(func.substr(SigenStorModbusSample.collected_at_local, 1, 10) >= start_text)
+        .where(func.substr(SigenStorModbusSample.collected_at_local, 1, 10) <= end_text)
+        .distinct()
+    ).all())
+    forecast_dates = set(session.scalars(
+        select(func.substr(ForecastSolarSample.collected_at_local, 1, 10))
+        .where(func.substr(ForecastSolarSample.collected_at_local, 1, 10) >= start_text)
+        .where(func.substr(ForecastSolarSample.collected_at_local, 1, 10) <= end_text)
+        .distinct()
+    ).all())
+    hours = pd.DataFrame({"hour": [f"{index:02d}:00" for index in range(24)]})
+    actual_columns = [actual_column_name(panel_id) for panel_id in actuals_to_forecast.values()]
+    number_of_days = (end_date - start_date).days + 1
+    for day_offset in range(number_of_days):
+        selected_date = start_date + timedelta(days=day_offset)
+        selected_date_text = selected_date.isoformat()
+        day_start = datetime(
+            selected_date.year,
+            selected_date.month,
+            selected_date.day,
+            tzinfo=timezone,
+        )
+        if selected_date_text in actual_dates:
+            actual = load_actual_hourly(session, day_start, fill_missing=False)
+            actual_by_array = load_actual_arrays_hourly(
+                session,
+                day_start,
+                actuals_to_forecast,
+                fill_missing=False,
+            )
+        else:
+            actual = hours.assign(
+                solar=float("nan"),
+                load=float("nan"),
+                battery=float("nan"),
+                grid_import=float("nan"),
+                grid_export=float("nan"),
+            )
+            actual_by_array = hours.assign(
+                **{column: float("nan") for column in actual_columns}
+            )
+        forecast_rows = (
+            load_forecast_for_day(session, day_start)
+            if selected_date_text in forecast_dates
+            else []
+        )
+        forecast = aggregate_forecast(
+            forecast_rows, day_start, forecast_arrays, fill_missing=False
+        )
+        day = actual.merge(actual_by_array, on="hour", how="left").merge(
+            forecast, on="hour", how="left"
+        )
+        day["date"] = selected_date.isoformat()
+        daily_energy.append(day)
+    return daily_energy
+
+
+def historical_start_date(end_date: date, count: int, unit: str) -> date:
+    if count < 1:
+        raise ValueError("Historical period must be a positive whole number")
+    if unit == "days":
+        return end_date - timedelta(days=count - 1)
+    if unit == "weeks":
+        return end_date - timedelta(weeks=count) + timedelta(days=1)
+    if unit == "months":
+        return shift_date_by_months(end_date, -count) + timedelta(days=1)
+    if unit == "years":
+        return shift_date_by_months(end_date, -12 * count) + timedelta(days=1)
+    raise ValueError(f"Unsupported historical period: {unit}")
+
+
+def hourly_period_name(start_date: date, end_date: date) -> str:
+    days = (end_date - start_date).days + 1
+    return next(
+        (
+            period
+            for period, period_days in HOURLY_PERIOD_DAYS.items()
+            if period_days == days
+        ),
+        "Custom",
+    )
+
+
+def next_hourly_period(period: str) -> str:
+    if period not in HOURLY_PERIODS:
+        return "Today"
+    index = HOURLY_PERIODS.index(period)
+    return HOURLY_PERIODS[(index + 1) % len(HOURLY_PERIODS)]
+
+
+def hourly_period_range(
+    period: str,
+    end_date: date,
+    lifetime_start: date,
+) -> tuple[date, date]:
+    if period == "Lifetime":
+        return min(lifetime_start, end_date), end_date
+    days = HOURLY_PERIOD_DAYS.get(period)
+    if days is None:
+        raise ValueError(f"Unsupported hourly period: {period}")
+    return end_date - timedelta(days=days - 1), end_date
+
+
+def shift_date_by_months(value: date, months: int) -> date:
+    month_index = value.year * 12 + value.month - 1 + months
+    year, zero_based_month = divmod(month_index, 12)
+    month = zero_based_month + 1
+    following_month = date(year + (month == 12), month % 12 + 1, 1)
+    last_day = (following_month - timedelta(days=1)).day
+    return date(year, month, min(value.day, last_day))
+
+
+def historical_bucket_start(value: date, frequency: str) -> date:
+    if frequency == "day":
+        return value
+    if frequency == "week":
+        return value - timedelta(days=value.weekday())
+    if frequency == "month":
+        return value.replace(day=1)
+    if frequency == "season":
+        if value.month in {12, 1, 2}:
+            winter_year = value.year if value.month == 12 else value.year - 1
+            return date(winter_year, 12, 1)
+        season_month = 3 if value.month <= 5 else 6 if value.month <= 8 else 9
+        return date(value.year, season_month, 1)
+    if frequency == "year":
+        return date(value.year, 1, 1)
+    raise ValueError(f"Unsupported historical frequency: {frequency}")
+
+
+def historical_bucket_label(value: date, frequency: str) -> str:
+    if frequency == "day":
+        return value.isoformat()
+    if frequency == "week":
+        return f"Week of {value:%d %b %Y}"
+    if frequency == "month":
+        return value.strftime("%b %Y")
+    if frequency == "season":
+        season = {12: "Winter", 3: "Spring", 6: "Summer", 9: "Autumn"}[value.month]
+        if value.month == 12:
+            return f"{season} {value.year}/{str(value.year + 1)[-2:]}"
+        return f"{season} {value.year}"
+    if frequency == "year":
+        return str(value.year)
+    raise ValueError(f"Unsupported historical frequency: {frequency}")
+
+
+def load_telemetry(
+    database_path: str,
+    timezone_name: str,
+) -> TelemetryData:
+    timezone = ZoneInfo(timezone_name)
+    day_start = datetime.now(timezone).replace(hour=0, minute=0, second=0, microsecond=0)
+    engine = create_engine(f"sqlite:///{Path(database_path)}", future=True)
+    try:
+        with Session(engine) as session:
+            samples = list(session.scalars(
+                select(SigenStorModbusSample)
+                .where(
+                    func.substr(SigenStorModbusSample.collected_at_local, 1, 10)
+                    == day_start.strftime("%Y-%m-%d")
+                )
+                .order_by(SigenStorModbusSample.collected_at_utc)
+            ).all())
+    finally:
+        engine.dispose()
+
+    power_totals: dict[tuple[str, str], float] = {}
+    power_counts: dict[tuple[str, str], int] = {}
+    battery_totals: dict[tuple[str, str], float] = {}
+    battery_counts: dict[tuple[str, str], int] = {}
+
+    for sample in samples:
+        timestamp = parse_time(sample.collected_at_local, timezone)
+        power_bucket = quarter_hour_label(timestamp)
+        grid_power = sample.plant_grid_power_kw
+        power_values = {
+            "solar": sample.plant_pv_power_kw,
+            "load": sample.plant_load_power_kw,
+            "battery": sample.plant_battery_power_kw,
+            "inverter": sample.inverter_power_kw,
+            "grid_import": max(grid_power, 0.0) if grid_power is not None else None,
+            "grid_export": max(-grid_power, 0.0) if grid_power is not None else None,
+        }
+        for name, value in power_values.items():
+            if value is not None:
+                key = (power_bucket, name)
+                power_totals[key] = power_totals.get(key, 0.0) + value
+                power_counts[key] = power_counts.get(key, 0) + 1
+
+        battery_values = {
+            "available_energy_kwh": sample.inverter_battery_available_discharge_kwh,
+            "soc_percent": sample.plant_battery_soc_percent,
+        }
+        for name, value in battery_values.items():
+            if value is not None:
+                key = (power_bucket, name)
+                battery_totals[key] = battery_totals.get(key, 0.0) + value
+                battery_counts[key] = battery_counts.get(key, 0) + 1
+
+    bucket_labels = [quarter_hour_label(day_start + timedelta(minutes=15 * index)) for index in range(96)]
+    power_rows: list[dict[str, Any]] = []
+    battery_rows: list[dict[str, Any]] = []
+    for bucket in bucket_labels:
+        power_row: dict[str, Any] = {"time": bucket}
+        for name in ("solar", "load", "battery", "inverter", "grid_import", "grid_export"):
+            key = (bucket, name)
+            count = power_counts.get(key, 0)
+            power_row[name] = power_totals.get(key, 0.0) / count if count else None
+        power_rows.append(power_row)
+        battery_row: dict[str, Any] = {"time": bucket}
+        for name in ("available_energy_kwh", "soc_percent"):
+            key = (bucket, name)
+            count = battery_counts.get(key, 0)
+            battery_row[name] = battery_totals.get(key, 0.0) / count if count else None
+        battery_rows.append(battery_row)
+
+    latest_sample = samples[-1] if samples else None
+    latest_grid = latest_sample.plant_grid_power_kw if latest_sample is not None else None
+    latest = {
+        "solar": latest_sample.plant_pv_power_kw if latest_sample is not None else None,
+        "battery": latest_sample.plant_battery_power_kw if latest_sample is not None else None,
+        "inverter": latest_sample.inverter_power_kw if latest_sample is not None else None,
+        "inverter_today": latest_sample.inverter_pv_daily_kwh if latest_sample is not None else None,
+        "load": latest_sample.plant_load_power_kw if latest_sample is not None else None,
+        "grid_import": max(latest_grid, 0.0) if latest_grid is not None else None,
+        "grid_export": max(-latest_grid, 0.0) if latest_grid is not None else None,
+        "battery_available_energy_kwh": (
+            latest_sample.inverter_battery_available_discharge_kwh
+            if latest_sample is not None
+            else None
+        ),
+        "battery_soc_percent": (
+            (
+                latest_sample.plant_battery_soc_percent
+                if latest_sample.plant_battery_soc_percent is not None
+                else latest_sample.inverter_battery_soc_percent
+            )
+            if latest_sample is not None
+            else None
+        ),
+    }
+    return TelemetryData(
+        power_15m=pd.DataFrame(power_rows),
+        battery_15m=pd.DataFrame(battery_rows),
+        latest=latest,
+    )
+
+
+def average_daily_hourly_energy(daily_frames: list[pd.DataFrame]) -> pd.DataFrame:
+    hours = pd.DataFrame({"hour": [f"{index:02d}:00" for index in range(24)]})
+    if not daily_frames:
+        return hours
+
+    combined = pd.concat(daily_frames, ignore_index=True)
+    value_columns = [column for column in combined.columns if column not in {"date", "hour"}]
+    for column in value_columns:
+        combined[column] = pd.to_numeric(combined[column], errors="coerce")
+    averaged = cast(pd.DataFrame, combined.groupby("hour", as_index=False)[value_columns].mean())
+    return hours.merge(averaged, on="hour", how="left")
+
+
+def average_telemetry_by_interval(
+    samples: list[SigenStorModbusSample],
+    timezone: tzinfo,
+    power_interval_minutes: int,
+    actuals_to_forecast: dict[str, int],
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    if power_interval_minutes < 1:
+        raise ValueError("Power interval must be at least one minute")
+    array_power_names = tuple(
+        actual_column_name(panel_id) for panel_id in actuals_to_forecast.values()
+    )
+    power_names = (
+        "solar",
+        *array_power_names,
+        "load",
+        "battery",
+        "inverter",
+        "grid_import",
+        "grid_export",
+    )
+    battery_names = ("available_energy_kwh", "soc_percent")
+    daily_totals: dict[tuple[str, str, str], float] = {}
+    daily_counts: dict[tuple[str, str, str], int] = {}
+
+    for sample in samples:
+        timestamp = parse_time(sample.collected_at_local, timezone)
+        day = timestamp.date().isoformat()
+        power_bucket = interval_label(timestamp, power_interval_minutes)
+        grid_power = sample.plant_grid_power_kw
+        values: dict[str, float | None] = {
+            "solar": sample.plant_pv_power_kw,
+            "load": sample.plant_load_power_kw,
+            "battery": sample.plant_battery_power_kw,
+            "inverter": sample.inverter_power_kw,
+            "grid_import": max(grid_power, 0.0) if grid_power is not None else None,
+            "grid_export": max(-grid_power, 0.0) if grid_power is not None else None,
+            "available_energy_kwh": sample.inverter_battery_available_discharge_kwh,
+            "soc_percent": sample.plant_battery_soc_percent,
+        }
+        for pv_string, panel_id in actuals_to_forecast.items():
+            voltage, current = PV_STRING_READERS[pv_string](sample)
+            values[actual_column_name(panel_id)] = (
+                max(voltage * current, 0.0) / 1000
+                if voltage is not None and current is not None
+                else None
+            )
+        for name, value in values.items():
+            if value is None:
+                continue
+            key = (day, power_bucket, name)
+            daily_totals[key] = daily_totals.get(key, 0.0) + value
+            daily_counts[key] = daily_counts.get(key, 0) + 1
+
+    hourly_totals: dict[tuple[str, str], float] = {}
+    hourly_counts: dict[tuple[str, str], int] = {}
+    for daily_key, total in daily_totals.items():
+        _, hour, name = daily_key
+        key = (hour, name)
+        daily_average = total / daily_counts[daily_key]
+        hourly_totals[key] = hourly_totals.get(key, 0.0) + daily_average
+        hourly_counts[key] = hourly_counts.get(key, 0) + 1
+
+    def build_frame(names: tuple[str, ...], bucket_labels: list[str]) -> pd.DataFrame:
+        rows: list[dict[str, Any]] = []
+        for bucket in bucket_labels:
+            row: dict[str, Any] = {"time": bucket}
+            for name in names:
+                key = (bucket, name)
+                count = hourly_counts.get(key, 0)
+                row[name] = hourly_totals.get(key, 0.0) / count if count else None
+            rows.append(row)
+        return pd.DataFrame(rows)
+
+    power_buckets = [
+        minute_of_day_label(minute)
+        for minute in range(0, 24 * 60, power_interval_minutes)
+    ]
+    battery_buckets = power_buckets
+    return build_frame(power_names, power_buckets), build_frame(battery_names, battery_buckets)
+
+
+def load_device_information(database_path: str) -> list[dict[str, str]]:
+    engine = create_engine(f"sqlite:///{Path(database_path)}", future=True)
+    try:
+        with Session(engine) as session:
+            rows = session.scalars(
+                select(SigenStorDevice).order_by(SigenStorDevice.id.desc())
+            ).all()
+    finally:
+        engine.dispose()
+
+    latest_by_variable: dict[str, SigenStorDevice] = {}
+    for row in rows:
+        latest_by_variable.setdefault(row.variable, row)
+    return [
+        {"variable": row.variable, "value": row.value, "unit": row.unit}
+        for row in sorted(latest_by_variable.values(), key=lambda item: item.variable.casefold())
+    ]
+
+
+def load_forecast_for_day(session: Session, day_start: datetime) -> list[ForecastSolarSample]:
+    first_forecast = session.scalar(
+        select(ForecastSolarSample.collection_guid)
+        .where(ForecastSolarSample.collection_guid.is_not(None))
+        .where(func.substr(ForecastSolarSample.collected_at_local, 1, 10) == day_start.strftime("%Y-%m-%d"))
+        .order_by(ForecastSolarSample.collected_at_utc.asc())
+        .limit(1)
+    )
+    if not first_forecast:
+        return []
+    return list(session.scalars(
+        select(ForecastSolarSample).where(ForecastSolarSample.collection_guid == first_forecast)
+    ).all())
+
+
+def load_actual_hourly(
+    session: Session,
+    day_start: datetime,
+    *,
+    fill_missing: bool = True,
+) -> pd.DataFrame:
+    local_date = day_start.strftime("%Y-%m-%d")
+    local_timestamp = func.substr(SigenStorModbusSample.collected_at_local, 1, 19)
+    hour = func.strftime("%H", func.datetime(local_timestamp, "-1 second")).label("hour_key")
+    query = (
+        select(
+            hour,
+            func.sum(SigenStorModbusSample.plant_pv_total_kwh_period).label("solar"),
+            func.sum(SigenStorModbusSample.plant_load_total_kwh_period).label("load"),
+            func.sum(SigenStorModbusSample.plant_battery_charge_total_kwh_period).label("battery_charge"),
+            func.sum(SigenStorModbusSample.plant_battery_discharge_total_kwh_period).label("battery_discharge"),
+            func.sum(SigenStorModbusSample.plant_grid_import_total_kwh_period).label("grid_import"),
+            func.sum(SigenStorModbusSample.plant_grid_export_total_kwh_period).label("grid_export"),
+        )
+        .where(func.substr(SigenStorModbusSample.collected_at_local, 1, 10) == local_date)
+        .where(SigenStorModbusSample.collected_at_local > day_start.isoformat())
+        .group_by(hour)
+    )
+    grouped = pd.DataFrame(session.execute(query).mappings().all())
+    hours = pd.DataFrame({"hour": [f"{index:02d}:00" for index in range(24)]})
+    if grouped.empty:
+        missing_value = 0.0 if fill_missing else float("nan")
+        return hours.assign(
+            solar=missing_value,
+            load=missing_value,
+            battery=missing_value,
+            grid_import=missing_value,
+            grid_export=missing_value,
+        )
+
+    grouped["hour"] = grouped["hour_key"].map(lambda value: f"{int(value):02d}:00")
+    grouped["battery"] = pd.concat(
+        [grouped["battery_charge"], -grouped["battery_discharge"]], axis=1
+    ).sum(axis=1, min_count=1)
+    grouped = grouped[["hour", "solar", "load", "battery", "grid_import", "grid_export"]]
+    merged = hours.merge(grouped, on="hour", how="left")
+    return merged.fillna(0.0) if fill_missing else merged
+
+
+def load_actual_arrays_hourly(
+    session: Session,
+    day_start: datetime,
+    actuals_to_forecast: dict[str, int],
+    *,
+    fill_missing: bool = True,
+) -> pd.DataFrame:
+    timezone = day_start.tzinfo
+    if timezone is None:
+        raise ValueError("day_start must be timezone-aware")
+
+    hours = pd.DataFrame({"hour": [f"{index:02d}:00" for index in range(24)]})
+    actual_columns = {actual_column_name(panel_id) for panel_id in actuals_to_forecast.values()}
+    if not actuals_to_forecast:
+        return hours
+
+    samples = list(session.scalars(
+        select(SigenStorModbusSample)
+        .where(
+            func.substr(SigenStorModbusSample.collected_at_local, 1, 10)
+            == day_start.strftime("%Y-%m-%d")
+        )
+        .order_by(SigenStorModbusSample.collected_at_utc)
+    ).all())
+    totals: dict[tuple[str, str], float] = {}
+    previous_timestamp: datetime | None = None
+    previous_power: dict[str, float | None] = {}
+
+    for sample in samples:
+        timestamp = parse_time(sample.collected_at_local, timezone)
+        current_power: dict[str, float | None] = {}
+        for pv_string in actuals_to_forecast:
+            voltage, current = PV_STRING_READERS[pv_string](sample)
+            current_power[pv_string] = (
+                max(voltage * current, 0.0) / 1000
+                if voltage is not None and current is not None
+                else None
+            )
+
+        if previous_timestamp is not None:
+            duration_hours = (timestamp - previous_timestamp).total_seconds() / 3600
+            hour = format_hour(timestamp - timedelta(microseconds=1), day_start)
+            if hour is not None and duration_hours > 0:
+                for pv_string, panel_id in actuals_to_forecast.items():
+                    before = previous_power.get(pv_string)
+                    after = current_power[pv_string]
+                    if before is not None and after is not None:
+                        column = actual_column_name(panel_id)
+                        totals[(hour, column)] = totals.get((hour, column), 0.0) + (
+                            (before + after) / 2 * duration_hours
+                        )
+
+        previous_timestamp = timestamp
+        previous_power = current_power
+
+    for column in actual_columns:
+        missing_value = 0.0 if fill_missing else float("nan")
+        hours[column] = dataframe_column(hours, "hour").map(
+            lambda hour, column=column: totals.get((hour, column), missing_value)
+        )
+    return hours
+
+
+def scale_forecast_to_elapsed_time(
+    forecast: pd.DataFrame,
+    current_time: datetime,
+) -> pd.DataFrame:
+    elapsed_hour_fraction = (
+        current_time.minute * 60
+        + current_time.second
+        + current_time.microsecond / 1_000_000
+    ) / 3_600
+
+    def hour_weight(hour_label: object) -> float:
+        hour = int(str(hour_label).split(":", maxsplit=1)[0])
+        if hour < current_time.hour:
+            return 1.0
+        if hour == current_time.hour:
+            return elapsed_hour_fraction
+        return 0.0
+
+    scaled = forecast.copy()
+    weights = dataframe_column(scaled, "hour").map(hour_weight)
+    for column in scaled.columns:
+        if column.startswith("forecast_"):
+            scaled[column] = pd.to_numeric(
+                dataframe_column(scaled, column),
+                errors="coerce",
+            ) * weights
+    return scaled
+
+
+def aggregate_forecast(
+    rows: list[ForecastSolarSample],
+    day_start: datetime,
+    forecast_arrays: tuple[SolarArrayConfig, ...],
+    *,
+    fill_missing: bool = True,
+) -> pd.DataFrame:
+    timezone = day_start.tzinfo
+    if timezone is None:
+        raise ValueError("day_start must be timezone-aware")
+
+    points: list[dict[str, object]] = []
+    for row in rows:
+        try:
+            timestamp = parse_time(row.forecast_time, timezone)
+        except (TypeError, ValueError):
+            continue
+        for array in forecast_arrays:
+            watt_hours = FORECAST_WATT_HOURS_READERS[array.panel_id](row)
+            if watt_hours is not None:
+                points.append(
+                    {
+                        "timestamp": timestamp,
+                        "panel_id": array.panel_id,
+                        "watt_hours": watt_hours,
+                    }
+                )
+
+    hours = pd.DataFrame({"hour": [f"{index:02d}:00" for index in range(24)]})
+    forecast_columns = [forecast_column_name(array.panel_id) for array in forecast_arrays]
+    if not points:
+        missing_value = 0.0 if fill_missing else float("nan")
+        return hours.assign(
+            **{column: missing_value for column in [*forecast_columns, "forecast_total"]}
+        )
+
+    frame = pd.DataFrame(points).sort_values(["panel_id", "timestamp"])
+    available_panels = set(dataframe_column(frame, "panel_id"))
+    frame["forecast_date"] = frame["timestamp"].dt.date
+    frame["energy_kwh"] = (
+        frame.groupby(["panel_id", "forecast_date"])["watt_hours"]
+        .diff()
+        .fillna(frame["watt_hours"])
+        .clip(lower=0)
+        .div(1000)
+    )
+    frame["hour"] = frame["timestamp"].map(
+        lambda value: format_hour(value - timedelta(microseconds=1), day_start)
+    )
+    frame = frame.dropna(subset=["hour"])
+    grouped = frame.pivot_table(index="hour", columns="panel_id", values="energy_kwh", aggfunc="sum", fill_value=0).reset_index()
+    grouped = grouped.rename(columns={
+        array.panel_id: forecast_column_name(array.panel_id) for array in forecast_arrays
+    })
+    for array in forecast_arrays:
+        column = forecast_column_name(array.panel_id)
+        if column not in grouped:
+            grouped[column] = float("nan")
+    result = hours.merge(grouped[["hour", *forecast_columns]], on="hour", how="left")
+    for array in forecast_arrays:
+        column = forecast_column_name(array.panel_id)
+        if array.panel_id in available_panels or fill_missing:
+            result[column] = dataframe_column(result, column).fillna(0.0)
+    result["forecast_total"] = result[forecast_columns].sum(axis=1, min_count=1)
+    return result
+
+
+def parse_time(value: str, timezone: tzinfo) -> datetime:
+    parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone)
+    return parsed.astimezone(timezone)
+
+
+def hour_index(value: datetime, day_start: datetime) -> int | None:
+    index = int((value - day_start).total_seconds() // 3600)
+    return index if 0 <= index < 24 else None
+
+
+def format_hour(value: datetime, day_start: datetime) -> str | None:
+    index = hour_index(value, day_start)
+    return f"{index:02d}:00" if index is not None else None
+
+
+def actual_column_name(panel_id: int) -> str:
+    return f"actual_panel_{panel_id}"
+
+
+def forecast_column_name(panel_id: int) -> str:
+    return f"forecast_panel_{panel_id}"
+
+
+def interval_label(value: datetime, interval_minutes: int) -> str:
+    minute_of_day = value.hour * 60 + value.minute
+    bucket_start = minute_of_day // interval_minutes * interval_minutes
+    return minute_of_day_label(bucket_start)
+
+
+def minute_of_day_label(minute_of_day: int) -> str:
+    hour, minute = divmod(minute_of_day, 60)
+    return f"{hour:02d}:{minute:02d}"
+
+
+def quarter_hour_label(value: datetime) -> str:
+    minute = value.minute // 15 * 15
+    return f"{value.hour:02d}:{minute:02d}"
+
+
+def battery_status_text(latest: dict[str, float | None]) -> str:
+    energy = format_dashboard_number(latest["battery_available_energy_kwh"])
+    soc = format_dashboard_number(latest["battery_soc_percent"])
+    return f"Battery: {energy} kWh available, {soc}% SoC"
+
+
+def energy_summary_rows(data: pd.DataFrame) -> list[dict[str, str]]:
+    value_columns = (
+        "solar_actual",
+        "solar_forecast",
+        "load",
+        "grid_import",
+        "grid_export",
+    )
+    return [
+        {
+            "period": str(row["period"]),
+            **{
+                column: format_dashboard_number(row[column])
+                for column in value_columns
+            },
+        }
+        for row in data.to_dict(orient="records")
+    ]
+
+
+def summary_rows(
+    data: pd.DataFrame,
+    latest: dict[str, float | None],
+) -> list[dict[str, str]]:
+    today = {
+        "solar": float(dataframe_column(data, "solar").sum()),
+        "battery": float(dataframe_column(data, "battery").sum()),
+        "inverter": latest["inverter_today"],
+        "load": float(dataframe_column(data, "load").sum()),
+        "grid_import": float(dataframe_column(data, "grid_import").sum()),
+        "grid_export": float(dataframe_column(data, "grid_export").sum()),
+    }
+    forecast = {
+        "solar": float(dataframe_column(data, "forecast_total").sum()),
+        "battery": None,
+        "inverter": None,
+        "load": None,
+        "grid_import": None,
+        "grid_export": None,
+    }
+    return [
+        {
+            "metric": label,
+            "latest": format_dashboard_number(latest[key]),
+            "today": format_dashboard_number(today[key]),
+            "forecast": format_dashboard_number(forecast[key]),
+        }
+        for label, key in SUMMARY_LATEST_KEYS.items()
+    ]
+
+
+def format_dashboard_number(value: float | None) -> str:
+    if value is None or pd.isna(value):
+        return "—"
+    rounded = round(float(value), 1)
+    return f"{0.0 if rounded == 0 else rounded:.1f}"
+
+
+def chart_values(values: pd.Series) -> list[float | None]:
+    rounded_values: list[float | None] = []
+    for value in values:
+        if pd.isna(value):
+            rounded_values.append(None)
+            continue
+        rounded = round(float(value), 1)
+        rounded_values.append(0.0 if rounded == 0 else rounded)
+    return rounded_values
+
+
+def dataframe_column(frame: pd.DataFrame, name: str) -> pd.Series:
+    return cast(pd.Series, frame[name])

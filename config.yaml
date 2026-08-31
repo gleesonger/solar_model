@@ -7,6 +7,7 @@ database:
   path: solar.db
 
 dashboard:
+  host: 0.0.0.0
   port: 8090
   actuals_to_forecast:
     pv1: 1

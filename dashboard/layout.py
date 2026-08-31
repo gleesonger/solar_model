@@ -27,7 +27,11 @@ class DashboardLayout:
         self.elements = DashboardElements()
         self.timezone = ZoneInfo(config.timezone)
         today = datetime.now(self.timezone).date()
-        self.state = DashboardState(hourly_start=today, hourly_end=today)
+        self.state = DashboardState(
+            hourly_start=today,
+            hourly_end=today,
+            historical_as_of=today,
+        )
 
         self.recent_tab = RecentTab(config, self.state, self.elements, live_collector)
         self.hourly_tab = HourlyTab(config, self.state, self.elements)
@@ -50,11 +54,12 @@ class DashboardLayout:
             ).classes("solar-tabs w-full") as tabs:
                 recent = ui.tab("Recent")
                 hourly = ui.tab("Data by Hour")
-                historical = ui.tab("Historical")
+                historical = ui.tab("Analysis")
                 system_info = ui.tab("System Info")
             selected = {
                 "Recent": recent,
                 "Data by Hour": hourly,
+                "Analysis": historical,
                 "Historical": historical,
                 "System Info": system_info,
             }.get(self.state.active_tab, recent)

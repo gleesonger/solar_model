@@ -9,6 +9,7 @@ from nicegui.elements.echart import EChart
 
 from config import SolarArrayConfig
 
+from .chart_display import ChartDataDisplay
 from .data import actual_column_name, chart_values, dataframe_column, forecast_column_name
 from .models import HistoricalCharts, HourlyCharts, PANEL_COLORS
 
@@ -71,33 +72,109 @@ def render_hourly_charts(
 
 def render_historical_charts(
     data: pd.DataFrame,
+    power_data: pd.DataFrame,
+    battery_data: pd.DataFrame,
     frequency: str,
     forecast_arrays: tuple[SolarArrayConfig, ...],
     actuals_to_forecast: dict[str, int],
+    power_interval_minutes: int,
+    zoom_start: float,
+    zoom_end: float,
+    on_time_zoom: Callable[[Any], None],
 ) -> HistoricalCharts:
-    energy_title = ui.label(
-        f"Energy by {frequency} (kWh)"
-    ).classes("text-lg font-semibold mt-4")
-    energy_chart = ui.echart(
-        energy_chart_options(data, "period")
-    ).classes("w-full h-96")
-    array_energy_title = ui.label(
-        f"Solar energy by array and {frequency} (kWh)"
-    ).classes("text-lg font-semibold mt-4")
-    array_energy_chart = ui.echart(
-        array_energy_chart_options(
-            data,
-            "period",
+    energy_display = ChartDataDisplay(
+        dataframe=data,
+        title=f"Energy by {frequency} (kWh)",
+        hint="Energy totals for each selected time group.",
+        render_chart=lambda: ui.echart(energy_chart_options(data, "period")).classes("w-full h-96"),
+    )
+    power_display = ChartDataDisplay(
+        dataframe=power_data,
+        title=f"Average power by {time_group_label(power_interval_minutes)} (kW)",
+        hint=(
+            "Pinch with two fingers (or use the mouse wheel or range slider) to zoom. "
+            "Detail changes automatically from hourly to 15-minute to one-minute data."
+        ),
+        render_chart=lambda: _render_historical_power_chart(
+            power_data, forecast_arrays, actuals_to_forecast, zoom_start, zoom_end, on_time_zoom
+        ),
+    )
+    battery_display = ChartDataDisplay(
+        dataframe=battery_data,
+        title=(
+            "Average battery energy and state of charge by "
+            f"{time_group_label(power_interval_minutes)}"
+        ),
+        hint="Battery energy is in kWh; state of charge is a percentage.",
+        render_chart=lambda: _render_historical_battery_chart(
+            battery_data, zoom_start, zoom_end, on_time_zoom
+        ),
+    )
+    array_energy_display = ChartDataDisplay(
+        dataframe=data,
+        title=f"Solar energy by array and {frequency} (kWh)",
+        hint="Actual and forecast solar energy for each configured array.",
+        render_chart=lambda: ui.echart(
+            array_energy_chart_options(data, "period", forecast_arrays, actuals_to_forecast)
+        ).classes("w-full h-96"),
+    )
+    money_display = ChartDataDisplay(
+        dataframe=money_dataframe(data),
+        title=f"Costs by {frequency}",
+        hint="Stored tariff costs and revenue for each selected time group.",
+        render_chart=lambda: ui.echart(money_chart_options(data, "period")).classes("w-full h-96"),
+    )
+    return HistoricalCharts(
+        energy_display=energy_display,
+        energy_title=energy_display.title,
+        energy=energy_display.chart,
+        power_display=power_display,
+        power_title=power_display.title,
+        power=power_display.chart,
+        battery_display=battery_display,
+        battery_title=battery_display.title,
+        battery=battery_display.chart,
+        array_energy_display=array_energy_display,
+        array_energy_title=array_energy_display.title,
+        array_energy=array_energy_display.chart,
+        money_display=money_display,
+        money_title=money_display.title,
+        money=money_display.chart,
+    )
+
+
+def _render_historical_power_chart(
+    power_data: pd.DataFrame,
+    forecast_arrays: tuple[SolarArrayConfig, ...],
+    actuals_to_forecast: dict[str, int],
+    zoom_start: float,
+    zoom_end: float,
+    on_time_zoom: Callable[[Any], None],
+) -> EChart:
+    chart = ui.echart(
+        power_chart_options(
+            power_data,
             forecast_arrays,
             actuals_to_forecast,
+            zoom_start,
+            zoom_end,
         )
     ).classes("w-full h-96")
-    return HistoricalCharts(
-        energy_title=energy_title,
-        energy=energy_chart,
-        array_energy_title=array_energy_title,
-        array_energy=array_energy_chart,
-    )
+    bind_time_zoom(chart, on_time_zoom)
+    return chart
+
+
+def _render_historical_battery_chart(
+    battery_data: pd.DataFrame,
+    zoom_start: float,
+    zoom_end: float,
+    on_time_zoom: Callable[[Any], None],
+) -> EChart:
+    chart = ui.echart(
+        battery_chart_options(battery_data, zoom_start, zoom_end)
+    ).classes("w-full h-96")
+    bind_time_zoom(chart, on_time_zoom)
+    return chart
 
 
 def render_energy_chart(data: pd.DataFrame, category_column: str, title: str) -> EChart:
@@ -125,6 +202,41 @@ def energy_chart_options(data: pd.DataFrame, category_column: str) -> dict[str, 
             {"name": "Load", "type": "bar", "data": chart_values(dataframe_column(data, "load"))},
             {"name": "Grid Imported", "type": "bar", "data": chart_values(dataframe_column(data, "grid_import"))},
             {"name": "Grid Exported", "type": "bar", "data": chart_values(dataframe_column(data, "grid_export"))},
+        ],
+    }
+
+
+MONEY_SERIES = (
+    ("Import Cost", "grid_import_cost"),
+    ("Export Revenue", "grid_export_revenue"),
+    ("Net Cost", "net_cost"),
+    ("Net Cost if No Solar", "no_solar_battery_import_cost"),
+)
+
+
+def money_dataframe(data: pd.DataFrame) -> pd.DataFrame:
+    columns = ["period", *[column for _, column in MONEY_SERIES]]
+    return data.reindex(columns=columns).copy()
+
+
+def money_chart_options(data: pd.DataFrame, category_column: str) -> dict[str, Any]:
+    selected = {
+        "Import Cost": False,
+        "Export Revenue": False,
+        "Net Cost": True,
+        "Net Cost if No Solar": True,
+    }
+    return {
+        "tooltip": {"trigger": "axis"},
+        "legend": {
+            "data": [label for label, _ in MONEY_SERIES],
+            "selected": selected,
+        },
+        "xAxis": {"type": "category", "data": dataframe_column(data, category_column).tolist()},
+        "yAxis": {"type": "value", "name": "Currency"},
+        "series": [
+            {"name": label, "type": "bar", "data": chart_values(dataframe_column(data, column))}
+            for label, column in MONEY_SERIES
         ],
     }
 
@@ -254,8 +366,10 @@ def power_chart_options(
 
 def battery_chart_options(
     battery_data: pd.DataFrame,
+    zoom_start: float | None = None,
+    zoom_end: float | None = None,
 ) -> dict[str, Any]:
-    return {
+    options: dict[str, Any] = {
         "tooltip": {"trigger": "axis"},
         "legend": {"data": ["Available energy", "State of charge"]},
         "grid": time_chart_grid(),
@@ -286,6 +400,9 @@ def battery_chart_options(
             },
         ],
     }
+    if zoom_start is not None and zoom_end is not None:
+        options["dataZoom"] = time_data_zoom_options(zoom_start, zoom_end)
+    return options
 
 
 def time_chart_grid() -> dict[str, Any]:

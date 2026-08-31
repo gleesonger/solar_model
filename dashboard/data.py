@@ -499,10 +499,13 @@ def load_historical_energy(
     frequency: str,
     forecast_arrays: tuple[SolarArrayConfig, ...],
     actuals_to_forecast: dict[str, int],
+    *,
+    start_at: datetime | None = None,
+    end_at: datetime | None = None,
 ) -> pd.DataFrame:
     if end_date < start_date:
         raise ValueError("End date must not be before first date")
-    if frequency not in {"day", "week", "month", "season", "year"}:
+    if frequency not in {"minute", "hour", "day", "week", "month", "season", "year"}:
         raise ValueError(f"Unsupported historical frequency: {frequency}")
 
     timezone = ZoneInfo(timezone_name)
@@ -524,6 +527,36 @@ def load_historical_energy(
     value_columns = [column for column in combined.columns if column not in {"date", "hour"}]
     for column in value_columns:
         combined[column] = pd.to_numeric(combined[column], errors="coerce")
+    if start_at is not None or end_at is not None:
+        timestamps = pd.to_datetime(
+            dataframe_column(combined, "date") + " " + dataframe_column(combined, "hour")
+        )
+        if start_at is not None:
+            combined = combined.loc[timestamps >= start_at.replace(tzinfo=None)]
+            timestamps = timestamps.loc[combined.index]
+        if end_at is not None:
+            combined = combined.loc[timestamps <= end_at.replace(tzinfo=None)]
+    if frequency == "hour":
+        combined["bucket_start"] = (
+            dataframe_column(combined, "date") + " " + dataframe_column(combined, "hour")
+        )
+        grouped = cast(
+            pd.DataFrame,
+            combined.groupby("bucket_start", as_index=False)[value_columns].sum(min_count=1),
+        )
+        grouped["period"] = dataframe_column(grouped, "bucket_start")
+        return cast(pd.DataFrame, grouped[["period", *value_columns]])
+    if frequency == "minute":
+        return load_historical_minute_energy(
+            database_path,
+            timezone_name,
+            start_date,
+            end_date,
+            forecast_arrays,
+            actuals_to_forecast,
+            start_at=start_at,
+            end_at=end_at,
+        )
     combined["bucket_start"] = dataframe_column(combined, "date").map(
         lambda value: historical_bucket_start(date.fromisoformat(str(value)), frequency)
     )
@@ -535,6 +568,81 @@ def load_historical_energy(
         lambda value: historical_bucket_label(value, frequency)
     )
     return cast(pd.DataFrame, grouped[["period", *value_columns]])
+
+
+def load_historical_minute_energy(
+    database_path: str,
+    timezone_name: str,
+    start_date: date,
+    end_date: date,
+    forecast_arrays: tuple[SolarArrayConfig, ...],
+    actuals_to_forecast: dict[str, int],
+    *,
+    start_at: datetime | None = None,
+    end_at: datetime | None = None,
+) -> pd.DataFrame:
+    """Aggregate stored per-sample energy and tariff values into calendar minutes."""
+    timezone = ZoneInfo(timezone_name)
+    engine = create_engine(f"sqlite:///{Path(database_path)}", future=True)
+    try:
+        with Session(engine) as session:
+            samples = list(session.scalars(
+                select(SigenStorModbusSample)
+                .where(func.substr(SigenStorModbusSample.collected_at_local, 1, 10) >= start_date.isoformat())
+                .where(func.substr(SigenStorModbusSample.collected_at_local, 1, 10) <= end_date.isoformat())
+                .order_by(SigenStorModbusSample.collected_at_utc)
+            ).all())
+    finally:
+        engine.dispose()
+
+    array_columns = [
+        *(actual_column_name(panel_id) for panel_id in actuals_to_forecast.values()),
+        *(forecast_column_name(array.panel_id) for array in forecast_arrays),
+    ]
+    value_columns = [
+        "solar",
+        "forecast_total",
+        "load",
+        "battery",
+        "grid_import",
+        "grid_export",
+        "grid_import_cost",
+        "grid_export_revenue",
+        "net_cost",
+        "no_solar_battery_import_cost",
+        *array_columns,
+    ]
+    rows: list[dict[str, Any]] = []
+    for sample in samples:
+        timestamp = parse_time(sample.collected_at_local, timezone).replace(second=0, microsecond=0)
+        if start_at is not None and timestamp < start_at.replace(second=0, microsecond=0):
+            continue
+        if end_at is not None and timestamp > end_at.replace(second=0, microsecond=0):
+            continue
+        rows.append({
+            "period": timestamp.strftime("%Y-%m-%d %H:%M"),
+            "solar": sample.plant_pv_total_kwh_period,
+            "forecast_total": None,
+            "load": sample.plant_load_total_kwh_period,
+            "battery": (
+                (sample.plant_battery_charge_total_kwh_period or 0.0)
+                - (sample.plant_battery_discharge_total_kwh_period or 0.0)
+            ),
+            "grid_import": sample.plant_grid_import_total_kwh_period,
+            "grid_export": sample.plant_grid_export_total_kwh_period,
+            "grid_import_cost": sample.grid_import_cost_period,
+            "grid_export_revenue": sample.grid_export_revenue_period,
+            "net_cost": sample.net_cost_period,
+            "no_solar_battery_import_cost": sample.no_solar_battery_import_cost_period,
+            **{column: None for column in array_columns},
+        })
+    if not rows:
+        return pd.DataFrame(columns=["period", *value_columns])
+    frame = pd.DataFrame(rows)
+    return cast(
+        pd.DataFrame,
+        frame.groupby("period", as_index=False)[value_columns].sum(min_count=1),
+    )
 
 
 def load_daily_energy_frames(
@@ -587,6 +695,10 @@ def load_daily_energy_frames(
                 battery=float("nan"),
                 grid_import=float("nan"),
                 grid_export=float("nan"),
+                grid_import_cost=float("nan"),
+                grid_export_revenue=float("nan"),
+                net_cost=float("nan"),
+                no_solar_battery_import_cost=float("nan"),
             )
             actual_by_array = hours.assign(
                 **{column: float("nan") for column in actual_columns}
@@ -610,6 +722,10 @@ def load_daily_energy_frames(
 def historical_start_date(end_date: date, count: int, unit: str) -> date:
     if count < 1:
         raise ValueError("Historical period must be a positive whole number")
+    if unit == "minutes":
+        return end_date - timedelta(days=(count - 1) // (24 * 60))
+    if unit == "hours":
+        return end_date - timedelta(days=(count - 1) // 24)
     if unit == "days":
         return end_date - timedelta(days=count - 1)
     if unit == "weeks":
@@ -948,6 +1064,12 @@ def load_actual_hourly(
             func.sum(SigenStorModbusSample.plant_battery_discharge_total_kwh_period).label("battery_discharge"),
             func.sum(SigenStorModbusSample.plant_grid_import_total_kwh_period).label("grid_import"),
             func.sum(SigenStorModbusSample.plant_grid_export_total_kwh_period).label("grid_export"),
+            func.sum(SigenStorModbusSample.grid_import_cost_period).label("grid_import_cost"),
+            func.sum(SigenStorModbusSample.grid_export_revenue_period).label("grid_export_revenue"),
+            func.sum(SigenStorModbusSample.net_cost_period).label("net_cost"),
+            func.sum(
+                SigenStorModbusSample.no_solar_battery_import_cost_period
+            ).label("no_solar_battery_import_cost"),
         )
         .where(func.substr(SigenStorModbusSample.collected_at_local, 1, 10) == local_date)
         .where(SigenStorModbusSample.collected_at_local > day_start.isoformat())
@@ -963,13 +1085,28 @@ def load_actual_hourly(
             battery=missing_value,
             grid_import=missing_value,
             grid_export=missing_value,
+            grid_import_cost=missing_value,
+            grid_export_revenue=missing_value,
+            net_cost=missing_value,
+            no_solar_battery_import_cost=missing_value,
         )
 
     grouped["hour"] = grouped["hour_key"].map(lambda value: f"{int(value):02d}:00")
     grouped["battery"] = pd.concat(
         [grouped["battery_charge"], -grouped["battery_discharge"]], axis=1
     ).sum(axis=1, min_count=1)
-    grouped = grouped[["hour", "solar", "load", "battery", "grid_import", "grid_export"]]
+    grouped = grouped[[
+        "hour",
+        "solar",
+        "load",
+        "battery",
+        "grid_import",
+        "grid_export",
+        "grid_import_cost",
+        "grid_export_revenue",
+        "net_cost",
+        "no_solar_battery_import_cost",
+    ]]
     merged = hours.merge(grouped, on="hour", how="left")
     return merged.fillna(0.0) if fill_missing else merged
 

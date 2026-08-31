@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date
+from typing import Any
 
 import pandas as pd
 from nicegui.elements.echart import EChart
@@ -60,10 +61,21 @@ class HourlyCharts:
 
 @dataclass(frozen=True)
 class HistoricalCharts:
+    energy_display: Any
     energy_title: Label
     energy: EChart
+    power_display: Any
+    power_title: Label
+    power: EChart
+    battery_display: Any
+    battery_title: Label
+    battery: EChart
+    array_energy_display: Any
     array_energy_title: Label
     array_energy: EChart
+    money_display: Any
+    money_title: Label
+    money: EChart
 
 
 @dataclass
@@ -86,12 +98,16 @@ class DashboardElements:
 class DashboardState:
     hourly_start: date
     hourly_end: date
+    historical_as_of: date
     hourly_period: str = "Today"
     hourly_dates_valid: bool = True
     power_interval_minutes: int = 15
     time_zoom_start: float = 0.0
     time_zoom_end: float = 100.0
-    historical_count: int = 7
-    historical_unit: str = "days"
-    historical_frequency: str = "day"
+    historical_count: int = 24
+    historical_unit: str = "hours"
+    historical_frequency: str = "hour"
+    historical_power_interval_minutes: int = 60
+    historical_time_zoom_start: float = 0.0
+    historical_time_zoom_end: float = 100.0
     active_tab: str = "Recent"

@@ -8,18 +8,24 @@ from nicegui.elements.column import Column
 
 from .historical import HistoricalTab
 from .hourly import HourlyTab
+from .live import LivePowerCollector
 from .models import DashboardContext, DashboardElements, DashboardState
 from .recent import RecentTab
 from .system_info import SystemInfoTab
 
 
 class DashboardLayout:
-    def __init__(self, context: DashboardContext, state: DashboardState) -> None:
+    def __init__(
+        self,
+        context: DashboardContext,
+        state: DashboardState,
+        live_collector: LivePowerCollector,
+    ) -> None:
         self.context = context
         self.state = state
         self.elements = DashboardElements()
         self.timezone = ZoneInfo(context.timezone_name)
-        self.recent_tab = RecentTab(context, state, self.elements)
+        self.recent_tab = RecentTab(context, state, self.elements, live_collector)
         self.hourly_tab = HourlyTab(context, state, self.elements)
         self.historical_tab = HistoricalTab(context, state, self.elements)
         self.system_info_tab = SystemInfoTab(context, self.elements)

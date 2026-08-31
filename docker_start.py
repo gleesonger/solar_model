@@ -17,7 +17,6 @@ def main() -> int:
     database.close()
     processes = [
         subprocess.Popen([sys.executable, str(app_directory / "main_data_collection.py")]),
-        subprocess.Popen([sys.executable, str(app_directory / "main_live_collection.py")]),
         subprocess.Popen([sys.executable, str(app_directory / "main_dashboard.py")]),
     ]
     stopping = False

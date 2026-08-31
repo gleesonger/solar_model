@@ -8,13 +8,7 @@ python main_data_collection.py
 
 `main_data_collection.py` synchronizes to the next wall-clock minute, runs Modbus first every minute, and runs Forecast.Solar at its configured interval when due. A failed interval is logged and skipped. The collector modules expose one-pass functions and are not standalone schedulers.
 
-The lightweight live-power collector reads only the five Modbus power values used by the dashboard's `Latest (kW)` column:
-
-```powershell
-python main_live_collection.py
-```
-
-It defaults to a five-second interval and atomically replaces the single row in `sigenstor_live` after each successful read.
+The dashboard runs a lightweight background collector for the `Latest (kW)` column. It reads the configured plant power values and mapped PV-string power values at the live interval, retaining only the newest successful result in memory.
 
 Set `actuals.scheduler.interval_seconds` in `config.yaml` to change the scheduler interval; it defaults to `60` seconds.
 Set `live.scheduler.interval_seconds` to change the live-power interval; it defaults to `5` seconds.
@@ -58,7 +52,7 @@ Use `input` or `holding` for `kind`. Addresses are passed to pymodbus as zero-ba
 
 The requested device defaults are Modbus TCP host `192.168.1.130` and port `502`. The supplied maps use the Sigenergy plant unit ID `247` and inverter unit ID `1`; set explicit `device_id` values in the register maps when your topology differs. Set `database.path` in `config.yaml` to change the SQLite path.
 
-The database uses explicit SQLAlchemy models. `sigenstor_samples` has one row per Modbus electrical sample with one column per metric, `sigenstor_live` contains only the latest live power sample, and `sigenstor_devices` records valid device-information values only when a variable changes. The inverter model is matched against the official SigenStor model catalogue to add its nameplate maximum PV input power. `forecast_solar_samples` has one row per forecast timestamp with columns for `panel_1` through `panel_4`. Each forecast scan creates a collection GUID; every panel in that scan uses the same GUID, and the GUID plus forecast timestamp identifies the shared wide row. Modbus column names include their units, for example `plant_pv_power_kw` and `inverter_battery_soc_percent`; cumulative metrics also have a `_period` column. All tables store UTC/local timestamps.
+The database uses explicit SQLAlchemy models. `sigenstor_samples` has one row per Modbus electrical sample with one column per metric, and `sigenstor_devices` records valid device-information values only when a variable changes. The inverter model is matched against the official SigenStor model catalogue to add its nameplate maximum PV input power. `forecast_solar_samples` has one row per forecast timestamp with columns for `panel_1` through `panel_4`. Each forecast scan creates a collection GUID; every panel in that scan uses the same GUID, and the GUID plus forecast timestamp identifies the shared wide row. Modbus column names include their units, for example `plant_pv_power_kw` and `inverter_battery_soc_percent`; cumulative metrics also have a `_period` column. All tables store UTC/local timestamps.
 
 ## Dashboard
 
@@ -68,6 +62,6 @@ Install the requirements and start the NiceGUI dashboard with:
 python main_dashboard.py
 ```
 
-It listens on `dashboard.port` from `config.yaml`; `DASHBOARD_PORT` can override the configured value. The dashboard updates the `Latest (kW)` cells in place from `sigenstor_live` every five seconds. The remaining current-day, forecast, chart, and device data stays on the minute refresh; table rows and chart options are updated in place without recreating the tabs or their contents. Mapped PV-string voltage and current readings provide the per-panel actual energy and power values. The battery chart uses the inverter's Modbus reading for available discharge energy; battery energy is not calculated from state of charge.
+It listens on `dashboard.port` from `config.yaml`. The dashboard updates the `Latest (kW)` cells in place from its background Modbus collector every five seconds. The cells remain blank until its first successful reading. The remaining current-day, forecast, chart, and device data stays on the minute refresh; table rows and chart options are updated in place without recreating the tabs or their contents. Mapped PV-string voltage and current readings provide the per-panel actual energy and power values. The battery chart uses the inverter's Modbus reading for available discharge energy; battery energy is not calculated from state of charge.
 
-The Docker image starts the minute collector, live collector, and dashboard. Publish port `8080` when running the container, for example `docker run -p 8080:8080 -v solar-config:/config solar-model`.
+The Docker image starts the minute collector and dashboard. Publish the configured dashboard port when running the container, for example `docker run -p 8090:8090 -v solar-config:/config solar-model`.

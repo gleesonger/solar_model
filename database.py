@@ -5,7 +5,7 @@ import re
 from pathlib import Path
 from typing import Any, cast
 
-from sqlalchemy import Float, Index, Integer, String, Table, create_engine, delete, inspect, select
+from sqlalchemy import Float, Index, Integer, String, Table, create_engine, inspect, select
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
 
@@ -81,19 +81,6 @@ class SigenStorModbusSample(Base):
     inverter_phase_a_current_amps: Mapped[float | None] = mapped_column(Float)
     inverter_phase_b_current_amps: Mapped[float | None] = mapped_column(Float)
     inverter_phase_c_current_amps: Mapped[float | None] = mapped_column(Float)
-
-
-class SigenStorLive(Base):
-    __tablename__ = "sigenstor_live"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    collected_at_utc: Mapped[str] = mapped_column(String, nullable=False)
-    collected_at_local: Mapped[str] = mapped_column(String, nullable=False)
-    plant_grid_power_kw: Mapped[float | None] = mapped_column(Float)
-    plant_pv_power_kw: Mapped[float | None] = mapped_column(Float)
-    plant_battery_power_kw: Mapped[float | None] = mapped_column(Float)
-    plant_load_power_kw: Mapped[float | None] = mapped_column(Float)
-    inverter_power_kw: Mapped[float | None] = mapped_column(Float)
 
 
 class SigenStorDevice(Base):
@@ -210,25 +197,6 @@ class SolarDatabase:
             session.add(SigenStorModbusSample(**row))
         previous.update({column_name(metric, unit): value for metric, (value, unit, _) in values.items()})
 
-    def save_live_sample(
-        self,
-        values: dict[str, tuple[float, str, bool]],
-        collected: tuple[str, str],
-    ) -> None:
-        row: dict[str, Any] = {
-            "id": 1,
-            "collected_at_utc": collected[0],
-            "collected_at_local": collected[1],
-        }
-        for metric, (value, unit, _) in values.items():
-            name = column_name(metric, unit)
-            if name not in SigenStorLive.__table__.c:
-                raise ValueError(f"Live Modbus metric {metric!r} is not declared in SigenStorLive")
-            row[name] = value
-        with self.sessions.begin() as session:
-            session.execute(delete(SigenStorLive))
-            session.add(SigenStorLive(**row))
-
     def save_device_info(
         self,
         values: dict[str, tuple[float | str, str, bool]],
@@ -280,7 +248,6 @@ def open_database(path: str | Path) -> SolarDatabase:
     engine = create_engine(f"sqlite:///{Path(path)}", future=True)
     Base.metadata.create_all(engine)
     _add_missing_columns(engine, SigenStorModbusSample)
-    _add_missing_columns(engine, SigenStorLive)
     _add_missing_columns(engine, SigenStorDevice)
     _add_missing_columns(engine, ForecastSolarSample)
     _drop_columns(engine, SigenStorModbusSample, ("raw_registers_json",))

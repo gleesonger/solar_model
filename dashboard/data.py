@@ -10,16 +10,14 @@ from zoneinfo import ZoneInfo
 
 import pandas as pd
 from sqlalchemy import create_engine, func, select
-from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
 from config import SolarArrayConfig
-from database import ForecastSolarSample, SigenStorDevice, SigenStorLive, SigenStorModbusSample
+from database import ForecastSolarSample, SigenStorDevice, SigenStorModbusSample
 from .models import (
     HOURLY_PERIOD_DAYS,
     HOURLY_PERIODS,
     HourlyRangeData,
-    LivePowerData,
     SUMMARY_LATEST_KEYS,
     TelemetryData,
 )
@@ -301,37 +299,6 @@ def load_daily_energy_totals(
             "grid_export": actual.get("grid_export"),
         })
     return pd.DataFrame(rows)
-
-
-def load_live_power(database_path: str) -> LivePowerData:
-    empty_values: dict[str, float | None] = {
-        key: None for key in SUMMARY_LATEST_KEYS.values()
-    }
-    engine = create_engine(f"sqlite:///{Path(database_path)}", future=True)
-    try:
-        try:
-            with Session(engine) as session:
-                row = session.scalar(select(SigenStorLive).limit(1))
-        except OperationalError:
-            row = None
-    finally:
-        engine.dispose()
-
-    if row is None:
-        return LivePowerData(None, None, empty_values)
-    grid_power = row.plant_grid_power_kw
-    return LivePowerData(
-        collected_at_utc=row.collected_at_utc,
-        collected_at_local=row.collected_at_local,
-        values={
-            "solar": row.plant_pv_power_kw,
-            "battery": row.plant_battery_power_kw,
-            "inverter": row.inverter_power_kw,
-            "load": row.plant_load_power_kw,
-            "grid_import": max(grid_power, 0.0) if grid_power is not None else None,
-            "grid_export": max(-grid_power, 0.0) if grid_power is not None else None,
-        },
-    )
 
 
 def human_readable_age(age_seconds: float) -> str:
@@ -1176,6 +1143,7 @@ def energy_summary_rows(data: pd.DataFrame) -> list[dict[str, str]]:
 def summary_rows(
     data: pd.DataFrame,
     latest: dict[str, float | None],
+    forecast_arrays: tuple[SolarArrayConfig, ...],
 ) -> list[dict[str, str]]:
     today = {
         "solar": float(dataframe_column(data, "solar").sum()),
@@ -1193,15 +1161,33 @@ def summary_rows(
         "grid_import": None,
         "grid_export": None,
     }
-    return [
+    rows = [
         {
             "metric": label,
+            "latest_key": key,
             "latest": format_dashboard_number(latest[key]),
             "today": format_dashboard_number(today[key]),
             "forecast": format_dashboard_number(forecast[key]),
         }
         for label, key in SUMMARY_LATEST_KEYS.items()
     ]
+    for array in forecast_arrays:
+        actual = actual_column_name(array.panel_id)
+        forecast_column = forecast_column_name(array.panel_id)
+        rows.append({
+            "metric": f"Solar-{array.name}",
+            "latest_key": actual,
+            "latest": format_dashboard_number(latest.get(actual)),
+            "today": format_dashboard_number(
+                float(dataframe_column(data, actual).sum()) if actual in data else None
+            ),
+            "forecast": format_dashboard_number(
+                float(dataframe_column(data, forecast_column).sum())
+                if forecast_column in data
+                else None
+            ),
+        })
+    return rows
 
 
 def format_dashboard_number(value: float | None) -> str:

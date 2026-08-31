@@ -5,10 +5,11 @@ from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from nicegui import ui
+from nicegui import app, ui
 
 from config import load_config
 from dashboard.layout import DashboardLayout, render_dashboard_styles
+from dashboard.live import LivePowerCollector
 from dashboard.models import DashboardContext, DashboardState
 from common import source_path
 
@@ -23,6 +24,14 @@ def main() -> None:
         forecast_arrays=config.forecast.arrays,
         actuals_to_forecast=config.dashboard.actuals_to_forecast,
     )
+    live_collector = LivePowerCollector(
+        config.actuals.modbus,
+        config.timezone,
+        config.live.scheduler.interval_seconds,
+        config.dashboard.actuals_to_forecast,
+    )
+    app.on_startup(live_collector.start)
+    app.on_shutdown(live_collector.stop)
 
     @ui.page("/")
     def render_dashboard_page() -> None:
@@ -31,6 +40,7 @@ def main() -> None:
         layout = DashboardLayout(
             context,
             DashboardState(hourly_start=today, hourly_end=today),
+            live_collector,
         )
         with ui.column().classes("w-full max-w-7xl mx-auto p-4") as container:
             layout.render_dashboard_layout(container)

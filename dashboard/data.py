@@ -38,6 +38,13 @@ FORECAST_WATT_HOURS_READERS: dict[int, ForecastWattHoursReader] = {
     3: lambda row: row.panel_3_watt_hours,
     4: lambda row: row.panel_4_watt_hours,
 }
+ENERGY_SUMMARY_COLUMNS = (
+    "solar_actual",
+    "solar_forecast",
+    "load",
+    "grid_import",
+    "grid_export",
+)
 
 def load_day(
     database_path: str,
@@ -81,7 +88,8 @@ def load_recent_daily_energy(
         forecast_arrays,
     )
     daily["period"] = dataframe_column(daily, "date")
-    return daily.sort_values("date", ascending=False).reset_index(drop=True)
+    ordered = daily.sort_values("date", ascending=False).reset_index(drop=True)
+    return append_energy_total(ordered, "Total")
 
 
 def load_lifetime_start_date(database_path: str, fallback: date) -> date:
@@ -131,13 +139,7 @@ def load_recent_monthly_energy(
         end_date,
         forecast_arrays,
     )
-    value_columns = [
-        "solar_actual",
-        "solar_forecast",
-        "load",
-        "grid_import",
-        "grid_export",
-    ]
+    value_columns = list(ENERGY_SUMMARY_COLUMNS)
     daily["month"] = dataframe_column(daily, "date").map(
         lambda value: str(value)[:7]
     )
@@ -161,7 +163,16 @@ def load_recent_monthly_energy(
                 else float("nan")
             )
         rows.append(row)
-    return pd.DataFrame(rows)
+    recent = append_energy_total(pd.DataFrame(rows), "Total")
+    lifetime_start = load_lifetime_start_date(database_path, end_date)
+    lifetime = load_daily_energy_totals(
+        database_path,
+        timezone_name,
+        lifetime_start,
+        end_date,
+        forecast_arrays,
+    )
+    return append_energy_total(recent, "Lifetime", source=lifetime)
 
 
 def load_daily_energy_totals(
@@ -299,6 +310,23 @@ def load_daily_energy_totals(
             "grid_export": actual.get("grid_export"),
         })
     return pd.DataFrame(rows)
+
+
+def append_energy_total(
+    data: pd.DataFrame,
+    label: str,
+    *,
+    source: pd.DataFrame | None = None,
+) -> pd.DataFrame:
+    values = source if source is not None else data
+    total = {
+        "period": label,
+        **{
+            column: dataframe_column(values, column).sum(min_count=1)
+            for column in ENERGY_SUMMARY_COLUMNS
+        },
+    }
+    return pd.concat([data, pd.DataFrame([total])], ignore_index=True)
 
 
 def human_readable_age(age_seconds: float) -> str:

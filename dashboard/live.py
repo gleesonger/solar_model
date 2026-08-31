@@ -20,6 +20,10 @@ LIVE_POWER_METRICS = {
     "plant_load_power_kw",
     "inverter_power_kw",
 }
+LIVE_BATTERY_METRICS = {
+    "inverter_battery_available_discharge",
+    "plant_battery_soc",
+}
 LIVE_VALUE_KEYS = {
     "plant_grid_power_kw": "grid",
     "plant_pv_power_kw": "solar",
@@ -74,7 +78,7 @@ class LivePowerCollector:
             )
 
     def _metrics(self) -> set[str]:
-        metrics = set(LIVE_POWER_METRICS)
+        metrics = LIVE_POWER_METRICS | LIVE_BATTERY_METRICS
         for pv_string in self._actuals_to_forecast:
             metrics.update({
                 f"inverter_{pv_string}_voltage",
@@ -86,6 +90,8 @@ class LivePowerCollector:
         values: dict[str, float | None] = {
             key: None for key in SUMMARY_LATEST_KEYS.values()
         }
+        values["battery_available_energy_kwh"] = None
+        values["battery_soc_percent"] = None
         values.update({
             f"actual_panel_{panel_id}": None
             for panel_id in self._actuals_to_forecast.values()
@@ -147,6 +153,13 @@ class LivePowerCollector:
         grid_power = values["grid"]
         values["grid_import"] = max(grid_power, 0.0) if grid_power is not None else None
         values["grid_export"] = max(-grid_power, 0.0) if grid_power is not None else None
+
+        available_energy, _, _ = readings["inverter_battery_available_discharge"]
+        soc_percent, _, _ = readings["plant_battery_soc"]
+        if isinstance(available_energy, str) or isinstance(soc_percent, str):
+            raise ValueError("live battery readings returned text")
+        values["battery_available_energy_kwh"] = available_energy
+        values["battery_soc_percent"] = soc_percent
 
         for pv_string, panel_id in self._actuals_to_forecast.items():
             voltage, _, _ = readings[f"inverter_{pv_string}_voltage"]

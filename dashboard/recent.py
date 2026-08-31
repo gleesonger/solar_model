@@ -48,7 +48,7 @@ class RecentTab:
             self.config.forecast.arrays,
         )
         self.elements.battery_status_label = ui.label(
-            data.battery_status_text(telemetry.latest)
+            self._battery_status_text(live_power)
         ).classes("text-sm font-medium mt-1")
         self.elements.recent_daily_table = render_energy_summary_table(
             recent_daily, "Past 7 days (kWh)", "Date"
@@ -68,7 +68,7 @@ class RecentTab:
                 self.config.forecast.arrays,
             )
         if self.elements.battery_status_label is not None:
-            self.elements.battery_status_label.set_text(data.battery_status_text(telemetry.latest))
+            self.elements.battery_status_label.set_text(self._battery_status_text(live_power))
         if self.elements.recent_daily_table is not None:
             self.elements.recent_daily_table.rows = data.energy_summary_rows(recent_daily)
         if self.elements.recent_monthly_table is not None:
@@ -99,6 +99,8 @@ class RecentTab:
                 self.elements.updated_at_label.set_text(
                     f"Last updated: {timestamp:%Y-%m-%d %H:%M:%S %Z}"
                 )
+            if self.elements.battery_status_label is not None:
+                self.elements.battery_status_label.set_text(self._battery_status_text(live_power))
         self._update_live_status(live_power.collected_at_utc)
 
     def _load_data(self) -> tuple[pd.DataFrame, data.TelemetryData, LivePowerData, pd.DataFrame, pd.DataFrame]:
@@ -141,6 +143,12 @@ class RecentTab:
             "inverter_today": telemetry.latest["inverter_today"],
         }
         return values
+
+    @staticmethod
+    def _battery_status_text(live_power: LivePowerData) -> str:
+        if live_power.collected_at_utc is None:
+            return ""
+        return data.battery_status_text(live_power.values)
 
     def _update_live_status(self, collected_at_utc: str | None) -> None:
         label = self.elements.live_status_label

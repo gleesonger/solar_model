@@ -31,6 +31,7 @@ class TelemetryData:
     power_15m: pd.DataFrame
     battery_15m: pd.DataFrame
     latest: dict[str, float | None]
+    latest_collected_at_utc: str | None
 
 
 @dataclass(frozen=True)

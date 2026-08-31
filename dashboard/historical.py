@@ -5,6 +5,7 @@ from zoneinfo import ZoneInfo
 
 from nicegui import ui
 
+from common import LOGGER
 from config import Config
 
 from . import charts, data
@@ -67,6 +68,7 @@ class HistoricalTab:
         try:
             historical, start, today = self._load_historical_data()
         except Exception as error:
+            LOGGER.exception("Dashboard historical data initial load failed")
             ui.label(f"Unable to load historical data: {error}").classes("text-red-600")
             return
         self.elements.historical_range_label = ui.label(

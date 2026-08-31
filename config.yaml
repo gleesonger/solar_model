@@ -13,10 +13,6 @@ dashboard:
     pv1: 1
     pv2: 2
 
-live:
-  scheduler:
-    interval_seconds: 5
-
 forecast:
   interval_seconds: 3600
   timeout_seconds: 10

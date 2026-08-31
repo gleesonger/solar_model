@@ -6,6 +6,7 @@ from zoneinfo import ZoneInfo
 
 from nicegui import ui
 
+from common import LOGGER
 from config import Config
 
 from . import charts, data
@@ -124,6 +125,7 @@ class HourlyTab:
         try:
             hourly_range = self._load_hourly_range()
         except Exception as error:
+            LOGGER.exception("Dashboard hourly data initial load failed")
             ui.label(f"Unable to load hourly data: {error}").classes("text-red-600")
             return
         self.elements.hourly_range_label = ui.label(self._range_label()).classes("text-sm text-gray-600 mb-2")

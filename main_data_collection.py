@@ -1,12 +1,11 @@
 from __future__ import annotations
 
-import logging
 import time
 
 import requests
 from pymodbus.client import ModbusTcpClient
 
-from common import LOGGER, sleep_until_next_interval
+from common import LOGGER, configure_logging, sleep_until_next_interval
 from config import load_config
 from database import open_database
 from forecast_collector import collect_once as collect_forecast_once
@@ -17,7 +16,7 @@ def main() -> None:
     config = load_config()
     scheduler = config.actuals.scheduler
     modbus = config.actuals.modbus
-    logging.basicConfig(level=config.logging.level)
+    configure_logging(config.logging.level)
     registers = load_registers(modbus.register_map, modbus.default_device_id)
     device_registers = load_registers(modbus.device_register_map, modbus.default_device_id)
     database = open_database(config.database.path)

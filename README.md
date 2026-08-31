@@ -11,7 +11,7 @@ python main_data_collection.py
 The dashboard runs a lightweight background collector for the `Latest (kW)` column. It reads the configured plant power values and mapped PV-string power values at the live interval, retaining only the newest successful result in memory.
 
 Set `actuals.scheduler.interval_seconds` in `config.yaml` to change the scheduler interval; it defaults to `60` seconds.
-Set `live.scheduler.interval_seconds` to change the live-power interval; it defaults to `5` seconds.
+The dashboard polls live power once per second only while at least one browser is connected.
 Set `forecast.interval_seconds` in `config.yaml` to change the minimum elapsed time between forecast scans; it is configured for `3600` seconds.
 
 Configuration loading is strict: every documented field must be present, unknown fields and incorrect types are rejected, and invalid values cause the process to exit during startup.

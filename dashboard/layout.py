@@ -6,6 +6,7 @@ from zoneinfo import ZoneInfo
 from nicegui import ui
 from nicegui.elements.column import Column
 
+from common import LOGGER
 from config import Config
 
 from .historical import HistoricalTab
@@ -34,6 +35,7 @@ class DashboardLayout:
         self.system_info_tab = SystemInfoTab(config, self.elements)
 
     def render_dashboard_layout(self, container: Column) -> None:
+        LOGGER.info("Dashboard page UI loading")
         container.clear()
         with container:
             with ui.row().classes("w-full items-center justify-between"):
@@ -68,18 +70,21 @@ class DashboardLayout:
                     self.system_info_tab.render_system_info_tab()
 
     def refresh_dashboard(self) -> None:
+        LOGGER.info("Dashboard database refresh started")
         try:
             self.recent_tab.refresh_recent_tab()
             self.hourly_tab.refresh_hourly_tab()
             self.historical_tab.refresh_historical_tab()
             self.system_info_tab.refresh_system_info_tab()
         except Exception as error:
+            LOGGER.exception("Dashboard database refresh failed")
             ui.notify(f"Unable to refresh dashboard data: {error}", type="negative")
             return
         if self.elements.updated_at_label is not None:
             self.elements.updated_at_label.set_text(
                 f"Last updated: {datetime.now(self.timezone):%Y-%m-%d %H:%M:%S %Z}"
             )
+        LOGGER.info("Dashboard database refresh completed")
 
     def refresh_live_power(self) -> None:
         self.recent_tab.refresh_live_power()

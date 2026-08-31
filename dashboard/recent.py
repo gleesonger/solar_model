@@ -9,6 +9,7 @@ from nicegui import ui
 from nicegui.elements.label import Label
 from nicegui.elements.table import Table
 
+from common import LOGGER
 from config import Config, SolarArrayConfig
 
 from . import data
@@ -34,6 +35,7 @@ class RecentTab:
         try:
             day, telemetry, live_power, recent_daily, recent_monthly = self._load_data()
         except Exception as error:
+            LOGGER.exception("Dashboard Recent tab initial load failed")
             ui.label(f"Unable to load Recent data: {error}").classes("text-red-600")
             return
 
@@ -104,7 +106,13 @@ class RecentTab:
         self._update_live_status(live_power.collected_at_utc)
 
     def _load_data(self) -> tuple[pd.DataFrame, data.TelemetryData, LivePowerData, pd.DataFrame, pd.DataFrame]:
+        LOGGER.info("Dashboard loading data from database")
         today = datetime.now(self.timezone).date()
+        telemetry = data.load_telemetry(
+            self.config.database.path,
+            self.config.timezone,
+        )
+        self._log_database_staleness(telemetry.latest_collected_at_utc)
         return (
             data.load_day(
                 self.config.database.path,
@@ -112,10 +120,7 @@ class RecentTab:
                 self.config.forecast.arrays,
                 self.config.dashboard.actuals_to_forecast,
             ).copy(),
-            data.load_telemetry(
-                self.config.database.path,
-                self.config.timezone,
-            ),
+            telemetry,
             self.live_collector.snapshot(),
             data.load_recent_daily_energy(
                 self.config.database.path,
@@ -150,6 +155,17 @@ class RecentTab:
             return ""
         return data.battery_status_text(live_power.values)
 
+    def _log_database_staleness(self, collected_at_utc: str | None) -> None:
+        if collected_at_utc is None:
+            LOGGER.warning("Dashboard database telemetry is unavailable")
+            return
+        age_seconds = (
+            datetime.now(ZoneInfo("UTC"))
+            - data.parse_time(collected_at_utc, ZoneInfo("UTC"))
+        ).total_seconds()
+        if age_seconds > self.config.actuals.scheduler.interval_seconds * 2:
+            LOGGER.warning("Dashboard database telemetry is stale")
+
     def _update_live_status(self, collected_at_utc: str | None) -> None:
         label = self.elements.live_status_label
         if label is None:
@@ -164,6 +180,7 @@ class RecentTab:
             (datetime.now(ZoneInfo("UTC")) - data.parse_time(collected_at_utc, ZoneInfo("UTC"))).total_seconds(),
         )
         if age_seconds > 30:
+            LOGGER.warning("Dashboard live data is stale")
             label.set_text(f"Warning: Live data is stale — last updated {data.human_readable_age(age_seconds)}.")
             label.set_visibility(True)
             label.classes(add="text-orange-700 font-semibold")

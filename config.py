@@ -69,11 +69,6 @@ class ActualsConfig:
 
 
 @dataclass(frozen=True)
-class LiveConfig:
-    scheduler: SchedulerConfig
-
-
-@dataclass(frozen=True)
 class Config:
     timezone: str
     logging: LoggingConfig
@@ -81,7 +76,6 @@ class Config:
     forecast: ForecastConfig
     dashboard: DashboardConfig
     actuals: ActualsConfig
-    live: LiveConfig
 
 
 
@@ -105,7 +99,6 @@ def validate_config(config: Config) -> None:
     """Validate configuration values after the YAML has been deserialized."""
     if (
         config.actuals.scheduler.interval_seconds <= 0
-        or config.live.scheduler.interval_seconds <= 0
         or config.forecast.interval_seconds <= 0
     ):
         raise ValueError("scheduler, live, and forecast intervals must be greater than zero")

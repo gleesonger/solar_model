@@ -4,11 +4,12 @@ from __future__ import annotations
 
 from threading import Event, Lock, Thread
 
+from nicegui.client import Client
 from pymodbus.client import ModbusTcpClient
 
 from common import LOGGER, timestamps
 from config import ModbusConfig
-from modbus_collector import RegisterBlock, load_registers, read_registers
+from modbus_collector import load_registers, read_registers
 
 from .models import LivePowerData, SUMMARY_LATEST_KEYS
 
@@ -31,6 +32,7 @@ LIVE_VALUE_KEYS = {
     "plant_load_power_kw": "load",
     "inverter_power_kw": "inverter",
 }
+LIVE_COLLECTION_INTERVAL_SECONDS = 1
 
 
 class LivePowerCollector:
@@ -40,12 +42,10 @@ class LivePowerCollector:
         self,
         modbus: ModbusConfig,
         timezone_name: str,
-        interval_seconds: int,
         actuals_to_forecast: dict[str, int],
     ) -> None:
         self._modbus = modbus
         self._timezone_name = timezone_name
-        self._interval_seconds = interval_seconds
         self._actuals_to_forecast = actuals_to_forecast
         self._registers = load_registers(
             modbus.register_map,
@@ -54,8 +54,10 @@ class LivePowerCollector:
         )
         self._lock = Lock()
         self._stop_event = Event()
+        self._active_event = Event()
         self._thread: Thread | None = None
         self._latest = LivePowerData(None, None, self._empty_values())
+        self._has_received_data = False
 
     def start(self) -> None:
         if self._thread is not None and self._thread.is_alive():
@@ -63,11 +65,34 @@ class LivePowerCollector:
         self._stop_event.clear()
         self._thread = Thread(target=self._run, name="live-power-collector", daemon=True)
         self._thread.start()
+        LOGGER.info("Live collector thread started")
 
     def stop(self) -> None:
+        if self._thread is None:
+            return
+        LOGGER.info("Live collector stopping")
         self._stop_event.set()
-        if self._thread is not None:
-            self._thread.join(timeout=self._modbus.timeout_seconds + 1)
+        self._active_event.set()
+        self._thread.join(timeout=self._modbus.timeout_seconds + 1)
+        LOGGER.info("Live collector stopped")
+
+    def refresh_browser_activity(self) -> None:
+        has_connected_browser = any(
+            client.has_socket_connection
+            for client in Client.instances.values()
+        )
+        with self._lock:
+            was_active = self._active_event.is_set()
+            if has_connected_browser:
+                self._active_event.set()
+            else:
+                self._active_event.clear()
+        if has_connected_browser and not was_active:
+            LOGGER.info("Live collector activated by browser connection")
+        if not has_connected_browser and was_active:
+            LOGGER.info("Live collector paused: no browser connected")
+        if has_connected_browser:
+            self.start()
 
     def snapshot(self) -> LivePowerData:
         with self._lock:
@@ -102,12 +127,18 @@ class LivePowerCollector:
         client: ModbusTcpClient | None = None
         try:
             while not self._stop_event.is_set():
+                if not self._active_event.is_set():
+                    if client is not None:
+                        client.close()
+                        client = None
+                    self._active_event.wait()
+                    continue
                 if client is None:
                     client = self._connect()
                 if client is not None and not self._collect_once(client):
                     client.close()
                     client = None
-                self._stop_event.wait(self._interval_seconds)
+                self._stop_event.wait(LIVE_COLLECTION_INTERVAL_SECONDS)
         finally:
             if client is not None:
                 client.close()
@@ -124,7 +155,7 @@ class LivePowerCollector:
             client.close()
         except Exception:
             pass
-        LOGGER.info("Live Modbus connection failed; retrying next cycle")
+        LOGGER.warning("Live Modbus connection failed; retrying next cycle")
         return None
 
     def _collect_once(self, client: ModbusTcpClient) -> bool:
@@ -134,9 +165,13 @@ class LivePowerCollector:
             collected_at_utc, collected_at_local = timestamps(timezone_name=self._timezone_name)
             with self._lock:
                 self._latest = LivePowerData(collected_at_utc, collected_at_local, values)
+                first_successful_read = not self._has_received_data
+                self._has_received_data = True
+            if first_successful_read:
+                LOGGER.info("Live collector received first successful reading")
             return True
         except Exception:
-            LOGGER.info("Live Modbus interval failed; interval skipped")
+            LOGGER.warning("Live Modbus interval failed; interval skipped")
             return False
 
     def _power_values(

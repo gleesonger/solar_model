@@ -3,6 +3,7 @@ from __future__ import annotations
 from nicegui import ui
 from nicegui.elements.table import Table
 
+from common import LOGGER
 from config import Config
 
 from . import data
@@ -20,6 +21,7 @@ class SystemInfoTab:
                 data.load_device_information(self.config.database.path)
             )
         except Exception as error:
+            LOGGER.exception("Dashboard system information initial load failed")
             ui.label(f"Unable to load system information: {error}").classes("text-red-600")
 
     def refresh_system_info_tab(self) -> None:

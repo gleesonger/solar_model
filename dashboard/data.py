@@ -739,6 +739,9 @@ def load_telemetry(
         power_15m=pd.DataFrame(power_rows),
         battery_15m=pd.DataFrame(battery_rows),
         latest=latest,
+        latest_collected_at_utc=(
+            latest_sample.collected_at_utc if latest_sample is not None else None
+        ),
     )
 
 

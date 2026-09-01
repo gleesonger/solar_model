@@ -9,7 +9,7 @@ from nicegui.elements.column import Column
 from common import LOGGER
 from config import Config
 
-from .historical import HistoricalTab
+from .anlaysis import AnalysisTab
 from .live import LivePowerCollector
 from .models import DashboardElements, DashboardState
 from .recent import RecentTab
@@ -33,7 +33,7 @@ class DashboardLayout:
         )
 
         self.recent_tab = RecentTab(config, self.state, self.elements, live_collector)
-        self.historical_tab = HistoricalTab(config, self.state, self.elements)
+        self.historical_tab = AnalysisTab(config, self.state, self.elements)
         self.system_info_tab = SystemInfoTab(config, self.elements)
 
     def render_dashboard_layout(self, container: Column) -> None:

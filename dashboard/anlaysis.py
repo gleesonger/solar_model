@@ -12,7 +12,7 @@ from . import charts, data
 from .models import DashboardElements, DashboardState
 
 
-class HistoricalTab:
+class AnalysisTab:
     def __init__(
         self,
         config: Config,

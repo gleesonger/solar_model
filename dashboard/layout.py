@@ -56,14 +56,11 @@ class DashboardLayout:
                         recent = ui.tab("Recent")
                         historical = ui.tab("Analysis")
                         system_info = ui.tab("System Info")
-                    ui.button("Refresh", on_click=self.refresh_dashboard, icon="refresh").classes(
-                        "justify-self-end"
+                    self.elements.updated_at_label = ui.label("Last full update: unavailable").classes(
+                        "text-sm text-gray-600 justify-self-end"
                     )
                 analysis_controls = self.historical_tab.render_historical_controls()
                 analysis_controls.set_visibility(self.state.active_tab in {"Analysis", "Historical"})
-            # self.elements.updated_at_label = ui.label(
-            #     f"Last Full Update: {datetime.now(self.timezone):%Y-%m-%d %H:%M:%S %Z}"
-            # ).classes("text-sm text-gray-600")
             selected = {
                 "Recent": recent,
                 "Analysis": historical,
@@ -89,10 +86,6 @@ class DashboardLayout:
             LOGGER.exception("Dashboard database refresh failed")
             ui.notify(f"Unable to refresh dashboard data: {error}", type="negative")
             return
-        # if self.elements.updated_at_label is not None:
-        #     self.elements.updated_at_label.set_text(
-        #         f"Last Full Update: {datetime.now(self.timezone):%Y-%m-%d %H:%M:%S %Z}"
-        #     )
         LOGGER.info("Dashboard database refresh completed")
 
     def refresh_live_power(self) -> None:

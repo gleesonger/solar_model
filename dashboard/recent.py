@@ -22,8 +22,8 @@ SUMMARY_TODAY_LIVE_KEYS = {
     "Battery": "battery",
     "Inverter": "inverter",
     "Load": "load",
-    "Grid-Imported": "grid_import",
-    "Grid-Exported": "grid_export",
+    "Grid-Imported": "today_grid_import",
+    "Grid-Exported": "today_grid_export",
 }
 
 
@@ -40,7 +40,6 @@ class RecentTab:
         self.elements = elements
         self.live_collector = live_collector
         self.timezone = ZoneInfo(config.timezone)
-        self._inverter_today: float | None = None
         self._today_values: dict[str, float | None] = {}
         self._previous_live_for_today: LivePowerData | None = None
         self._today_live_keys = {
@@ -50,6 +49,11 @@ class RecentTab:
                 for array in config.forecast.arrays
             },
         }
+        self._array_today_metrics = frozenset(
+            f"Solar-{array.name}"
+            for array in config.forecast.arrays
+            if array.panel_id in config.dashboard.actuals_to_forecast.values()
+        )
 
     def render_recent_tab(self) -> None:
         try:
@@ -63,9 +67,9 @@ class RecentTab:
         self.elements.live_status_label = ui.label().classes("text-sm mt-1")
         self._update_live_status(live_power.collected_at_utc)
 
-        latest = self._live_table_values(telemetry, live_power)
-        self._inverter_today = telemetry.latest["inverter_today"]
-        self._set_today_baseline(day, live_power)
+        latest = self._live_table_values(live_power)
+        self._set_full_updated_timestamp(telemetry.full_updated_last_local)
+        self._set_live_today_values(live_power)
         self.elements.live_table = render_live_today_table(
             day,
             latest,
@@ -85,9 +89,9 @@ class RecentTab:
 
     def refresh_recent_tab(self) -> None:
         day, telemetry, live_power, recent_daily, recent_monthly = self._load_data()
-        latest = self._live_table_values(telemetry, live_power)
-        self._inverter_today = telemetry.latest["inverter_today"]
-        self._set_today_baseline(day, live_power)
+        latest = self._live_table_values(live_power)
+        self._set_full_updated_timestamp(telemetry.full_updated_last_local)
+        self._set_live_today_values(live_power)
         if self.elements.live_table is not None:
             self.elements.live_table.rows = data.summary_rows(
                 day,
@@ -119,6 +123,30 @@ class RecentTab:
             if self.elements.battery_status_label is not None:
                 self.elements.battery_status_label.set_text(self._battery_status_text(live_power))
         self._update_live_status(live_power.collected_at_utc)
+
+    def _set_full_updated_timestamp(self, full_updated_last_local: str | None) -> None:
+        self.elements.full_updated_last_local = full_updated_last_local
+        label = self.elements.updated_at_label
+        if label is None:
+            return
+
+        if full_updated_last_local is None:
+            label.set_text("Last full update: unavailable")
+            label.classes(replace="text-sm text-gray-600 justify-self-end")
+            return
+
+        timestamp = datetime.fromisoformat(full_updated_last_local)
+        age_seconds = (datetime.now(timestamp.tzinfo) - timestamp).total_seconds()
+        stale_after_seconds = (
+            self.config.actuals.data_retrival_schedule.full_updated_interval_seconds * 3
+        )
+        label.set_text(f"Last full update: {timestamp:%Y-%m-%d %H:%M:%S}")
+        label.classes(replace=(
+            "text-sm font-semibold text-white bg-red-600 border-4 border-red-900 "
+            "rounded px-2 py-1 justify-self-end"
+            if age_seconds > stale_after_seconds
+            else "text-sm text-gray-600 justify-self-end"
+        ))
 
     def _load_data(self) -> tuple[pd.DataFrame, data.TelemetryData, LivePowerData, pd.DataFrame, pd.DataFrame]:
         LOGGER.info("Dashboard loading data from database")
@@ -153,37 +181,25 @@ class RecentTab:
             ),
         )
 
-    def _live_table_values(
-        self,
-        telemetry: data.TelemetryData,
-        live_power: LivePowerData,
-    ) -> dict[str, float | None]:
-        values = {
-            **live_power.values,
-            "inverter_today": telemetry.latest["inverter_today"],
-        }
-        return values
+    @staticmethod
+    def _live_table_values(live_power: LivePowerData) -> dict[str, float | None]:
+        return live_power.values
 
-    def _set_today_baseline(self, day: pd.DataFrame, live_power: LivePowerData) -> None:
-        def total(column: str) -> float | None:
-            if column not in day:
-                return None
-            value = float(data.dataframe_column(day, column).sum(min_count=1))
-            return None if pd.isna(value) else value
-
+    def _set_live_today_values(self, live_power: LivePowerData) -> None:
         self._today_values = {
-            "Solar": total("solar"),
-            "Battery": total("battery"),
-            "Inverter": self._inverter_today,
-            "Load": total("load"),
-            "Grid-Imported": total("grid_import"),
-            "Grid-Exported": total("grid_export"),
+            "Solar": None,
+            "Battery": None,
+            "Inverter": None,
+            "Load": None,
+            "Grid-Imported": None,
+            "Grid-Exported": None,
             **{
-                f"Solar-{array.name}": total(data.actual_column_name(array.panel_id))
+                f"Solar-{array.name}": None
                 for array in self.config.forecast.arrays
             },
         }
         self._apply_live_today_meters(live_power)
+        self._set_array_today_total(live_power)
         self._previous_live_for_today = live_power
 
     def _update_live_table_rows(self, live_power: LivePowerData) -> None:
@@ -207,6 +223,8 @@ class RecentTab:
             "Solar": live_power.values.get("today_solar"),
             "Inverter": live_power.values.get("today_inverter"),
             "Load": live_power.values.get("today_load"),
+            "Grid-Imported": live_power.values.get("today_grid_import"),
+            "Grid-Exported": live_power.values.get("today_grid_export"),
         }
         charge = live_power.values.get("today_battery_charge")
         discharge = live_power.values.get("today_battery_discharge")
@@ -225,26 +243,64 @@ class RecentTab:
         previous_time = data.parse_time(previous.collected_at_utc, ZoneInfo("UTC"))
         current_time = data.parse_time(live_power.collected_at_utc, ZoneInfo("UTC"))
         if previous_time.astimezone(self.timezone).date() != current_time.astimezone(self.timezone).date():
-            day = data.load_day(
-                self.config.database.path,
-                self.config.timezone,
-                self.config.forecast.arrays,
-                self.config.dashboard.actuals_to_forecast,
+            self._set_live_today_values(live_power)
+            return
+        self._advance_live_array_solar_values(previous, live_power)
+
+    def _advance_live_array_solar_values(
+        self,
+        previous: LivePowerData,
+        current: LivePowerData,
+    ) -> None:
+        before_solar = previous.values.get("today_solar")
+        current_solar = current.values.get("today_solar")
+        if before_solar is None or current_solar is None:
+            return
+        generated_energy = current_solar - before_solar
+        if generated_energy <= 0:
+            return
+
+        weights: dict[str, float] = {}
+        for metric in self._array_today_metrics:
+            key = self._today_live_keys[metric]
+            before_power = previous.values.get(key)
+            current_power = current.values.get(key)
+            if before_power is not None and current_power is not None:
+                weights[metric] = max((before_power + current_power) / 2, 0.0)
+        weight_total = sum(weights.values())
+        if weight_total <= 0:
+            weights = {metric: 1.0 for metric in self._array_today_metrics}
+            weight_total = float(len(weights))
+
+        for metric, weight in weights.items():
+            self._today_values[metric] = (
+                (self._today_values.get(metric) or 0.0)
+                + generated_energy * weight / weight_total
             )
-            self._set_today_baseline(day, live_power)
+
+    def _set_array_today_total(self, live_power: LivePowerData) -> None:
+        """Align the array allocation with the live daily solar meter at refresh time."""
+        solar_total = live_power.values.get("today_solar")
+        if solar_total is None or not self._array_today_metrics:
             return
-        duration_hours = (current_time - previous_time).total_seconds() / 3600
-        if duration_hours <= 0 or duration_hours > 1 / 12:
-            return
-        for metric, key in self._today_live_keys.items():
-            if metric in {"Solar", "Battery", "Inverter", "Load"}:
-                continue
-            before = previous.values.get(key)
-            after = live_power.values.get(key)
-            if before is None or after is None:
-                continue
-            current_total = self._today_values.get(metric)
-            self._today_values[metric] = (current_total or 0.0) + (before + after) / 2 * duration_hours
+
+        weights = {
+            metric: max(self._today_values.get(metric) or 0.0, 0.0)
+            for metric in self._array_today_metrics
+        }
+        weight_total = sum(weights.values())
+        if weight_total <= 0:
+            weights = {
+                metric: max(live_power.values.get(self._today_live_keys[metric]) or 0.0, 0.0)
+                for metric in self._array_today_metrics
+            }
+            weight_total = sum(weights.values())
+        if weight_total <= 0:
+            weights = {metric: 1.0 for metric in self._array_today_metrics}
+            weight_total = float(len(weights))
+
+        for metric, weight in weights.items():
+            self._today_values[metric] = solar_total * weight / weight_total
 
     @staticmethod
     def _battery_status_text(live_power: LivePowerData) -> str:

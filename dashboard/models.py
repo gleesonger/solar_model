@@ -33,6 +33,7 @@ class TelemetryData:
     battery_15m: pd.DataFrame
     latest: dict[str, float | None]
     latest_collected_at_utc: str | None
+    full_updated_last_local: str | None
 
 
 @dataclass(frozen=True)
@@ -83,6 +84,7 @@ class DashboardElements:
     recent_monthly_table: Table | None = None
     live_status_label: Label | None = None
     updated_at_label: Label | None = None
+    full_updated_last_local: str | None = None
     live_timestamp: str | None = None
     hourly_range_label: Label | None = None
     hourly_charts: HourlyCharts | None = None
@@ -101,8 +103,8 @@ class DashboardState:
     power_interval_minutes: int = 15
     time_zoom_start: float = 0.0
     time_zoom_end: float = 100.0
-    historical_count: int = 24
-    historical_unit: str = "hours"
+    historical_count: int = 1
+    historical_unit: str = "days"
     historical_frequency: str = "hour"
     historical_power_interval_minutes: int = 60
     historical_time_zoom_start: float = 0.0

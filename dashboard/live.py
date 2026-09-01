@@ -11,6 +11,7 @@ from common import LOGGER, timestamps
 from config import ModbusConfig
 from modbus_collector import REGISTER_MAP_PATH, load_registers, read_registers
 
+from . import data
 from .models import LivePowerData, SUMMARY_LATEST_KEYS
 
 
@@ -31,6 +32,8 @@ LIVE_TODAY_METRICS = {
     "inverter_battery_charge_daily_kwh",
     "inverter_battery_discharge_daily_kwh",
     "inverter_pv_daily_kwh",
+    "plant_grid_import_total_kwh",
+    "plant_grid_export_total_kwh",
 }
 LIVE_VALUE_KEYS = {
     "plant_grid_power_kw": "grid",
@@ -46,11 +49,13 @@ class LivePowerCollector:
         self,
         modbus: ModbusConfig,
         timezone_name: str,
+        database_path: str,
         actuals_to_forecast: dict[str, int],
         collection_interval_seconds: float,
     ) -> None:
         self._modbus = modbus
         self._timezone_name = timezone_name
+        self._database_path = database_path
         self._actuals_to_forecast = actuals_to_forecast
         self._collection_interval_seconds = collection_interval_seconds
         self._registers = load_registers(
@@ -64,6 +69,8 @@ class LivePowerCollector:
         self._thread: Thread | None = None
         self._latest = LivePowerData(None, None, self._empty_values())
         self._has_received_data = False
+        self._grid_energy_day: str | None = None
+        self._grid_energy_start: dict[str, float] = {}
 
     def start(self) -> None:
         if self._thread is not None and self._thread.is_alive():
@@ -129,6 +136,8 @@ class LivePowerCollector:
             "today_battery_charge": None,
             "today_battery_discharge": None,
             "today_inverter": None,
+            "today_grid_import": None,
+            "today_grid_export": None,
         })
         values.update({
             f"actual_panel_{panel_id}": None
@@ -174,9 +183,8 @@ class LivePowerCollector:
     def _collect_once(self, client: ModbusTcpClient) -> bool:
         try:
             readings = read_registers(client, self._registers)
-            values = self._power_values(readings)
             collected_at_utc, collected_at_local = timestamps(timezone_name=self._timezone_name)
-            print(f"Live Modbus poll {collected_at_local}: {values}", flush=True)
+            values = self._power_values(readings, collected_at_local)
             with self._lock:
                 self._latest = LivePowerData(collected_at_utc, collected_at_local, values)
                 first_successful_read = not self._has_received_data
@@ -191,6 +199,7 @@ class LivePowerCollector:
     def _power_values(
         self,
         readings: dict[str, tuple[float | str, str, bool]],
+        collected_at_local: str,
     ) -> dict[str, float | None]:
         values = self._empty_values()
         for metric, key in LIVE_VALUE_KEYS.items():
@@ -222,6 +231,24 @@ class LivePowerCollector:
             if isinstance(value, str):
                 raise ValueError(f"live daily metric {metric!r} returned text")
             values[key] = value
+
+        grid_totals = {
+            "today_grid_import": "plant_grid_import_total_kwh",
+            "today_grid_export": "plant_grid_export_total_kwh",
+        }
+        day = collected_at_local[:10]
+        if self._grid_energy_day != day:
+            self._grid_energy_day = day
+            self._grid_energy_start = data.load_grid_energy_day_start(
+                self._database_path,
+                day,
+            )
+        for key, metric in grid_totals.items():
+            value, _, _ = readings[metric]
+            if isinstance(value, str):
+                raise ValueError(f"live grid energy metric {metric!r} returned text")
+            baseline = self._grid_energy_start.setdefault(key, value)
+            values[key] = max(value - baseline, 0.0)
 
         for pv_string, panel_id in self._actuals_to_forecast.items():
             voltage, _, _ = readings[f"inverter_{pv_string}_voltage"]

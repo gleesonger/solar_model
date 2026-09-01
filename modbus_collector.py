@@ -12,6 +12,7 @@ from config import TariffsConfig
 
 REGISTER_MAP_PATH = source_path("sigen_register_map.json")
 DEVICE_REGISTER_MAP_PATH = source_path("sigen_device_register_map.json")
+MAX_REGISTERS_PER_BLOCK = 120
 
 
 @dataclass(frozen=True)
@@ -79,7 +80,7 @@ def group_registers(registers: list[Register]) -> list[RegisterBlock]:
         current_end = -1
         for definition in sorted(definitions, key=lambda item: item.address):
             proposed_end = max(current_end, definition.address + definition.words)
-            if current and (definition.address > current_end or proposed_end - current[0].address > 120):
+            if current and proposed_end - current[0].address > MAX_REGISTERS_PER_BLOCK:
                 blocks.append(RegisterBlock(device_id, kind, current[0].address, current_end - current[0].address, tuple(current)))
                 current = []
             current.append(definition)

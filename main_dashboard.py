@@ -20,6 +20,7 @@ def main() -> None:
     live_collector = LivePowerCollector(
         config.actuals.modbus,
         config.timezone,
+        config.database.path,
         config.dashboard.actuals_to_forecast,
         config.actuals.data_retrival_schedule.live_update_interval_seconds,
     )
@@ -46,7 +47,10 @@ def main() -> None:
             config.actuals.data_retrival_schedule.live_update_interval_seconds,
             layout.refresh_live_power,
         )
-        ui.timer(60, layout.refresh_dashboard)
+        ui.timer(
+            config.actuals.data_retrival_schedule.full_updated_interval_seconds,
+            layout.refresh_dashboard,
+        )
 
     ui.run(
         host=config.dashboard.host,

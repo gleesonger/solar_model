@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 import re
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from numbers import Real
 from typing import Any
 
@@ -30,12 +30,16 @@ class ChartDataDisplay:
         hint: str | Callable[[], str] | None = None,
         chart_options: Callable[[pd.DataFrame], dict[str, Any]] | None = None,
         column_labels: Mapping[str, str] | None = None,
+        table_columns: Sequence[str] | None = None,
+        show_total: bool = False,
     ) -> None:
         self.dataframe = dataframe
         self._title = title
         self._hint = hint
         self._chart_options = chart_options
         self._column_labels = column_labels or {}
+        self._table_column_order = table_columns
+        self._show_total = show_total
         self._showing_table = False
 
         with ui.row().classes("w-full items-center justify-between gap-4 mt-4"):
@@ -96,7 +100,15 @@ class ChartDataDisplay:
                 "field": column,
                 "align": "right",
             }
-            for column in self.dataframe.columns
+            for column in self._table_column_names()
+        ]
+
+    def _table_column_names(self) -> list[str]:
+        if self._table_column_order is None:
+            return list(self.dataframe.columns)
+        return [
+            column for column in self._table_column_order
+            if column in self.dataframe
         ]
 
     def _table_rows(self) -> list[dict[str, object]]:
@@ -105,13 +117,26 @@ class ChartDataDisplay:
             .where(pd.notna(self.dataframe), "")
             .to_dict(orient="records")
         )
-        return [
+        formatted_rows = [
             {
                 "_row": index,
                 **{column: self._format_table_value(value) for column, value in row.items()},
             }
             for index, row in enumerate(rows)
         ]
+        if self._show_total and not self.dataframe.empty:
+            total_row: dict[str, object] = {"_row": "total"}
+            for index, column in enumerate(self._table_column_names()):
+                if index == 0:
+                    total_row[column] = "Total"
+                elif pd.api.types.is_numeric_dtype(self.dataframe[column]):
+                    total_row[column] = self._format_table_value(
+                        self.dataframe[column].sum(min_count=1)
+                    )
+                else:
+                    total_row[column] = ""
+            formatted_rows.append(total_row)
+        return formatted_rows
 
     @staticmethod
     def _format_table_value(value: object) -> object:

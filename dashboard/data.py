@@ -79,8 +79,37 @@ def load_day(
         engine.dispose()
 
     forecast = aggregate_forecast(forecast_rows, day_start, forecast_arrays)
-    hourly = actual.merge(actual_by_array, on="hour", how="left").merge(forecast, on="hour", how="left").fillna(0.0)
+    hourly = actual.merge(actual_by_array, on="hour", how="left").merge(forecast, on="hour", how="left")
+    hourly = allocate_solar_energy_to_arrays(hourly, actuals_to_forecast).fillna(0.0)
     return hourly
+
+
+def load_grid_energy_day_start(
+    database_path: str,
+    local_date: str,
+) -> dict[str, float]:
+    """Return the day's opening lifetime grid meters for live daily totals."""
+    engine = create_engine_for_database(database_path)
+    try:
+        with Session(engine) as session:
+            row = session.execute(
+                select(
+                    SigenStorModbusSample.plant_grid_import_total_kwh,
+                    SigenStorModbusSample.plant_grid_export_total_kwh,
+                )
+                .where(func.substr(SigenStorModbusSample.collected_at_local, 1, 10) == local_date)
+                .order_by(SigenStorModbusSample.collected_at_utc)
+                .limit(1)
+            ).first()
+    finally:
+        engine.dispose()
+
+    if row is None:
+        return {}
+    return {
+        "today_grid_import": float(row.plant_grid_import_total_kwh),
+        "today_grid_export": float(row.plant_grid_export_total_kwh),
+    }
 
 
 def load_recent_daily_energy(
@@ -501,6 +530,12 @@ class AnalysisRangeBounds:
     end_at: datetime
 
 
+@dataclass(frozen=True)
+class AnalysisSourceData:
+    samples: list[SigenStorModbusSample]
+    forecast_rows: list[ForecastSolarSample]
+
+
 def analysis_range_bounds(
     end_date: date,
     count: int,
@@ -521,6 +556,180 @@ def analysis_range_bounds(
     return AnalysisRangeBounds(start_at.date(), end_date, start_at, end_at)
 
 
+def analysis_date_bounds(
+    start_date: date,
+    end_date: date,
+    timezone: tzinfo,
+) -> AnalysisRangeBounds:
+    if end_date < start_date:
+        raise ValueError("End date must not be before start date")
+    return AnalysisRangeBounds(
+        start_date=start_date,
+        end_date=end_date,
+        start_at=datetime.combine(start_date, time.min, tzinfo=timezone),
+        end_at=datetime.combine(end_date, time.max, tzinfo=timezone),
+    )
+
+
+def load_analysis_source_data(
+    database_path: str,
+    bounds: AnalysisRangeBounds,
+) -> AnalysisSourceData:
+    """Load the raw records shared by Analysis charts and downloads."""
+    engine = create_engine_for_database(database_path)
+    try:
+        with Session(engine) as session:
+            samples = list(session.scalars(
+                select(SigenStorModbusSample)
+                .where(SigenStorModbusSample.collected_at_local >= bounds.start_at.isoformat())
+                .where(SigenStorModbusSample.collected_at_local <= bounds.end_at.isoformat())
+                .order_by(SigenStorModbusSample.collected_at_utc)
+            ).all())
+            forecast_rows = list(session.scalars(
+                select(ForecastSolarSample)
+                .where(ForecastSolarSample.collected_at_local >= bounds.start_at.isoformat())
+                .where(ForecastSolarSample.collected_at_local <= bounds.end_at.isoformat())
+                .order_by(ForecastSolarSample.collected_at_utc, ForecastSolarSample.forecast_time)
+            ).all())
+    finally:
+        engine.dispose()
+    return AnalysisSourceData(samples=samples, forecast_rows=forecast_rows)
+
+
+SAMPLE_EXPORT_COLUMNS = tuple(
+    column.name
+    for column in SigenStorModbusSample.__table__.columns
+    if column.name not in {"id", "collected_at_utc", "collected_at_local"}
+)
+FORECAST_EXPORT_COLUMNS = tuple(
+    column.name
+    for column in ForecastSolarSample.__table__.columns
+    if column.name not in {"id", "collection_guid", "collected_at_utc", "collected_at_local", "forecast_time"}
+)
+
+# Retain the familiar wording for the fields already shown in Analysis.  All
+# other database fields are included too, with an unambiguous readable label.
+EXPORT_FIELD_LABELS = {
+    "plant_pv_total_kwh_period": "Solar (kWh)",
+    "plant_load_total_kwh_period": "Load (kWh)",
+    "plant_battery_charge_total_kwh_period": "Battery Charge (kWh)",
+    "plant_battery_discharge_total_kwh_period": "Battery Discharge (kWh)",
+    "plant_grid_import_total_kwh_period": "Grid Imported (kWh)",
+    "plant_grid_export_total_kwh_period": "Grid Exported (kWh)",
+    "grid_import_cost_period": "Import Cost",
+    "grid_export_revenue_period": "Export Revenue",
+    "net_cost_period": "Net Cost",
+    "no_solar_battery_import_cost_period": "Net Cost if No Solar",
+    "import_rate": "Import Rate",
+    "export_rate": "Export Rate",
+}
+
+
+def export_field_label(column: str, *, forecast: bool = False) -> str:
+    if not forecast and column in EXPORT_FIELD_LABELS:
+        return EXPORT_FIELD_LABELS[column]
+    prefix = "Forecast " if forecast else ""
+    return prefix + column.replace("_", " ").title()
+
+
+def export_aggregation(column: str) -> str:
+    """Return the appropriate interval aggregation for a database metric."""
+    if column.endswith("_kwh_period") or column.endswith("_cost_period") or column.endswith("_revenue_period"):
+        return "sum"
+    if column.endswith("_kwh") or column.endswith("_watt_hours_day"):
+        # Cumulative and daily counters are point-in-time readings, so their
+        # final reading represents the interval without double-counting.
+        return "last"
+    return "average"
+
+
+def analysis_export_dataframe(
+    database_path: str, bounds: AnalysisRangeBounds, timestep: str, timezone: tzinfo,
+    *, include_forecast: bool,
+) -> pd.DataFrame:
+    """Aggregate Analysis records into chronological export intervals."""
+    source = load_analysis_source_data(database_path, bounds)
+    actual_records = [{
+        "period": analysis_interval_start(parse_time(sample.collected_at_local, timezone), timestep),
+        **{column: getattr(sample, column) for column in SAMPLE_EXPORT_COLUMNS},
+    } for sample in source.samples]
+    actual = aggregate_analysis_export_records(
+        actual_records,
+        columns=SAMPLE_EXPORT_COLUMNS,
+    )
+    if not include_forecast:
+        return actual
+    forecast = aggregate_analysis_export_records(
+        analysis_forecast_export_records(
+            source.forecast_rows, bounds, timestep, timezone,
+        ),
+        columns=FORECAST_EXPORT_COLUMNS,
+        forecast=True,
+    )
+    return actual.merge(forecast, on="period", how="outer").sort_values("period").reset_index(drop=True)
+
+
+def analysis_interval_start(value: datetime, timestep: str) -> datetime:
+    if timestep == "minute":
+        return value.replace(second=0, microsecond=0)
+    if timestep == "hour":
+        return value.replace(minute=0, second=0, microsecond=0)
+    if timestep == "day":
+        return value.replace(hour=0, minute=0, second=0, microsecond=0)
+    if timestep == "week":
+        return datetime.combine(value.date() - timedelta(days=value.weekday()), time.min, tzinfo=value.tzinfo)
+    if timestep in {"month", "season", "year"}:
+        return datetime.combine(historical_bucket_start(value.date(), timestep), time.min, tzinfo=value.tzinfo)
+    raise ValueError(f"Unsupported export timestep: {timestep}")
+
+
+def aggregate_analysis_export_records(
+    records: list[dict[str, object]], *, columns: tuple[str, ...], forecast: bool = False,
+) -> pd.DataFrame:
+    output_columns = ["period", *(export_field_label(column, forecast=forecast) for column in columns)]
+    if not records:
+        return pd.DataFrame(columns=output_columns)
+    frame = pd.DataFrame(records)
+    groups = frame.groupby("period", sort=True)
+    result = pd.DataFrame(index=groups.size().index)
+    for column in columns:
+        aggregation = export_aggregation(column)
+        label = export_field_label(column, forecast=forecast)
+        if aggregation == "sum":
+            result[label] = groups[column].sum(min_count=1)
+        elif aggregation == "last":
+            result[label] = groups[column].last()
+        else:
+            result[label] = groups[column].mean()
+    return result.reset_index()
+
+
+def analysis_forecast_export_records(
+    forecast_rows: list[ForecastSolarSample], bounds: AnalysisRangeBounds, timestep: str,
+    timezone: tzinfo,
+) -> list[dict[str, object]]:
+    first_guid_by_date: dict[str, str] = {}
+    rows_by_guid: dict[str, list[ForecastSolarSample]] = {}
+    for row in forecast_rows:
+        if row.collection_guid is not None:
+            first_guid_by_date.setdefault(row.collected_at_local[:10], row.collection_guid)
+            rows_by_guid.setdefault(row.collection_guid, []).append(row)
+    records: list[dict[str, object]] = []
+    for collection_guid in first_guid_by_date.values():
+        # Preserve the chart behaviour of using the first forecast collection
+        # captured on a date, then export every stored metric from that
+        # collection at its forecast timestamp.
+        for row in rows_by_guid.get(collection_guid, []):
+            timestamp = parse_time(row.forecast_time, timezone)
+            if not bounds.start_at <= timestamp <= bounds.end_at:
+                continue
+            records.append({
+                "period": analysis_interval_start(timestamp, timestep),
+                **{column: getattr(row, column) for column in FORECAST_EXPORT_COLUMNS},
+            })
+    return records
+
+
 def load_analysis_range(
     database_path: str,
     timezone_name: str,
@@ -535,28 +744,11 @@ def load_analysis_range(
         raise ValueError("Power interval must be at least one minute")
 
     timezone = ZoneInfo(timezone_name)
-    engine = create_engine_for_database(database_path)
-    try:
-        with Session(engine) as session:
-            samples = list(session.scalars(
-                select(SigenStorModbusSample)
-                .where(func.substr(SigenStorModbusSample.collected_at_local, 1, 10) >= bounds.start_date.isoformat())
-                .where(func.substr(SigenStorModbusSample.collected_at_local, 1, 10) <= bounds.end_date.isoformat())
-                .order_by(SigenStorModbusSample.collected_at_utc)
-            ).all())
-            forecast_rows = list(session.scalars(
-                select(ForecastSolarSample)
-                .where(ForecastSolarSample.collection_guid.is_not(None))
-                .where(func.substr(ForecastSolarSample.collected_at_local, 1, 10) >= bounds.start_date.isoformat())
-                .where(func.substr(ForecastSolarSample.collected_at_local, 1, 10) <= bounds.end_date.isoformat())
-                .order_by(ForecastSolarSample.collected_at_local, ForecastSolarSample.collected_at_utc)
-            ).all())
-    finally:
-        engine.dispose()
+    source = load_analysis_source_data(database_path, bounds)
 
     daily_frames = analysis_daily_energy_frames(
-        samples,
-        forecast_rows,
+        source.samples,
+        source.forecast_rows,
         timezone,
         bounds.start_date,
         bounds.end_date,
@@ -570,7 +762,7 @@ def load_analysis_range(
         bounds.end_at,
     )
     power, battery = average_telemetry_by_interval(
-        samples,
+        source.samples,
         timezone,
         power_interval_minutes,
         actuals_to_forecast,
@@ -629,6 +821,7 @@ def analysis_daily_energy_frames(
             fill_missing=False,
         )
         frame = actual.merge(actual_by_array, on="hour", how="left").merge(forecast, on="hour", how="left")
+        frame = allocate_solar_energy_to_arrays(frame, actuals_to_forecast)
         frame["date"] = date_text
         frames.append(frame)
     return frames
@@ -866,6 +1059,7 @@ def load_daily_energy_frames(
         day = actual.merge(actual_by_array, on="hour", how="left").merge(
             forecast, on="hour", how="left"
         )
+        day = allocate_solar_energy_to_arrays(day, actuals_to_forecast)
         day["date"] = selected_date.isoformat()
         daily_energy.append(day)
     return daily_energy
@@ -982,6 +1176,11 @@ def load_telemetry(
                 )
                 .order_by(SigenStorModbusSample.collected_at_utc)
             ).all())
+            full_updated_last_local = session.scalar(
+                select(SigenStorModbusSample.collected_at_local)
+                .order_by(SigenStorModbusSample.collected_at_utc.desc())
+                .limit(1)
+            )
     finally:
         engine.dispose()
 
@@ -1067,6 +1266,7 @@ def load_telemetry(
         latest_collected_at_utc=(
             latest_sample.collected_at_utc if latest_sample is not None else None
         ),
+        full_updated_last_local=full_updated_last_local,
     )
 
 
@@ -1521,6 +1721,37 @@ def actual_column_name(panel_id: int) -> str:
     return f"actual_panel_{panel_id}"
 
 
+def allocate_solar_energy_to_arrays(
+    dataframe: pd.DataFrame,
+    actuals_to_forecast: dict[str, int],
+) -> pd.DataFrame:
+    """Allocate measured solar energy to arrays using their DC-power proportions."""
+    array_columns = [
+        actual_column_name(panel_id) for panel_id in actuals_to_forecast.values()
+        if actual_column_name(panel_id) in dataframe
+    ]
+    if "solar" not in dataframe or not array_columns:
+        return dataframe
+
+    allocated = dataframe.copy()
+    solar = pd.to_numeric(allocated["solar"], errors="coerce")
+    weights = allocated[array_columns].apply(pd.to_numeric, errors="coerce").clip(lower=0).fillna(0.0)
+    weight_total = weights.sum(axis=1)
+    weighted_rows = solar.notna() & weight_total.gt(0)
+    unweighted_rows = solar.notna() & ~weight_total.gt(0)
+
+    for column in array_columns:
+        allocated.loc[weighted_rows, column] = (
+            solar.loc[weighted_rows]
+            * weights.loc[weighted_rows, column]
+            / weight_total.loc[weighted_rows]
+        )
+        allocated.loc[unweighted_rows, column] = (
+            solar.loc[unweighted_rows] / len(array_columns)
+        )
+    return allocated
+
+
 def forecast_column_name(panel_id: int) -> str:
     return f"forecast_panel_{panel_id}"
 
@@ -1572,7 +1803,7 @@ def summary_rows(
     today = {
         "solar": float(dataframe_column(data, "solar").sum()),
         "battery": float(dataframe_column(data, "battery").sum()),
-        "inverter": latest["inverter_today"],
+        "inverter": latest.get("today_inverter", latest.get("inverter_today")),
         "load": float(dataframe_column(data, "load").sum()),
         "grid_import": float(dataframe_column(data, "grid_import").sum()),
         "grid_export": float(dataframe_column(data, "grid_export").sum()),

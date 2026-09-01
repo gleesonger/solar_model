@@ -23,6 +23,48 @@ GRID_EXPORT_COLOR = "#009E73"
 NET_COST_COLOR = "#6C757D"
 NO_SOLAR_COST_COLOR = "#7B2CBF"
 
+ENERGY_TABLE_COLUMNS = (
+    "period", "solar", "forecast_total", "load", "grid_import", "grid_export",
+)
+
+
+def analysis_column_labels(
+    forecast_arrays: tuple[SolarArrayConfig, ...],
+) -> dict[str, str]:
+    labels = {
+        "period": "Period",
+        "time": "Time",
+        "solar": "Solar",
+        "forecast_total": "Solar Forecast",
+        "load": "Load",
+        "battery": "Battery",
+        "inverter": "Inverter",
+        "grid_import": "Grid Imported",
+        "grid_export": "Grid Exported",
+        "available_energy_kwh": "Available Energy",
+        "soc_percent": "State of Charge",
+        "grid_import_cost": "Import Cost",
+        "grid_export_revenue": "Export Revenue",
+        "net_cost": "Net Cost",
+        "no_solar_battery_import_cost": "Net Cost if No Solar",
+    }
+    for array in forecast_arrays:
+        labels[actual_column_name(array.panel_id)] = f"{array.name} Actual"
+        labels[forecast_column_name(array.panel_id)] = f"{array.name} Forecast"
+    return labels
+
+
+def array_energy_table_columns(
+    forecast_arrays: tuple[SolarArrayConfig, ...],
+) -> tuple[str, ...]:
+    return (
+        "period",
+        *(column for array in forecast_arrays for column in (
+            actual_column_name(array.panel_id),
+            forecast_column_name(array.panel_id),
+        )),
+    )
+
 
 def render_hourly_charts(
     data: pd.DataFrame,
@@ -89,11 +131,15 @@ def render_historical_charts(
     actuals_to_forecast: dict[str, int],
     on_time_zoom: Callable[[Any], None],
 ) -> HistoricalCharts:
+    column_labels = analysis_column_labels(forecast_arrays)
     energy_display = ChartDataDisplay(
         dataframe=data,
         title=lambda: f"Energy by {state.historical_frequency} (kWh)",
         render_chart=lambda: ui.echart(energy_chart_options(data, "period")).classes("w-full h-96"),
         chart_options=lambda dataframe: energy_chart_options(dataframe, "period"),
+        column_labels=column_labels,
+        table_columns=ENERGY_TABLE_COLUMNS,
+        show_total=True,
     )
     power_display = ChartDataDisplay(
         dataframe=power_data,
@@ -109,6 +155,8 @@ def render_historical_charts(
             state.historical_time_zoom_start,
             state.historical_time_zoom_end,
         ),
+        column_labels=column_labels,
+        show_total=True,
     )
     battery_display = ChartDataDisplay(
         dataframe=battery_data,
@@ -118,6 +166,8 @@ def render_historical_charts(
         ),
         render_chart=lambda: ui.echart(battery_chart_options(battery_data)).classes("w-full h-96"),
         chart_options=battery_chart_options,
+        column_labels=column_labels,
+        show_total=True,
     )
     array_energy_display = ChartDataDisplay(
         dataframe=data,
@@ -128,13 +178,17 @@ def render_historical_charts(
         chart_options=lambda dataframe: array_energy_chart_options(
             dataframe, "period", forecast_arrays, actuals_to_forecast
         ),
+        column_labels=column_labels,
+        table_columns=array_energy_table_columns(forecast_arrays),
+        show_total=True,
     )
     money_display = ChartDataDisplay(
         dataframe=money_dataframe(data),
         title=lambda: f"Costs by {state.historical_frequency}",
         render_chart=lambda: ui.echart(money_chart_options(data, "period")).classes("w-full h-96"),
         chart_options=lambda dataframe: money_chart_options(dataframe, "period"),
-        column_labels={"no_solar_battery_import_cost": "Net Cost if No Solar"},
+        column_labels=column_labels,
+        show_total=True,
     )
     return HistoricalCharts(
         energy=energy_display,

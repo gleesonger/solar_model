@@ -9,6 +9,7 @@ from common import LOGGER
 from config import Config
 
 from . import charts, data
+from .download_data_dialog import show_download_data_dialog
 from .models import DashboardElements, DashboardState
 
 
@@ -43,39 +44,58 @@ class AnalysisTab:
                 ["hour", "day", "week", "month", "season", "year"],
                 value=self.state.historical_frequency,
                 label="Group by",
-            ).props("outlined dense").classes("w-36")
+            ).props("outlined dense").classes("w-48")
 
-            def apply_range() -> None:
+            def selected_range() -> tuple[date, int, str, str] | None:
                 try:
                     raw_count = float(count_input.value)
                     count = int(raw_count)
                 except (TypeError, ValueError):
                     ui.notify("Last must be a positive whole number", type="negative")
-                    return
+                    return None
                 if count < 1 or raw_count != count:
                     ui.notify("Last must be a positive whole number", type="negative")
-                    return
+                    return None
                 try:
                     as_of = date.fromisoformat(str(as_of_input.value))
                 except ValueError:
                     ui.notify("As of must be a valid date", type="negative")
-                    return
+                    return None
                 if as_of > datetime.now(self.timezone).date():
                     ui.notify("As of cannot be in the future", type="negative")
-                    return
+                    return None
                 unit = str(unit_input.value)
                 frequency = str(frequency_input.value)
                 if unit not in {"hours", "days", "weeks", "months", "years"}:
                     ui.notify("Select a valid period", type="negative")
-                    return
+                    return None
                 if frequency not in {"hour", "day", "week", "month", "season", "year"}:
                     ui.notify("Select a valid grouping", type="negative")
+                    return None
+                return as_of, count, unit, frequency
+
+            def apply_range() -> None:
+                selection = selected_range()
+                if selection is None:
                     return
+                as_of, count, unit, frequency = selection
                 self.state.historical_as_of = as_of
                 self.state.historical_count = count
                 self.state.historical_unit = unit
                 self.state.historical_frequency = frequency
                 self._try_refresh_historical_tab()
+
+            def download_data() -> None:
+                selection = selected_range()
+                if selection is None:
+                    return
+                as_of, count, unit, _ = selection
+                bounds = data.analysis_range_bounds(as_of, count, unit, self.timezone)
+                show_download_data_dialog(
+                    self.config.database.path,
+                    bounds,
+                    self.timezone,
+                )
 
             def move_as_of(direction: int) -> None:
                 try:
@@ -106,6 +126,8 @@ class AnalysisTab:
                 apply_range()
 
             ui.button("Apply", on_click=apply_range, icon="date_range")
+            ui.space()
+            ui.button("Download Data", on_click=download_data, icon="download")
 
         return controls
 

@@ -537,14 +537,11 @@ def load_historical_energy(
         if end_at is not None:
             combined = combined.loc[timestamps <= end_at.replace(tzinfo=None)]
     if frequency == "hour":
-        combined["bucket_start"] = (
-            dataframe_column(combined, "date") + " " + dataframe_column(combined, "hour")
-        )
         grouped = cast(
             pd.DataFrame,
-            combined.groupby("bucket_start", as_index=False)[value_columns].sum(min_count=1),
+            combined.groupby("hour", as_index=False)[value_columns].sum(min_count=1),
         )
-        grouped["period"] = dataframe_column(grouped, "bucket_start")
+        grouped["period"] = dataframe_column(grouped, "hour")
         return cast(pd.DataFrame, grouped[["period", *value_columns]])
     if frequency == "minute":
         return load_historical_minute_energy(
@@ -1386,14 +1383,14 @@ def summary_rows(
 
 def format_dashboard_number(value: float | None) -> str:
     if value is None or pd.isna(value):
-        return "—"
+        return ""
     rounded = round(float(value), 1)
     return f"{0.0 if rounded == 0 else rounded:.1f}"
 
 
 def format_currency(value: float | None) -> str:
     if value is None or pd.isna(value):
-        return "â€”"
+        return ""
     return f"{float(value):.2f}"
 
 

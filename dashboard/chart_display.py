@@ -4,73 +4,73 @@ from __future__ import annotations
 
 import re
 from collections.abc import Callable
+from numbers import Real
+from typing import Any
 
 import pandas as pd
 from nicegui import ui
 from nicegui.elements.echart import EChart
-from nicegui.elements.label import Label
 
 
 class ChartDataDisplay:
     """Display a chart and its source dataframe with consistent export controls.
 
-    A caller may supply an existing chart or a callback that creates one inside the
-    component. The latter is useful when the callback also needs to bind chart
-    events such as ECharts data zoom.
+    The render callback creates the chart inside the component, keeping ownership
+    of the layout and chart lifecycle in one place. It can also bind ECharts
+    events such as data zoom while creating the chart.
     """
 
     def __init__(
         self,
         *,
         dataframe: pd.DataFrame,
-        title: str,
-        hint: str,
-        chart: EChart | None = None,
-        render_chart: Callable[[], EChart] | None = None,
+        title: str | Callable[[], str],
+        render_chart: Callable[[], EChart],
+        hint: str | Callable[[], str] | None = None,
+        chart_options: Callable[[pd.DataFrame], dict[str, Any]] | None = None,
     ) -> None:
-        if chart is None and render_chart is None:
-            raise ValueError("Provide either chart or render_chart")
-        if chart is not None and render_chart is not None:
-            raise ValueError("Provide chart or render_chart, not both")
-
         self.dataframe = dataframe
-        self.title = ui.label(title).classes("text-lg font-semibold")
-        self.hint = ui.label(hint).classes("text-sm text-gray-600")
+        self._title = title
+        self._hint = hint
+        self._chart_options = chart_options
         self._showing_table = False
 
-        with ui.row().classes("w-full items-start justify-between gap-4 mt-4"):
-            with ui.column().classes("gap-0"):
-                self.title.move()
-                self.hint.move()
+        with ui.row().classes("w-full items-center justify-between gap-4 mt-4"):
+            self.title = ui.label(self._text(title)).classes("text-lg font-semibold")
+
             with ui.row().classes("items-center gap-1 rounded border p-1"):
-                ui.button(icon="content_copy", on_click=self._copy_data).props("flat round dense").tooltip(
-                    "Copy data for Excel"
-                )
-                ui.button(icon="download", on_click=self._download_data).props("flat round dense").tooltip(
-                    "Download CSV"
-                )
-                ui.button(icon="table_chart", on_click=self._toggle_layout).props("flat round dense").tooltip(
-                    "Show table"
-                )
+                ui.button(icon="content_copy", on_click=self._copy_data).props("flat round dense").tooltip("Copy data for Excel")
+                ui.button(icon="download", on_click=self._download_data).props("flat round dense").tooltip("Download CSV")
+                ui.button(icon="table_chart", on_click=self._toggle_layout).props("flat round dense").tooltip("Show table")
+        self.hint = (
+            ui.label(self._text(hint)).classes("text-sm text-gray-600")
+            if hint is not None
+            else None
+        )
 
         self.chart_container = ui.column().classes("w-full")
         with self.chart_container:
-            self.chart = render_chart() if render_chart is not None else chart
-            if chart is not None:
-                chart.move()
+            self.chart = render_chart()
         self.table_container = ui.column().classes("w-full overflow-auto")
         self.table = self._render_table()
         self.table_container.set_visibility(False)
 
-    def update(self, dataframe: pd.DataFrame, *, title: str | None = None, hint: str | None = None) -> None:
+    def update(self, dataframe: pd.DataFrame) -> None:
         self.dataframe = dataframe
-        if title is not None:
-            self.title.set_text(title)
-        if hint is not None:
-            self.hint.set_text(hint)
+        self.title.set_text(self._text(self._title))
+        if self.hint is not None and self._hint is not None:
+            self.hint.set_text(self._text(self._hint))
         self.table.columns = self._table_columns()
         self.table.rows = self._table_rows()
         self.table.update()
+        if self._chart_options is not None:
+            self.chart.options.clear()
+            self.chart.options.update(self._chart_options(dataframe))
+            self.chart.update()
+
+    @staticmethod
+    def _text(value: str | Callable[[], str]) -> str:
+        return value() if callable(value) else value
 
     def _render_table(self):
         with self.table_container:
@@ -87,8 +87,24 @@ class ChartDataDisplay:
         ]
 
     def _table_rows(self) -> list[dict[str, object]]:
-        rows = self.dataframe.where(pd.notna(self.dataframe), None).to_dict(orient="records")
-        return [{"_row": index, **row} for index, row in enumerate(rows)]
+        rows = (
+            self.dataframe.astype(object)
+            .where(pd.notna(self.dataframe), "")
+            .to_dict(orient="records")
+        )
+        return [
+            {
+                "_row": index,
+                **{column: self._format_table_value(value) for column, value in row.items()},
+            }
+            for index, row in enumerate(rows)
+        ]
+
+    @staticmethod
+    def _format_table_value(value: object) -> object:
+        if isinstance(value, Real) and not isinstance(value, bool):
+            return f"{float(value):.2f}"
+        return value
 
     def _copy_data(self) -> None:
         text = self.dataframe.to_csv(index=False, sep="\t", lineterminator="\n")

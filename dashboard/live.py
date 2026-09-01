@@ -25,6 +25,13 @@ LIVE_BATTERY_METRICS = {
     "inverter_battery_available_discharge",
     "plant_battery_soc",
 }
+LIVE_TODAY_METRICS = {
+    "plant_pv_daily_kwh",
+    "plant_load_daily_kwh",
+    "inverter_battery_charge_daily_kwh",
+    "inverter_battery_discharge_daily_kwh",
+    "inverter_pv_daily_kwh",
+}
 LIVE_VALUE_KEYS = {
     "plant_grid_power_kw": "grid",
     "plant_pv_power_kw": "solar",
@@ -103,7 +110,7 @@ class LivePowerCollector:
             )
 
     def _metrics(self) -> set[str]:
-        metrics = LIVE_POWER_METRICS | LIVE_BATTERY_METRICS
+        metrics = LIVE_POWER_METRICS | LIVE_BATTERY_METRICS | LIVE_TODAY_METRICS
         for pv_string in self._actuals_to_forecast:
             metrics.update({
                 f"inverter_{pv_string}_voltage",
@@ -117,6 +124,13 @@ class LivePowerCollector:
         }
         values["battery_available_energy_kwh"] = None
         values["battery_soc_percent"] = None
+        values.update({
+            "today_solar": None,
+            "today_load": None,
+            "today_battery_charge": None,
+            "today_battery_discharge": None,
+            "today_inverter": None,
+        })
         values.update({
             f"actual_panel_{panel_id}": None
             for panel_id in self._actuals_to_forecast.values()
@@ -195,6 +209,19 @@ class LivePowerCollector:
             raise ValueError("live battery readings returned text")
         values["battery_available_energy_kwh"] = available_energy
         values["battery_soc_percent"] = soc_percent
+
+        today_metrics = {
+            "today_solar": "plant_pv_daily_kwh",
+            "today_load": "plant_load_daily_kwh",
+            "today_battery_charge": "inverter_battery_charge_daily_kwh",
+            "today_battery_discharge": "inverter_battery_discharge_daily_kwh",
+            "today_inverter": "inverter_pv_daily_kwh",
+        }
+        for key, metric in today_metrics.items():
+            value, _, _ = readings[metric]
+            if isinstance(value, str):
+                raise ValueError(f"live daily metric {metric!r} returned text")
+            values[key] = value
 
         for pv_string, panel_id in self._actuals_to_forecast.items():
             voltage, _, _ = readings[f"inverter_{pv_string}_voltage"]

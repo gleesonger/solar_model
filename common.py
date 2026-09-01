@@ -65,4 +65,6 @@ def source_path(path: str | Path) -> Path:
     path = Path(path)
     return path if path.is_absolute() else Path(__file__).resolve().parent / path
 
+def str_is_null_or_empty(value: str | None) -> bool:
+    return value is None or value.strip() == ""
 

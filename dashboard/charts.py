@@ -11,7 +11,7 @@ from config import SolarArrayConfig
 
 from .chart_display import ChartDataDisplay
 from .data import actual_column_name, chart_values, dataframe_column, forecast_column_name
-from .models import HistoricalCharts, HourlyCharts, PANEL_COLORS
+from .models import DashboardState, HistoricalCharts, HourlyCharts, PANEL_COLORS
 
 
 def render_hourly_charts(
@@ -74,72 +74,69 @@ def render_historical_charts(
     data: pd.DataFrame,
     power_data: pd.DataFrame,
     battery_data: pd.DataFrame,
-    frequency: str,
+    state: DashboardState,
     forecast_arrays: tuple[SolarArrayConfig, ...],
     actuals_to_forecast: dict[str, int],
-    power_interval_minutes: int,
-    zoom_start: float,
-    zoom_end: float,
     on_time_zoom: Callable[[Any], None],
 ) -> HistoricalCharts:
     energy_display = ChartDataDisplay(
         dataframe=data,
-        title=f"Energy by {frequency} (kWh)",
-        hint="Energy totals for each selected time group.",
+        title=lambda: f"Energy by {state.historical_frequency} (kWh)",
         render_chart=lambda: ui.echart(energy_chart_options(data, "period")).classes("w-full h-96"),
+        chart_options=lambda dataframe: energy_chart_options(dataframe, "period"),
     )
     power_display = ChartDataDisplay(
         dataframe=power_data,
-        title=f"Average power by {time_group_label(power_interval_minutes)} (kW)",
-        hint=(
-            "Pinch with two fingers (or use the mouse wheel or range slider) to zoom. "
-            "Detail changes automatically from hourly to 15-minute to one-minute data."
-        ),
+        title=lambda: f"Average power by {time_group_label(state.historical_power_interval_minutes)} (kW)",
         render_chart=lambda: _render_historical_power_chart(
-            power_data, forecast_arrays, actuals_to_forecast, zoom_start, zoom_end, on_time_zoom
+            power_data, forecast_arrays, actuals_to_forecast,
+            state.historical_time_zoom_start, state.historical_time_zoom_end, on_time_zoom
+        ),
+        chart_options=lambda dataframe: power_chart_options(
+            dataframe,
+            forecast_arrays,
+            actuals_to_forecast,
+            state.historical_time_zoom_start,
+            state.historical_time_zoom_end,
         ),
     )
     battery_display = ChartDataDisplay(
         dataframe=battery_data,
-        title=(
+        title=lambda: (
             "Average battery energy and state of charge by "
-            f"{time_group_label(power_interval_minutes)}"
+            f"{time_group_label(state.historical_power_interval_minutes)}"
         ),
-        hint="Battery energy is in kWh; state of charge is a percentage.",
         render_chart=lambda: _render_historical_battery_chart(
-            battery_data, zoom_start, zoom_end, on_time_zoom
+            battery_data, state.historical_time_zoom_start, state.historical_time_zoom_end, on_time_zoom
+        ),
+        chart_options=lambda dataframe: battery_chart_options(
+            dataframe,
+            state.historical_time_zoom_start,
+            state.historical_time_zoom_end,
         ),
     )
     array_energy_display = ChartDataDisplay(
         dataframe=data,
-        title=f"Solar energy by array and {frequency} (kWh)",
-        hint="Actual and forecast solar energy for each configured array.",
+        title=lambda: f"Solar energy by array and {state.historical_frequency} (kWh)",
         render_chart=lambda: ui.echart(
             array_energy_chart_options(data, "period", forecast_arrays, actuals_to_forecast)
         ).classes("w-full h-96"),
+        chart_options=lambda dataframe: array_energy_chart_options(
+            dataframe, "period", forecast_arrays, actuals_to_forecast
+        ),
     )
     money_display = ChartDataDisplay(
         dataframe=money_dataframe(data),
-        title=f"Costs by {frequency}",
-        hint="Stored tariff costs and revenue for each selected time group.",
+        title=lambda: f"Costs by {state.historical_frequency}",
         render_chart=lambda: ui.echart(money_chart_options(data, "period")).classes("w-full h-96"),
+        chart_options=lambda dataframe: money_chart_options(dataframe, "period"),
     )
     return HistoricalCharts(
-        energy_display=energy_display,
-        energy_title=energy_display.title,
-        energy=energy_display.chart,
-        power_display=power_display,
-        power_title=power_display.title,
-        power=power_display.chart,
-        battery_display=battery_display,
-        battery_title=battery_display.title,
-        battery=battery_display.chart,
-        array_energy_display=array_energy_display,
-        array_energy_title=array_energy_display.title,
-        array_energy=array_energy_display.chart,
-        money_display=money_display,
-        money_title=money_display.title,
-        money=money_display.chart,
+        energy=energy_display,
+        power=power_display,
+        battery=battery_display,
+        array_energy=array_energy_display,
+        money=money_display,
     )
 
 

@@ -2,12 +2,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date
-from typing import Any
-
 import pandas as pd
 from nicegui.elements.echart import EChart
 from nicegui.elements.label import Label
 from nicegui.elements.table import Table
+
+from .chart_display import ChartDataDisplay
 
 PANEL_COLORS = ("#5470c6", "#91cc75", "#fac858", "#ee6666")
 SUMMARY_LATEST_KEYS = {
@@ -61,21 +61,11 @@ class HourlyCharts:
 
 @dataclass(frozen=True)
 class HistoricalCharts:
-    energy_display: Any
-    energy_title: Label
-    energy: EChart
-    power_display: Any
-    power_title: Label
-    power: EChart
-    battery_display: Any
-    battery_title: Label
-    battery: EChart
-    array_energy_display: Any
-    array_energy_title: Label
-    array_energy: EChart
-    money_display: Any
-    money_title: Label
-    money: EChart
+    energy: ChartDataDisplay
+    power: ChartDataDisplay
+    battery: ChartDataDisplay
+    array_energy: ChartDataDisplay
+    money: ChartDataDisplay
 
 
 @dataclass

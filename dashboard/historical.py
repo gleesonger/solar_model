@@ -33,12 +33,12 @@ class HistoricalTab:
                 "outlined dense"
             ).classes("w-28")
             unit_input = ui.select(
-                ["hours", "minutes", "days", "weeks", "months", "years"],
+                ["hours", "days", "weeks", "months", "years"],
                 value=self.state.historical_unit,
                 label="Period",
             ).props("outlined dense").classes("w-36")
             frequency_input = ui.select(
-                ["minute", "hour", "day", "week", "month", "season", "year"],
+                ["hour", "day", "week", "month", "season", "year"],
                 value=self.state.historical_frequency,
                 label="Group by",
             ).props("outlined dense").classes("w-36")
@@ -63,10 +63,10 @@ class HistoricalTab:
                     return
                 unit = str(unit_input.value)
                 frequency = str(frequency_input.value)
-                if unit not in {"hours", "minutes", "days", "weeks", "months", "years"}:
+                if unit not in {"hours", "days", "weeks", "months", "years"}:
                     ui.notify("Select a valid period", type="negative")
                     return
-                if frequency not in {"minute", "hour", "day", "week", "month", "season", "year"}:
+                if frequency not in {"hour", "day", "week", "month", "season", "year"}:
                     ui.notify("Select a valid grouping", type="negative")
                     return
                 self.state.historical_as_of = as_of
@@ -90,12 +90,9 @@ class HistoricalTab:
             historical,
             power,
             battery,
-            self.state.historical_frequency,
+            self.state,
             self.config.forecast.arrays,
             self.config.dashboard.actuals_to_forecast,
-            self.state.historical_power_interval_minutes,
-            self.state.historical_time_zoom_start,
-            self.state.historical_time_zoom_end,
             self._refresh_historical_time_zoom,
         )
 
@@ -106,57 +103,11 @@ class HistoricalTab:
         chart_elements = self.elements.historical_charts
         if chart_elements is None:
             return
-        chart_elements.energy_display.update(
-            historical, title=f"Energy by {self.state.historical_frequency} (kWh)"
-        )
-        chart_elements.power_display.update(
-            power,
-            title=f"Average power by {charts.time_group_label(self.state.historical_power_interval_minutes)} (kW)",
-        )
-        chart_elements.battery_display.update(
-            battery,
-            title=(
-                "Average battery energy and state of charge by "
-                f"{charts.time_group_label(self.state.historical_power_interval_minutes)}"
-            ),
-        )
-        chart_elements.array_energy_display.update(
-            historical,
-            title=f"Solar energy by array and {self.state.historical_frequency} (kWh)",
-        )
-        chart_elements.money_display.update(
-            charts.money_dataframe(historical),
-            title=f"Costs by {self.state.historical_frequency}",
-        )
-        charts.update_chart(chart_elements.energy, charts.energy_chart_options(historical, "period"))
-        charts.update_chart(
-            chart_elements.power,
-            charts.power_chart_options(
-                power,
-                self.config.forecast.arrays,
-                self.config.dashboard.actuals_to_forecast,
-                self.state.historical_time_zoom_start,
-                self.state.historical_time_zoom_end,
-            ),
-        )
-        charts.update_chart(
-            chart_elements.battery,
-            charts.battery_chart_options(
-                battery,
-                self.state.historical_time_zoom_start,
-                self.state.historical_time_zoom_end,
-            ),
-        )
-        charts.update_chart(
-            chart_elements.array_energy,
-            charts.array_energy_chart_options(
-                historical,
-                "period",
-                self.config.forecast.arrays,
-                self.config.dashboard.actuals_to_forecast,
-            ),
-        )
-        charts.update_chart(chart_elements.money, charts.money_chart_options(historical, "period"))
+        chart_elements.energy.update(historical)
+        chart_elements.power.update(power)
+        chart_elements.battery.update(battery)
+        chart_elements.array_energy.update(historical)
+        chart_elements.money.update(charts.money_dataframe(historical))
 
     def _try_refresh_historical_tab(self) -> None:
         try:
@@ -228,7 +179,8 @@ class HistoricalTab:
             return
         chart_elements = self.elements.historical_charts
         if chart_elements is not None:
-            for chart in (chart_elements.power, chart_elements.battery):
+            for display in (chart_elements.power, chart_elements.battery):
+                chart = display.chart
                 if chart is not getattr(event, "sender", None):
                     chart.run_chart_method(
                         "dispatchAction",

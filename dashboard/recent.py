@@ -10,22 +10,11 @@ from nicegui.elements.label import Label
 from nicegui.elements.table import Table
 
 from common import LOGGER
-from config import Config, SolarArrayConfig
+from config import Config
 
 from . import data
 from .live import LivePowerCollector
 from .models import DashboardElements, DashboardState, LivePowerData
-
-
-SUMMARY_TODAY_LIVE_KEYS = {
-    "Solar": "solar",
-    "Battery": "battery",
-    "Inverter": "inverter",
-    "Load": "load",
-    "Grid-Imported": "today_grid_import",
-    "Grid-Exported": "today_grid_export",
-}
-
 
 class RecentTab:
     def __init__(
@@ -42,18 +31,6 @@ class RecentTab:
         self.timezone = ZoneInfo(config.timezone)
         self._today_values: dict[str, float | None] = {}
         self._previous_live_for_today: LivePowerData | None = None
-        self._today_live_keys = {
-            **SUMMARY_TODAY_LIVE_KEYS,
-            **{
-                f"Solar-{array.name}": data.actual_column_name(array.panel_id)
-                for array in config.forecast.arrays
-            },
-        }
-        self._array_today_metrics = frozenset(
-            f"Solar-{array.name}"
-            for array in config.forecast.arrays
-            if array.panel_id in config.dashboard.actuals_to_forecast.values()
-        )
 
     def render_recent_tab(self) -> None:
         try:
@@ -80,7 +57,6 @@ class RecentTab:
         self.elements.live_table = render_live_today_table(
             day,
             latest,
-            self.config.forecast.arrays,
         )
         self._update_live_table_rows(live_power)
 
@@ -101,7 +77,6 @@ class RecentTab:
             self.elements.live_table.rows = data.summary_rows(
                 day,
                 latest,
-                self.config.forecast.arrays,
             )
             self._update_live_table_rows(live_power)
         if self.elements.battery_status_label is not None:
@@ -191,7 +166,10 @@ class RecentTab:
     def _live_table_values(live_power: LivePowerData) -> dict[str, float | None]:
         return live_power.values
 
-    def _set_live_today_values(self, live_power: LivePowerData) -> None:
+    def _set_live_today_values(
+        self,
+        live_power: LivePowerData,
+    ) -> None:
         self._today_values = {
             "Solar": None,
             "Battery": None,
@@ -199,13 +177,8 @@ class RecentTab:
             "Load": None,
             "Grid-Imported": None,
             "Grid-Exported": None,
-            **{
-                f"Solar-{array.name}": None
-                for array in self.config.forecast.arrays
-            },
         }
         self._apply_live_today_meters(live_power)
-        self._set_array_today_total(live_power)
         self._previous_live_for_today = live_power
 
     def _update_live_table_rows(self, live_power: LivePowerData) -> None:
@@ -250,63 +223,6 @@ class RecentTab:
         current_time = data.parse_time(live_power.collected_at_utc, ZoneInfo("UTC"))
         if previous_time.astimezone(self.timezone).date() != current_time.astimezone(self.timezone).date():
             self._set_live_today_values(live_power)
-            return
-        self._advance_live_array_solar_values(previous, live_power)
-
-    def _advance_live_array_solar_values(
-        self,
-        previous: LivePowerData,
-        current: LivePowerData,
-    ) -> None:
-        before_solar = previous.values.get("today_solar")
-        current_solar = current.values.get("today_solar")
-        if before_solar is None or current_solar is None:
-            return
-        generated_energy = current_solar - before_solar
-        if generated_energy <= 0:
-            return
-
-        weights: dict[str, float] = {}
-        for metric in self._array_today_metrics:
-            key = self._today_live_keys[metric]
-            before_power = previous.values.get(key)
-            current_power = current.values.get(key)
-            if before_power is not None and current_power is not None:
-                weights[metric] = max((before_power + current_power) / 2, 0.0)
-        weight_total = sum(weights.values())
-        if weight_total <= 0:
-            weights = {metric: 1.0 for metric in self._array_today_metrics}
-            weight_total = float(len(weights))
-
-        for metric, weight in weights.items():
-            self._today_values[metric] = (
-                (self._today_values.get(metric) or 0.0)
-                + generated_energy * weight / weight_total
-            )
-
-    def _set_array_today_total(self, live_power: LivePowerData) -> None:
-        """Align the array allocation with the live daily solar meter at refresh time."""
-        solar_total = live_power.values.get("today_solar")
-        if solar_total is None or not self._array_today_metrics:
-            return
-
-        weights = {
-            metric: max(self._today_values.get(metric) or 0.0, 0.0)
-            for metric in self._array_today_metrics
-        }
-        weight_total = sum(weights.values())
-        if weight_total <= 0:
-            weights = {
-                metric: max(live_power.values.get(self._today_live_keys[metric]) or 0.0, 0.0)
-                for metric in self._array_today_metrics
-            }
-            weight_total = sum(weights.values())
-        if weight_total <= 0:
-            weights = {metric: 1.0 for metric in self._array_today_metrics}
-            weight_total = float(len(weights))
-
-        for metric, weight in weights.items():
-            self._today_values[metric] = solar_total * weight / weight_total
 
     @staticmethod
     def _battery_status_text(live_power: LivePowerData) -> str:
@@ -351,7 +267,6 @@ class RecentTab:
 def render_live_today_table(
     dataframe: pd.DataFrame,
     latest: dict[str, float | None],
-    forecast_arrays: tuple[SolarArrayConfig, ...],
 ) -> Table:
     columns = [
         {"name": "metric", "label": "", "field": "metric", "align": "left"},
@@ -361,7 +276,7 @@ def render_live_today_table(
     ]
     return ui.table(
         columns=columns,
-        rows=data.summary_rows(dataframe, latest, forecast_arrays),
+        rows=data.summary_rows(dataframe, latest),
         row_key="metric",
     ).props(
         "dense flat bordered"

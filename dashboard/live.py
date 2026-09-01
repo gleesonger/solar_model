@@ -50,13 +50,11 @@ class LivePowerCollector:
         modbus: ModbusConfig,
         timezone_name: str,
         database_path: str,
-        actuals_to_forecast: dict[str, int],
         collection_interval_seconds: float,
     ) -> None:
         self._modbus = modbus
         self._timezone_name = timezone_name
         self._database_path = database_path
-        self._actuals_to_forecast = actuals_to_forecast
         self._collection_interval_seconds = collection_interval_seconds
         self._registers = load_registers(
             REGISTER_MAP_PATH,
@@ -117,11 +115,6 @@ class LivePowerCollector:
 
     def _metrics(self) -> set[str]:
         metrics = LIVE_POWER_METRICS | LIVE_BATTERY_METRICS | LIVE_TODAY_METRICS
-        for pv_string in self._actuals_to_forecast:
-            metrics.update({
-                f"inverter_{pv_string}_voltage",
-                f"inverter_{pv_string}_current",
-            })
         return metrics
 
     def _empty_values(self) -> dict[str, float | None]:
@@ -138,10 +131,6 @@ class LivePowerCollector:
             "today_inverter": None,
             "today_grid_import": None,
             "today_grid_export": None,
-        })
-        values.update({
-            f"actual_panel_{panel_id}": None
-            for panel_id in self._actuals_to_forecast.values()
         })
         return values
 
@@ -250,10 +239,4 @@ class LivePowerCollector:
             baseline = self._grid_energy_start.setdefault(key, value)
             values[key] = max(value - baseline, 0.0)
 
-        for pv_string, panel_id in self._actuals_to_forecast.items():
-            voltage, _, _ = readings[f"inverter_{pv_string}_voltage"]
-            current, _, _ = readings[f"inverter_{pv_string}_current"]
-            if isinstance(voltage, str) or isinstance(current, str):
-                raise ValueError(f"live PV string {pv_string!r} returned text")
-            values[f"actual_panel_{panel_id}"] = max(voltage * current, 0.0) / 1000
         return values

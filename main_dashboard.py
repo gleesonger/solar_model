@@ -21,7 +21,6 @@ def main() -> None:
         config.actuals.modbus,
         config.timezone,
         config.database.path,
-        config.dashboard.actuals_to_forecast,
         config.actuals.data_retrival_schedule.live_update_interval_seconds,
     )
     app.on_shutdown(live_collector.stop)

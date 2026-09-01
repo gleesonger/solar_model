@@ -1820,7 +1820,6 @@ def energy_summary_rows(data: pd.DataFrame) -> list[dict[str, str]]:
 def summary_rows(
     data: pd.DataFrame,
     latest: dict[str, float | None],
-    forecast_arrays: tuple[SolarArrayConfig, ...],
 ) -> list[dict[str, str]]:
     today = {
         "solar": float(dataframe_column(data, "solar").sum()),
@@ -1848,22 +1847,6 @@ def summary_rows(
         }
         for label, key in SUMMARY_LATEST_KEYS.items()
     ]
-    for array in forecast_arrays:
-        actual = actual_column_name(array.panel_id)
-        forecast_column = forecast_column_name(array.panel_id)
-        rows.append({
-            "metric": f"Solar-{array.name}",
-            "latest_key": actual,
-            "latest": format_dashboard_number(latest.get(actual)),
-            "today": format_dashboard_number(
-                float(dataframe_column(data, actual).sum()) if actual in data else None
-            ),
-            "forecast": format_dashboard_number(
-                float(dataframe_column(data, forecast_column).sum())
-                if forecast_column in data
-                else None
-            ),
-        })
     return rows
 
 

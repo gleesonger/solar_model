@@ -820,6 +820,7 @@ def analysis_daily_energy_frames(
                 grid_import=float("nan"), grid_export=float("nan"),
                 grid_import_cost=float("nan"), grid_export_revenue=float("nan"),
                 net_cost=float("nan"), no_solar_battery_import_cost=float("nan"),
+                import_rate=float("nan"), export_rate=float("nan"),
             )
             actual_by_array = hours.assign(**{column: float("nan") for column in actual_columns})
         forecast = aggregate_forecast(
@@ -894,6 +895,8 @@ def historical_energy_from_frames(
 ) -> pd.DataFrame:
     combined = pd.concat(daily_frames, ignore_index=True)
     value_columns = [column for column in combined.columns if column not in {"date", "hour"}]
+    rate_columns = [column for column in ("import_rate", "export_rate") if column in value_columns]
+    sum_columns = [column for column in value_columns if column not in rate_columns]
     for column in value_columns:
         combined[column] = pd.to_numeric(combined[column], errors="coerce")
     timestamps = pd.to_datetime(
@@ -904,19 +907,19 @@ def historical_energy_from_frames(
         & (timestamps <= end_at.replace(tzinfo=None))
     ]
     if frequency == "hour":
-        grouped = cast(
-            pd.DataFrame,
-            combined.groupby("hour", as_index=False)[value_columns].sum(min_count=1),
-        )
+        grouped = cast(pd.DataFrame, combined.groupby("hour", as_index=False).agg({
+            **{column: "sum" for column in sum_columns},
+            **{column: "mean" for column in rate_columns},
+        }))
         grouped["period"] = dataframe_column(grouped, "hour")
         return cast(pd.DataFrame, grouped[["period", *value_columns]])
     combined["bucket_start"] = dataframe_column(combined, "date").map(
         lambda value: historical_bucket_start(date.fromisoformat(str(value)), frequency)
     )
-    grouped = cast(
-        pd.DataFrame,
-        combined.groupby("bucket_start", as_index=False)[value_columns].sum(min_count=1),
-    )
+    grouped = cast(pd.DataFrame, combined.groupby("bucket_start", as_index=False).agg({
+        **{column: "sum" for column in sum_columns},
+        **{column: "mean" for column in rate_columns},
+    }))
     grouped["period"] = dataframe_column(grouped, "bucket_start").map(
         lambda value: historical_bucket_label(value, frequency)
     )
@@ -1426,6 +1429,9 @@ def actual_hourly_from_samples(
         ("net_cost", "net_cost_period"),
         ("no_solar_battery_import_cost", "no_solar_battery_import_cost_period"),
     )
+    rate_columns = (("import_rate", "import_rate"), ("export_rate", "export_rate"))
+    rate_totals: dict[tuple[str, str], float] = {}
+    rate_counts: dict[tuple[str, str], int] = {}
     for sample in samples:
         timestamp = parse_time(sample.collected_at_local, day_start.tzinfo or ZoneInfo("UTC"))
         if timestamp <= day_start:
@@ -1437,12 +1443,20 @@ def actual_hourly_from_samples(
             value = getattr(sample, attribute)
             if value is not None:
                 totals[(hour, name)] = totals.get((hour, name), 0.0) + value
+        for name, attribute in rate_columns:
+            value = getattr(sample, attribute)
+            if value is not None:
+                rate_totals[(hour, name)] = rate_totals.get((hour, name), 0.0) + value
+                rate_counts[(hour, name)] = rate_counts.get((hour, name), 0) + 1
 
     rows: list[dict[str, float | str]] = []
     for hour in dataframe_column(hours, "hour"):
         row: dict[str, float | str] = {"hour": hour}
         for name, _ in columns:
             row[name] = totals.get((hour, name), float("nan"))
+        for name, _ in rate_columns:
+            count = rate_counts.get((hour, name), 0)
+            row[name] = rate_totals[(hour, name)] / count if count else float("nan")
         row["battery"] = row["battery_charge"] - row["battery_discharge"]
         rows.append(row)
     result = pd.DataFrame(rows).drop(columns=["battery_charge", "battery_discharge"])

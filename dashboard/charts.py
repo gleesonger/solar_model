@@ -47,6 +47,8 @@ def analysis_column_labels(
         "grid_export_revenue": "Export Revenue",
         "net_cost": "Net Cost",
         "no_solar_battery_import_cost": "Net Cost if No Solar",
+        "import_rate": "Import Rate",
+        "export_rate": "Export Rate",
     }
     for array in forecast_arrays:
         labels[actual_column_name(array.panel_id)] = f"{array.name} Actual"
@@ -179,10 +181,11 @@ def render_historical_charts(
         table_columns=array_energy_table_columns(forecast_arrays),
         show_total=True,
     )
+    money_data = money_dataframe(data)
     money_display = ChartDataDisplay(
-        dataframe=money_dataframe(data),
+        dataframe=money_data,
         title=lambda: f"Costs by {state.historical_frequency}",
-        render_chart=lambda: ui.echart(money_chart_options(data, "period")).classes("w-full h-96"),
+        render_chart=lambda: ui.echart(money_chart_options(money_data, "period")).classes("w-full h-96"),
         chart_options=lambda dataframe: money_chart_options(dataframe, "period"),
         column_labels=column_labels,
         show_total=True,
@@ -262,6 +265,10 @@ MONEY_SERIES = (
     ("Net Cost", "net_cost", NET_COST_COLOR),
     ("Net Cost if No Solar", "no_solar_battery_import_cost", NO_SOLAR_COST_COLOR),
 )
+MONEY_RATE_SERIES = (
+    ("Import Rate", "import_rate", GRID_IMPORT_COLOR),
+    ("Export Rate", "export_rate", GRID_EXPORT_COLOR),
+)
 
 
 def forecast_item_style(color: str) -> dict[str, Any]:
@@ -281,8 +288,11 @@ def forecast_item_style(color: str) -> dict[str, Any]:
 
 
 def money_dataframe(data: pd.DataFrame) -> pd.DataFrame:
-    columns = ["period", *[column for _, column, _ in MONEY_SERIES]]
-    return data.reindex(columns=columns).copy()
+    columns = ["period", *[column for _, column, _ in MONEY_SERIES], *[column for _, column, _ in MONEY_RATE_SERIES]]
+    result = data.reindex(columns=columns).copy()
+    for _, column, _ in MONEY_RATE_SERIES:
+        result[column] = result[column] * 100
+    return result
 
 
 def money_chart_options(data: pd.DataFrame, category_column: str) -> dict[str, Any]:
@@ -291,15 +301,20 @@ def money_chart_options(data: pd.DataFrame, category_column: str) -> dict[str, A
         "Export Revenue": True,
         "Net Cost": False,
         "Net Cost if No Solar": False,
+        "Import Rate": True,
+        "Export Rate": True,
     }
     return {
         "tooltip": {"trigger": "axis"},
         "legend": {
-            "data": [label for label, _, _ in MONEY_SERIES],
+            "data": [label for label, _, _ in (*MONEY_SERIES, *MONEY_RATE_SERIES)],
             "selected": selected,
         },
         "xAxis": {"type": "category", "data": dataframe_column(data, category_column).tolist()},
-        "yAxis": {"type": "value", "name": "Currency"},
+        "yAxis": [
+            {"type": "value", "name": "Currency"},
+            {"type": "value", "name": "Rate"},
+        ],
         "series": [
             {
                 "name": label,
@@ -308,6 +323,18 @@ def money_chart_options(data: pd.DataFrame, category_column: str) -> dict[str, A
                 "itemStyle": {"color": color},
             }
             for label, column, color in MONEY_SERIES
+        ] + [
+            {
+                "name": label,
+                "type": "line",
+                "yAxisIndex": 1,
+                "showSymbol": False,
+                "step": "end",
+                "lineStyle": {"color": color},
+                "itemStyle": {"color": color},
+                "data": chart_values(dataframe_column(data, column)),
+            }
+            for label, column, color in MONEY_RATE_SERIES
         ],
     }
 
@@ -425,6 +452,12 @@ def power_chart_options(
 
 
 def battery_chart_options(battery_data: pd.DataFrame) -> dict[str, Any]:
+    estimated_capacity = estimated_battery_capacity_kwh(battery_data)
+    energy_axis: dict[str, Any] = {"type": "value", "name": "kWh", "min": 0}
+    if estimated_capacity is not None:
+        energy_axis["max"] = estimated_capacity
+        energy_axis["interval"] = estimated_capacity / 5
+        energy_axis["axisLabel"] = {":formatter": "value => Number(value).toFixed(1)"}
     return {
         "tooltip": {"trigger": "axis"},
         "legend": {"data": ["Available energy", "State of charge"]},
@@ -434,8 +467,8 @@ def battery_chart_options(battery_data: pd.DataFrame) -> dict[str, Any]:
             "data": dataframe_column(battery_data, "time").tolist(),
         },
         "yAxis": [
-            {"type": "value", "name": "kWh"},
-            {"type": "value", "name": "%", "min": 0, "max": 100},
+            energy_axis,
+            {"type": "value", "name": "%", "min": 0, "max": 100, "interval": 20},
         ],
         "series": [
             {
@@ -460,6 +493,20 @@ def battery_chart_options(battery_data: pd.DataFrame) -> dict[str, Any]:
             },
         ],
     }
+
+
+def estimated_battery_capacity_kwh(battery_data: pd.DataFrame) -> float | None:
+    """Estimate usable capacity from the displayed energy and state-of-charge data."""
+    available_energy = pd.to_numeric(
+        dataframe_column(battery_data, "available_energy_kwh"), errors="coerce"
+    ).dropna()
+    state_of_charge = pd.to_numeric(
+        dataframe_column(battery_data, "soc_percent"), errors="coerce"
+    ).dropna()
+    average_soc = state_of_charge.mean()
+    if available_energy.empty or pd.isna(average_soc) or average_soc <= 0:
+        return None
+    return float(available_energy.mean() * 100 / average_soc)
 
 
 def time_chart_grid() -> dict[str, Any]:

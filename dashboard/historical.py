@@ -24,8 +24,8 @@ class HistoricalTab:
         self.elements = elements
         self.timezone = ZoneInfo(config.timezone)
 
-    def render_historical_tab(self) -> None:
-        with ui.row().classes("w-full items-end gap-3"):
+    def render_historical_controls(self):
+        with ui.row().classes("analysis-controls w-full items-end gap-3") as controls:
             ui.button("<", on_click=lambda: move_as_of(-1)).props("dense outline")
             as_of_input = ui.input("As of", value=self.state.historical_as_of.isoformat()).props(
                 f"type=date outlined dense max={datetime.now(self.timezone).date().isoformat()}"
@@ -107,15 +107,16 @@ class HistoricalTab:
 
             ui.button("Apply", on_click=apply_range, icon="date_range")
 
+        return controls
+
+    def render_historical_tab(self) -> None:
         try:
             historical, power, battery, start, as_of = self._load_historical_data()
         except Exception as error:
             LOGGER.exception("Dashboard historical data initial load failed")
             ui.notify(f"Unable to load historical data: {error}", type="negative")
             return
-        self.elements.historical_range_label = ui.label(
-            self._range_label(start, as_of)
-        ).classes("text-sm text-gray-600 mb-2")
+
         self.elements.historical_charts = charts.render_historical_charts(
             historical,
             power,
@@ -128,8 +129,7 @@ class HistoricalTab:
 
     def refresh_historical_tab(self) -> None:
         historical, power, battery, start, as_of = self._load_historical_data()
-        if self.elements.historical_range_label is not None:
-            self.elements.historical_range_label.set_text(self._range_label(start, as_of))
+
         chart_elements = self.elements.historical_charts
         if chart_elements is None:
             return
@@ -216,9 +216,3 @@ class HistoricalTab:
                         "dispatchAction",
                         {"type": "dataZoom", "start": zoom_range[0], "end": zoom_range[1]},
                     )
-
-    def _range_label(self, start, as_of) -> str:
-        return (
-            f"Total grouped by {self.state.historical_frequency}: "
-            f"{start:%d %b %Y} to {as_of:%d %b %Y}, inclusive"
-        )

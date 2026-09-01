@@ -10,7 +10,9 @@ python main_data_collection.py
 
 The dashboard runs a lightweight background collector for the `Latest (kW)` column. It reads the configured plant power values and mapped PV-string power values at the live interval, retaining only the newest successful result in memory.
 
-Set `actuals.scheduler.interval_seconds` in `config.yaml` to change the scheduler interval; it defaults to `60` seconds.
+Set `actuals.data_retrival_schedule.full_updated_interval_seconds` in `config.yaml` to change the full data-refresh interval; it defaults to `60` seconds.
+
+Set `actuals.data_retrival_schedule.live_update_interval_seconds` to change the live Modbus polling and browser refresh interval; it defaults to `1` second.
 The dashboard polls live power once per second only while at least one browser is connected.
 Set `forecast.interval_seconds` in `config.yaml` to change the minimum elapsed time between forecast scans; it is configured for `3600` seconds.
 
@@ -59,7 +61,7 @@ Each forecast array requires a unique integer `panel_id` from `1` through `4`; i
 
 ## Modbus register map
 
-Sigenergy register addresses and scaling are firmware/device dependent. The collector reads contiguous groups. The supplied `sigen_register_map.json` contains electrical metrics, while `sigen_device_register_map.json` contains the device and system metadata recorded when values change. Relative register-map paths are resolved from the application source directory; the maps are not copied into the runtime configuration directory.
+Sigenergy register addresses and scaling are firmware/device dependent. The collector reads contiguous groups. The supplied `sigen_register_map.json` contains electrical metrics, while `sigen_device_register_map.json` contains the device and system metadata recorded when values change. Their filenames are fixed in `modbus_collector.py`; they are not dashboard configuration settings.
 
 Each entry has this shape:
 

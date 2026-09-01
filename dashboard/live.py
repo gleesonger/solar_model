@@ -9,7 +9,7 @@ from pymodbus.client import ModbusTcpClient
 
 from common import LOGGER, timestamps
 from config import ModbusConfig
-from modbus_collector import load_registers, read_registers
+from modbus_collector import REGISTER_MAP_PATH, load_registers, read_registers
 
 from .models import LivePowerData, SUMMARY_LATEST_KEYS
 
@@ -54,7 +54,7 @@ class LivePowerCollector:
         self._actuals_to_forecast = actuals_to_forecast
         self._collection_interval_seconds = collection_interval_seconds
         self._registers = load_registers(
-            modbus.register_map,
+            REGISTER_MAP_PATH,
             modbus.default_device_id,
             metrics=self._metrics(),
         )
@@ -176,6 +176,7 @@ class LivePowerCollector:
             readings = read_registers(client, self._registers)
             values = self._power_values(readings)
             collected_at_utc, collected_at_local = timestamps(timezone_name=self._timezone_name)
+            print(f"Live Modbus poll {collected_at_local}: {values}", flush=True)
             with self._lock:
                 self._latest = LivePowerData(collected_at_utc, collected_at_local, values)
                 first_successful_read = not self._has_received_data

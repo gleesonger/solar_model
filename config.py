@@ -11,8 +11,6 @@ from zoneinfo import ZoneInfo
 import yaml
 import dacite
 
-from common import source_path
-
 @dataclass(frozen=True)
 class LoggingConfig:
     level: str
@@ -24,8 +22,9 @@ class DatabaseConfig:
 
 
 @dataclass(frozen=True)
-class SchedulerConfig:
-    interval_seconds: int
+class DataRetrivalScheduleConfig:
+    live_update_interval_seconds: float
+    full_updated_interval_seconds: int
 
 
 @dataclass(frozen=True)
@@ -51,7 +50,6 @@ class ForecastConfig:
 class DashboardConfig:
     port: int
     host: str
-    live_update_interval_seconds: float
     actuals_to_forecast: dict[str, int]
 
 
@@ -75,13 +73,11 @@ class ModbusConfig:
     port: int
     timeout_seconds: float
     default_device_id: int
-    register_map: Path
-    device_register_map: Path
 
 
 @dataclass(frozen=True)
 class ActualsConfig:
-    scheduler: SchedulerConfig
+    data_retrival_schedule: DataRetrivalScheduleConfig
     modbus: ModbusConfig
 
 
@@ -107,7 +103,6 @@ def load_config(path: str | Path = "config.yaml") -> Config:
             data=raw_config,
             config=dacite.Config(
                 cast=[tuple],
-                type_hooks={Path: source_path},
                 convert_key=lambda field_name: field_name.removesuffix("_"),
             ),
         )
@@ -120,9 +115,9 @@ def load_config(path: str | Path = "config.yaml") -> Config:
 def validate_config(config: Config) -> None:
     """Validate configuration values after the YAML has been deserialized."""
     if (
-        config.actuals.scheduler.interval_seconds <= 0
+        config.actuals.data_retrival_schedule.live_update_interval_seconds <= 0
+        or config.actuals.data_retrival_schedule.full_updated_interval_seconds <= 0
         or config.forecast.interval_seconds <= 0
-        or config.dashboard.live_update_interval_seconds <= 0
     ):
         raise ValueError("scheduler, live, and forecast intervals must be greater than zero")
 
@@ -194,14 +189,6 @@ def validate_config(config: Config) -> None:
 
     if not 1 <= config.dashboard.port <= 65535:
         raise ValueError("Dashboard port must be between 1 and 65535")
-
-    for register_map in (
-        config.actuals.modbus.register_map,
-        config.actuals.modbus.device_register_map,
-    ):
-        if not register_map.is_file():
-            raise ValueError(f"register map does not exist: {register_map}")
-
 
 WEEKDAYS = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
 

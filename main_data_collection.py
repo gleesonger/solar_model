@@ -9,16 +9,21 @@ from common import LOGGER, configure_logging, sleep_until_next_interval
 from config import load_config
 from database import open_database
 from forecast_collector import collect_once as collect_forecast_once
-from modbus_collector import collect_once as collect_modbus_once, load_registers
+from modbus_collector import (
+    DEVICE_REGISTER_MAP_PATH,
+    REGISTER_MAP_PATH,
+    collect_once as collect_modbus_once,
+    load_registers,
+)
 
 
 def main() -> None:
     config = load_config()
-    scheduler = config.actuals.scheduler
+    data_retrival_schedule = config.actuals.data_retrival_schedule
     modbus = config.actuals.modbus
     configure_logging(config.logging.level)
-    registers = load_registers(modbus.register_map, modbus.default_device_id)
-    device_registers = load_registers(modbus.device_register_map, modbus.default_device_id)
+    registers = load_registers(REGISTER_MAP_PATH, modbus.default_device_id)
+    device_registers = load_registers(DEVICE_REGISTER_MAP_PATH, modbus.default_device_id)
     database = open_database(config.database.path)
     client = None
     previous = database.load_previous_cumulatives()
@@ -26,7 +31,7 @@ def main() -> None:
     try:
         with requests.Session() as session:
             LOGGER.info("Waiting for next interval before starting collectors")
-            sleep_until_next_interval(scheduler.interval_seconds)
+            sleep_until_next_interval(data_retrival_schedule.full_updated_interval_seconds)
             last_forecast_scan: float | None = None
             while True:
                 if client is None:
@@ -56,7 +61,7 @@ def main() -> None:
                 if last_forecast_scan is None or now - last_forecast_scan >= config.forecast.interval_seconds:
                     collect_forecast_once(session, database, config.forecast.arrays, config.forecast.endpoint, config.forecast.timeout_seconds, config.timezone)
                     last_forecast_scan = now
-                sleep_until_next_interval(scheduler.interval_seconds)
+                sleep_until_next_interval(data_retrival_schedule.full_updated_interval_seconds)
     finally:
         if client is not None:
             client.close()

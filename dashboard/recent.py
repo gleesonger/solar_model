@@ -260,7 +260,7 @@ class RecentTab:
             datetime.now(ZoneInfo("UTC"))
             - data.parse_time(collected_at_utc, ZoneInfo("UTC"))
         ).total_seconds()
-        if age_seconds > self.config.actuals.scheduler.interval_seconds * 2:
+        if age_seconds > self.config.actuals.data_retrival_schedule.full_updated_interval_seconds * 2:
             LOGGER.warning("Dashboard database telemetry is stale")
 
     def _update_live_status(self, collected_at_utc: str | None) -> None:

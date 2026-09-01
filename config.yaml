@@ -9,7 +9,6 @@ database:
 dashboard:
   host: 0.0.0.0
   port: 8090
-  live_update_interval_seconds: 1
   actuals_to_forecast:
     pv1: 1
     pv2: 2
@@ -55,12 +54,11 @@ forecast:
       peak_kw: 5.225
 
 actuals:
-  scheduler:
-    interval_seconds: 60
+  data_retrival_schedule:
+    live_update_interval_seconds: 1
+    full_updated_interval_seconds: 60
   modbus:
     host: 192.168.1.130
     port: 502
     timeout_seconds: 5
     default_device_id: 247
-    register_map: sigen_register_map.json
-    device_register_map: sigen_device_register_map.json

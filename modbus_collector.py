@@ -6,8 +6,12 @@ from pathlib import Path
 
 from pymodbus.client import ModbusTcpClient
 
-from common import LOGGER, timestamps
+from common import LOGGER, source_path, timestamps
 from config import TariffsConfig
+
+
+REGISTER_MAP_PATH = source_path("sigen_register_map.json")
+DEVICE_REGISTER_MAP_PATH = source_path("sigen_device_register_map.json")
 
 
 @dataclass(frozen=True)

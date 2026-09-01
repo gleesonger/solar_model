@@ -21,7 +21,7 @@ def main() -> None:
         config.actuals.modbus,
         config.timezone,
         config.dashboard.actuals_to_forecast,
-        config.dashboard.live_update_interval_seconds,
+        config.actuals.data_retrival_schedule.live_update_interval_seconds,
     )
     app.on_shutdown(live_collector.stop)
 
@@ -42,7 +42,10 @@ def main() -> None:
         )
         with ui.column().classes("w-full max-w-7xl mx-auto p-4") as container:
             layout.render_dashboard_layout(container)
-        ui.timer(config.dashboard.live_update_interval_seconds, layout.refresh_live_power)
+        ui.timer(
+            config.actuals.data_retrival_schedule.live_update_interval_seconds,
+            layout.refresh_live_power,
+        )
         ui.timer(60, layout.refresh_dashboard)
 
     ui.run(

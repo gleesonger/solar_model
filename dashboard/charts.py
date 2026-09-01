@@ -98,7 +98,7 @@ def render_hourly_charts(
     bind_time_zoom(power_chart, on_time_zoom)
 
     battery_title = ui.label(
-        "Average battery energy and state of charge by "
+        "Average battery by "
         f"{time_group_label(power_interval_minutes)}"
     ).classes("text-lg font-semibold mt-4")
     battery_chart = ui.echart(
@@ -108,7 +108,7 @@ def render_hourly_charts(
     array_energy_chart = render_array_energy_chart(
         data,
         "hour",
-        "Average hourly solar energy by array (kWh)",
+        "Average hourly energy by array (kWh)",
         forecast_arrays,
         actuals_to_forecast,
     )
@@ -160,10 +160,7 @@ def render_historical_charts(
     )
     battery_display = ChartDataDisplay(
         dataframe=battery_data,
-        title=lambda: (
-            "Average battery energy and state of charge by "
-            f"{time_group_label(state.historical_power_interval_minutes)}"
-        ),
+        title="Average battery by hour",
         render_chart=lambda: ui.echart(battery_chart_options(battery_data)).classes("w-full h-96"),
         chart_options=battery_chart_options,
         column_labels=column_labels,
@@ -171,7 +168,7 @@ def render_historical_charts(
     )
     array_energy_display = ChartDataDisplay(
         dataframe=data,
-        title=lambda: f"Solar energy by array and {state.historical_frequency} (kWh)",
+        title=lambda: f"Solar by array and {state.historical_frequency} (kWh)",
         render_chart=lambda: ui.echart(
             array_energy_chart_options(data, "period", forecast_arrays, actuals_to_forecast)
         ).classes("w-full h-96"),

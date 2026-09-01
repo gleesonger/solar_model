@@ -39,16 +39,14 @@ class DashboardLayout:
     def render_dashboard_layout(self, container: Column) -> None:
         LOGGER.info("Dashboard page UI loading")
         container.clear()
-        analysis_controls = None
 
         def tab_changed(event) -> None:
             self.state.active_tab = str(event.value)
-            if analysis_controls is not None:
-                analysis_controls.set_visibility(self.state.active_tab == "Analysis")
+            self.historical_tab.set_controls_visibility(self.state.active_tab == "Analysis")
 
         with container:
             with ui.element("div").classes("dashboard-topbar w-full"):
-                with ui.element("div").classes("grid w-full grid-cols-[1fr_auto_1fr] items-center py-1"):
+                with ui.element("div").classes("dashboard-tabs-row grid w-full grid-cols-[1fr_auto_1fr] items-center py-1"):
                     ui.element("div")
                     with ui.tabs(
                         on_change=tab_changed,
@@ -56,11 +54,14 @@ class DashboardLayout:
                         recent = ui.tab("Recent")
                         historical = ui.tab("Analysis")
                         system_info = ui.tab("System Info")
-                    self.elements.updated_at_label = ui.label("Last full update: unavailable").classes(
-                        "text-sm text-gray-600 justify-self-end"
+                    self.historical_tab.render_mobile_controls_trigger()
+                with ui.row().classes("w-full justify-end"):
+                    self.elements.updated_at_label = ui.label().classes(
+                        "text-sm font-semibold text-white bg-red-600 border-4 border-red-900 rounded px-2 py-1"
                     )
-                analysis_controls = self.historical_tab.render_historical_controls()
-                analysis_controls.set_visibility(self.state.active_tab in {"Analysis", "Historical"})
+                    self.elements.updated_at_label.set_visibility(False)
+                self.historical_tab.render_historical_controls()
+                self.historical_tab.set_controls_visibility(self.state.active_tab in {"Analysis", "Historical"})
             selected = {
                 "Recent": recent,
                 "Analysis": historical,
@@ -104,6 +105,64 @@ def render_dashboard_styles() -> None:
             background: white;
             padding-top: 0.5rem;
             padding-bottom: 0.5rem;
+        }
+        .analysis-mobile-controls-trigger {
+            display: none;
+        }
+        .analysis-mobile-controls-trigger-hidden {
+            visibility: hidden;
+            pointer-events: none;
+        }
+        .analysis-mobile-drawer {
+            width: min(22rem, 90vw);
+            padding: 1rem;
+        }
+        @media (max-width: 767px) {
+            .analysis-controls-desktop {
+                display: none !important;
+            }
+            .analysis-mobile-controls-trigger {
+                display: inline-flex;
+                justify-self: start;
+                grid-column: 1;
+                grid-row: 1;
+                margin-right: 0.25rem;
+            }
+            .dashboard-tabs-row {
+                grid-template-columns: auto auto 1fr !important;
+            }
+            .dashboard-tabs-row > :first-child {
+                display: none;
+            }
+            .solar-tabs {
+                justify-self: start;
+                grid-column: 2;
+                grid-row: 1;
+            }
+            .live-today-table th,
+            .live-today-table td {
+                font-size: 0.75rem;
+                padding: 3px 4px;
+                white-space: normal;
+                overflow-wrap: anywhere;
+            }
+            .live-today-table,
+            .live-today-table .q-table__container,
+            .live-today-table .q-table,
+            .live-today-table table {
+                width: 100% !important;
+            }
+            .live-today-table table {
+                table-layout: fixed;
+            }
+            .live-today-table th:first-child,
+            .live-today-table td:first-child {
+                width: 34%;
+            }
+            .live-today-table th:not(:first-child),
+            .live-today-table td:not(:first-child) {
+                width: 22%;
+            }
         }
         .q-table thead th {
             background-color: #0070C0 !important;

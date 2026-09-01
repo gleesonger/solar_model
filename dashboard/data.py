@@ -761,10 +761,18 @@ def load_analysis_range(
         bounds.start_at,
         bounds.end_at,
     )
-    power, battery = average_telemetry_by_interval(
+    power, _ = average_telemetry_by_interval(
         source.samples,
         timezone,
         power_interval_minutes,
+        actuals_to_forecast,
+    )
+    # Battery is deliberately fixed at an hourly view.  Unlike the power
+    # chart, it does not respond to the power chart's zoom level.
+    _, battery = average_telemetry_by_interval(
+        source.samples,
+        timezone,
+        60,
         actuals_to_forecast,
     )
     return AnalysisRangeData(energy=energy, power=power, battery=battery)

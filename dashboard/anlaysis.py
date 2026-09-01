@@ -24,27 +24,76 @@ class AnalysisTab:
         self.state = state
         self.elements = elements
         self.timezone = ZoneInfo(config.timezone)
+        self.desktop_controls = None
+        self.mobile_controls_trigger = None
+        self.mobile_controls_drawer = None
 
     def render_historical_controls(self):
-        with ui.row().classes("analysis-controls w-full items-end gap-3") as controls:
-            ui.button("<", on_click=lambda: move_as_of(-1)).props("dense outline")
-            as_of_input = ui.input("As of", value=self.state.historical_as_of.isoformat()).props(
-                f"type=date outlined dense max={datetime.now(self.timezone).date().isoformat()}"
-            ).classes("w-40")
-            ui.button(">", on_click=lambda: move_as_of(1)).props("dense outline")
+        self.desktop_controls = self._render_controls(compact=False)
+        return self.desktop_controls
+
+    def render_mobile_historical_controls(self) -> None:
+        """Render the small-screen control drawer at NiceGUI's layout root."""
+        with ui.left_drawer(value=False, fixed=True, bordered=True).props("overlay") as drawer:
+            drawer.classes("analysis-mobile-drawer")
+            ui.label("Analysis controls").classes("text-lg font-semibold")
+            self._render_controls(compact=True, after_action=drawer.hide)
+        self.mobile_controls_drawer = drawer
+
+    def render_mobile_controls_trigger(self):
+        self.mobile_controls_trigger = ui.button(
+            icon="menu", on_click=self.mobile_controls_drawer.toggle,
+        ).props("round flat dense").classes("analysis-mobile-controls-trigger")
+        return self.mobile_controls_trigger
+
+    def set_controls_visibility(self, visible: bool) -> None:
+        if self.desktop_controls is not None:
+            self.desktop_controls.set_visibility(visible)
+        if self.mobile_controls_trigger is not None:
+            self.mobile_controls_trigger.classes(
+                remove="analysis-mobile-controls-trigger-hidden"
+                if visible
+                else None,
+                add=None if visible else "analysis-mobile-controls-trigger-hidden",
+            )
+        if not visible and self.mobile_controls_drawer is not None:
+            self.mobile_controls_drawer.hide()
+
+    def _render_controls(self, *, compact: bool, after_action=None):
+        classes = (
+            "analysis-controls analysis-controls-mobile w-full gap-3"
+            if compact
+            else "analysis-controls analysis-controls-desktop w-full items-end gap-3"
+        )
+        container = ui.column() if compact else ui.row()
+        with container.classes(classes) as controls:
+            if compact:
+                with ui.row().classes("w-full items-end gap-2"):
+                    ui.button("<", on_click=lambda: move_as_of(-1)).props("dense outline")
+                    as_of_input = ui.input("As of", value=self.state.historical_as_of.isoformat()).props(
+                        f"type=date outlined dense max={datetime.now(self.timezone).date().isoformat()}"
+                    ).classes("flex-grow")
+                    ui.button(">", on_click=lambda: move_as_of(1)).props("dense outline")
+            else:
+                ui.button("<", on_click=lambda: move_as_of(-1)).props("dense outline")
+                as_of_input = ui.input("As of", value=self.state.historical_as_of.isoformat()).props(
+                    f"type=date outlined dense max={datetime.now(self.timezone).date().isoformat()}"
+                ).classes("w-40")
+                ui.button(">", on_click=lambda: move_as_of(1)).props("dense outline")
+
             count_input = ui.number("Last", value=self.state.historical_count, min=1, step=1).props(
                 "outlined dense"
-            ).classes("w-28")
+            ).classes("w-full" if compact else "w-28")
             unit_input = ui.select(
                 ["hours", "days", "weeks", "months", "years"],
                 value=self.state.historical_unit,
                 label="Period",
-            ).props("outlined dense").classes("w-36")
+            ).props("outlined dense").classes("w-full" if compact else "w-36")
             frequency_input = ui.select(
                 ["hour", "day", "week", "month", "season", "year"],
                 value=self.state.historical_frequency,
                 label="Group by",
-            ).props("outlined dense").classes("w-48")
+            ).props("outlined dense").classes("w-full" if compact else "w-48")
 
             def selected_range() -> tuple[date, int, str, str] | None:
                 try:
@@ -84,6 +133,8 @@ class AnalysisTab:
                 self.state.historical_unit = unit
                 self.state.historical_frequency = frequency
                 self._try_refresh_historical_tab()
+                if after_action is not None:
+                    after_action()
 
             def download_data() -> None:
                 selection = selected_range()
@@ -96,6 +147,8 @@ class AnalysisTab:
                     bounds,
                     self.timezone,
                 )
+                if after_action is not None:
+                    after_action()
 
             def move_as_of(direction: int) -> None:
                 try:
@@ -125,9 +178,12 @@ class AnalysisTab:
                 as_of_input.set_value(min(moved, datetime.now(self.timezone).date()).isoformat())
                 apply_range()
 
-            ui.button("Apply", on_click=apply_range, icon="date_range")
-            ui.space()
-            ui.button("Download Data", on_click=download_data, icon="download")
+            ui.button("Apply", on_click=apply_range, icon="date_range").classes("w-full" if compact else "")
+            if not compact:
+                ui.space()
+            ui.button("Download Data", on_click=download_data, icon="download").classes(
+                "w-full" if compact else ""
+            )
 
         return controls
 
@@ -149,7 +205,7 @@ class AnalysisTab:
             self._refresh_historical_time_zoom,
         )
 
-    def refresh_historical_tab(self) -> None:
+    def refresh_historical_tab(self, *, refresh_battery: bool = True) -> None:
         historical, power, battery, start, as_of = self._load_historical_data()
 
         chart_elements = self.elements.historical_charts
@@ -157,13 +213,14 @@ class AnalysisTab:
             return
         chart_elements.energy.update(historical)
         chart_elements.power.update(power)
-        chart_elements.battery.update(battery)
+        if refresh_battery:
+            chart_elements.battery.update(battery)
         chart_elements.array_energy.update(historical)
         chart_elements.money.update(charts.money_dataframe(historical))
 
-    def _try_refresh_historical_tab(self) -> None:
+    def _try_refresh_historical_tab(self, *, refresh_battery: bool = True) -> None:
         try:
-            self.refresh_historical_tab()
+            self.refresh_historical_tab(refresh_battery=refresh_battery)
         except Exception as error:
             ui.notify(f"Unable to update historical data: {error}", type="negative")
 
@@ -202,7 +259,7 @@ class AnalysisTab:
         interval = charts.power_interval_for_zoom(*zoom_range)
         if interval != self.state.historical_power_interval_minutes:
             self.state.historical_power_interval_minutes = interval
-            self._try_refresh_historical_tab()
+            self._try_refresh_historical_tab(refresh_battery=False)
             return
         chart_elements = self.elements.historical_charts
         if chart_elements is not None:

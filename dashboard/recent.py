@@ -123,6 +123,7 @@ class RecentTab:
             if self.elements.battery_status_label is not None:
                 self.elements.battery_status_label.set_text(self._battery_status_text(live_power))
         self._update_live_status(live_power.collected_at_utc)
+        self._set_full_updated_timestamp(self.elements.full_updated_last_local)
 
     def _set_full_updated_timestamp(self, full_updated_last_local: str | None) -> None:
         self.elements.full_updated_last_local = full_updated_last_local
@@ -131,8 +132,7 @@ class RecentTab:
             return
 
         if full_updated_last_local is None:
-            label.set_text("Last full update: unavailable")
-            label.classes(replace="text-sm text-gray-600 justify-self-end")
+            label.set_visibility(False)
             return
 
         timestamp = datetime.fromisoformat(full_updated_last_local)
@@ -140,13 +140,14 @@ class RecentTab:
         stale_after_seconds = (
             self.config.actuals.data_retrival_schedule.full_updated_interval_seconds * 3
         )
+        if age_seconds <= stale_after_seconds:
+            label.set_visibility(False)
+            return
         label.set_text(f"Last full update: {timestamp:%Y-%m-%d %H:%M:%S}")
         label.classes(replace=(
-            "text-sm font-semibold text-white bg-red-600 border-4 border-red-900 "
-            "rounded px-2 py-1 justify-self-end"
-            if age_seconds > stale_after_seconds
-            else "text-sm text-gray-600 justify-self-end"
+            "text-sm font-semibold text-white bg-red-600 border-4 border-red-900 rounded px-2 py-1"
         ))
+        label.set_visibility(True)
 
     def _load_data(self) -> tuple[pd.DataFrame, data.TelemetryData, LivePowerData, pd.DataFrame, pd.DataFrame]:
         LOGGER.info("Dashboard loading data from database")
@@ -360,7 +361,7 @@ def render_live_today_table(
         row_key="metric",
     ).props(
         "dense flat bordered"
-    ).classes("max-w-full").style("width: fit-content")
+    ).classes("live-today-table max-w-full").style("width: fit-content")
 
 
 def render_energy_summary_table(dataframe: pd.DataFrame, title: str, period_label: str) -> Table:

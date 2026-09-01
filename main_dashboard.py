@@ -41,6 +41,7 @@ def main() -> None:
             config,
             live_collector,
         )
+        layout.historical_tab.render_mobile_historical_controls()
         with ui.column().classes("w-full max-w-7xl mx-auto p-4") as container:
             layout.render_dashboard_layout(container)
         ui.timer(

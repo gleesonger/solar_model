@@ -174,7 +174,7 @@ class HourlyTab:
             f"Average power by {charts.time_group_label(self.state.power_interval_minutes)} (kW)"
         )
         chart_elements.battery_title.set_text(
-            "Average battery energy and state of charge by "
+            "Average battery by "
             f"{charts.time_group_label(self.state.power_interval_minutes)}"
         )
         charts.update_chart(chart_elements.energy, charts.energy_chart_options(hourly_range.energy, "hour"))

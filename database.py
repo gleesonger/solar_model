@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from functools import cache
 import math
 import re
 from datetime import datetime
@@ -264,9 +265,12 @@ class SolarDatabase:
                 changed += 1
         return changed
 
+@cache
+def create_engine_for_database(path: str | Path) -> Engine:
+    return create_engine(f"sqlite:///{Path(path)}", future=True)
 
 def open_database(path: str | Path) -> SolarDatabase:
-    engine = create_engine(f"sqlite:///{Path(path)}", future=True)
+    engine = create_engine_for_database(path)
     Base.metadata.create_all(engine)
     _add_missing_columns(engine, SigenStorModbusSample)
     _add_missing_columns(engine, SigenStorDevice)

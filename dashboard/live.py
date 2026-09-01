@@ -39,9 +39,6 @@ LIVE_VALUE_KEYS = {
     "plant_load_power_kw": "load",
     "inverter_power_kw": "inverter",
 }
-LIVE_COLLECTION_INTERVAL_SECONDS = 1
-
-
 class LivePowerCollector:
     """Collect the dashboard's latest power readings without writing to SQLite."""
 
@@ -50,10 +47,12 @@ class LivePowerCollector:
         modbus: ModbusConfig,
         timezone_name: str,
         actuals_to_forecast: dict[str, int],
+        collection_interval_seconds: float,
     ) -> None:
         self._modbus = modbus
         self._timezone_name = timezone_name
         self._actuals_to_forecast = actuals_to_forecast
+        self._collection_interval_seconds = collection_interval_seconds
         self._registers = load_registers(
             modbus.register_map,
             modbus.default_device_id,
@@ -152,7 +151,7 @@ class LivePowerCollector:
                 if client is not None and not self._collect_once(client):
                     client.close()
                     client = None
-                self._stop_event.wait(LIVE_COLLECTION_INTERVAL_SECONDS)
+                self._stop_event.wait(self._collection_interval_seconds)
         finally:
             if client is not None:
                 client.close()

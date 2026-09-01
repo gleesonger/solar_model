@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from numbers import Real
 from typing import Any
 
@@ -29,11 +29,13 @@ class ChartDataDisplay:
         render_chart: Callable[[], EChart],
         hint: str | Callable[[], str] | None = None,
         chart_options: Callable[[pd.DataFrame], dict[str, Any]] | None = None,
+        column_labels: Mapping[str, str] | None = None,
     ) -> None:
         self.dataframe = dataframe
         self._title = title
         self._hint = hint
         self._chart_options = chart_options
+        self._column_labels = column_labels or {}
         self._showing_table = False
 
         with ui.row().classes("w-full items-center justify-between gap-4 mt-4"):
@@ -88,7 +90,12 @@ class ChartDataDisplay:
 
     def _table_columns(self) -> list[dict[str, str]]:
         return [
-            {"name": column, "label": column.replace("_", " ").title(), "field": column, "align": "right"}
+            {
+                "name": column,
+                "label": self._column_labels.get(column, column.replace("_", " ").title()),
+                "field": column,
+                "align": "right",
+            }
             for column in self.dataframe.columns
         ]
 

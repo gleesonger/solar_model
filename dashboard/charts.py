@@ -14,6 +14,16 @@ from .data import actual_column_name, chart_values, dataframe_column, forecast_c
 from .models import DashboardState, HistoricalCharts, HourlyCharts, PANEL_COLORS
 
 
+SOLAR_COLOR = "#F9C74F"
+LOAD_COLOR = "#0072B2"
+BATTERY_COLOR = "#56B4E9"
+INVERTER_COLOR = "#6C757D"
+GRID_IMPORT_COLOR = "#D1495B"
+GRID_EXPORT_COLOR = "#009E73"
+NET_COST_COLOR = "#6C757D"
+NO_SOLAR_COST_COLOR = "#7B2CBF"
+
+
 def render_hourly_charts(
     data: pd.DataFrame,
     power_hourly: pd.DataFrame,
@@ -106,14 +116,8 @@ def render_historical_charts(
             "Average battery energy and state of charge by "
             f"{time_group_label(state.historical_power_interval_minutes)}"
         ),
-        render_chart=lambda: _render_historical_battery_chart(
-            battery_data, state.historical_time_zoom_start, state.historical_time_zoom_end, on_time_zoom
-        ),
-        chart_options=lambda dataframe: battery_chart_options(
-            dataframe,
-            state.historical_time_zoom_start,
-            state.historical_time_zoom_end,
-        ),
+        render_chart=lambda: ui.echart(battery_chart_options(battery_data)).classes("w-full h-96"),
+        chart_options=battery_chart_options,
     )
     array_energy_display = ChartDataDisplay(
         dataframe=data,
@@ -130,6 +134,7 @@ def render_historical_charts(
         title=lambda: f"Costs by {state.historical_frequency}",
         render_chart=lambda: ui.echart(money_chart_options(data, "period")).classes("w-full h-96"),
         chart_options=lambda dataframe: money_chart_options(dataframe, "period"),
+        column_labels={"no_solar_battery_import_cost": "Net Cost if No Solar"},
     )
     return HistoricalCharts(
         energy=energy_display,
@@ -161,19 +166,6 @@ def _render_historical_power_chart(
     return chart
 
 
-def _render_historical_battery_chart(
-    battery_data: pd.DataFrame,
-    zoom_start: float,
-    zoom_end: float,
-    on_time_zoom: Callable[[Any], None],
-) -> EChart:
-    chart = ui.echart(
-        battery_chart_options(battery_data, zoom_start, zoom_end)
-    ).classes("w-full h-96")
-    bind_time_zoom(chart, on_time_zoom)
-    return chart
-
-
 def render_energy_chart(data: pd.DataFrame, category_column: str, title: str) -> EChart:
     ui.label(title).classes("text-lg font-semibold mt-4")
     return ui.echart(energy_chart_options(data, category_column)).classes("w-full h-96")
@@ -194,25 +186,51 @@ def energy_chart_options(data: pd.DataFrame, category_column: str) -> dict[str, 
         "xAxis": {"type": "category", "data": dataframe_column(data, category_column).tolist()},
         "yAxis": {"type": "value", "name": "kWh"},
         "series": [
-            {"name": "Solar (Actual)", "type": "bar", "data": chart_values(dataframe_column(data, "solar"))},
-            {"name": "Solar (Forecast)", "type": "bar", "data": chart_values(dataframe_column(data, "forecast_total"))},
-            {"name": "Load", "type": "bar", "data": chart_values(dataframe_column(data, "load"))},
-            {"name": "Grid Imported", "type": "bar", "data": chart_values(dataframe_column(data, "grid_import"))},
-            {"name": "Grid Exported", "type": "bar", "data": chart_values(dataframe_column(data, "grid_export"))},
+            {
+                "name": "Solar (Actual)",
+                "type": "bar",
+                "data": chart_values(dataframe_column(data, "solar")),
+                "itemStyle": {"color": SOLAR_COLOR},
+            },
+            {
+                "name": "Solar (Forecast)",
+                "type": "bar",
+                "data": chart_values(dataframe_column(data, "forecast_total")),
+                "itemStyle": forecast_item_style(SOLAR_COLOR),
+            },
+            {"name": "Load", "type": "bar", "data": chart_values(dataframe_column(data, "load")), "itemStyle": {"color": LOAD_COLOR}},
+            {"name": "Grid Imported", "type": "bar", "data": chart_values(dataframe_column(data, "grid_import")), "itemStyle": {"color": GRID_IMPORT_COLOR}},
+            {"name": "Grid Exported", "type": "bar", "data": chart_values(dataframe_column(data, "grid_export")), "itemStyle": {"color": GRID_EXPORT_COLOR}},
         ],
     }
 
 
 MONEY_SERIES = (
-    ("Import Cost", "grid_import_cost"),
-    ("Export Revenue", "grid_export_revenue"),
-    ("Net Cost", "net_cost"),
-    ("Net Cost if No Solar", "no_solar_battery_import_cost"),
+    ("Import Cost", "grid_import_cost", GRID_IMPORT_COLOR),
+    ("Export Revenue", "grid_export_revenue", GRID_EXPORT_COLOR),
+    ("Net Cost", "net_cost", NET_COST_COLOR),
+    ("Net Cost if No Solar", "no_solar_battery_import_cost", NO_SOLAR_COST_COLOR),
 )
 
 
+def forecast_item_style(color: str) -> dict[str, Any]:
+    """Distinguish a forecast without separating it from its actual series' colour."""
+    return {
+        "color": color,
+        "decal": {
+            "symbol": "rect",
+            "symbolSize": 1,
+            "color": "rgba(0, 0, 0, 0.35)",
+            "backgroundColor": "rgba(0, 0, 0, 0)",
+            "dashArrayX": [1, 0],
+            "dashArrayY": [3, 4],
+            "rotation": -0.7853981633974483,
+        },
+    }
+
+
 def money_dataframe(data: pd.DataFrame) -> pd.DataFrame:
-    columns = ["period", *[column for _, column in MONEY_SERIES]]
+    columns = ["period", *[column for _, column, _ in MONEY_SERIES]]
     return data.reindex(columns=columns).copy()
 
 
@@ -226,14 +244,19 @@ def money_chart_options(data: pd.DataFrame, category_column: str) -> dict[str, A
     return {
         "tooltip": {"trigger": "axis"},
         "legend": {
-            "data": [label for label, _ in MONEY_SERIES],
+            "data": [label for label, _, _ in MONEY_SERIES],
             "selected": selected,
         },
         "xAxis": {"type": "category", "data": dataframe_column(data, category_column).tolist()},
         "yAxis": {"type": "value", "name": "Currency"},
         "series": [
-            {"name": label, "type": "bar", "data": chart_values(dataframe_column(data, column))}
-            for label, column in MONEY_SERIES
+            {
+                "name": label,
+                "type": "bar",
+                "data": chart_values(dataframe_column(data, column)),
+                "itemStyle": {"color": color},
+            }
+            for label, column, color in MONEY_SERIES
         ],
     }
 
@@ -285,18 +308,7 @@ def array_energy_chart_options(
                 "name": f"{panel_name} (Forecast)",
                 "type": "bar",
                 "data": chart_values(dataframe_column(data, forecast_column_name(panel_id))),
-                "itemStyle": {
-                    "color": panel_color,
-                    "decal": {
-                        "symbol": "rect",
-                        "symbolSize": 1,
-                        "color": "rgba(0, 0, 0, 0.35)",
-                        "backgroundColor": "rgba(0, 0, 0, 0)",
-                        "dashArrayX": [1, 0],
-                        "dashArrayY": [3, 4],
-                        "rotation": -0.7853981633974483,
-                    },
-                },
+                "itemStyle": forecast_item_style(panel_color),
             },
         ])
     return {
@@ -317,7 +329,7 @@ def power_chart_options(
 ) -> dict[str, Any]:
     mapped_panels = set(actuals_to_forecast.values())
     power_series: list[tuple[str, str, str | None]] = [
-        ("Solar", "solar", None),
+        ("Solar", "solar", SOLAR_COLOR),
         *[
             (
                 f"Solar - {array.name}",
@@ -327,11 +339,11 @@ def power_chart_options(
             for index, array in enumerate(forecast_arrays)
             if array.panel_id in mapped_panels
         ],
-        ("Load", "load", None),
-        ("Battery", "battery", None),
-        ("Inverter", "inverter", None),
-        ("Grid Imported", "grid_import", None),
-        ("Grid Exported", "grid_export", None),
+        ("Load", "load", LOAD_COLOR),
+        ("Battery", "battery", BATTERY_COLOR),
+        ("Inverter", "inverter", INVERTER_COLOR),
+        ("Grid Imported", "grid_import", GRID_IMPORT_COLOR),
+        ("Grid Exported", "grid_export", GRID_EXPORT_COLOR),
     ]
     return {
         "tooltip": {"trigger": "axis"},
@@ -361,15 +373,11 @@ def power_chart_options(
     }
 
 
-def battery_chart_options(
-    battery_data: pd.DataFrame,
-    zoom_start: float | None = None,
-    zoom_end: float | None = None,
-) -> dict[str, Any]:
-    options: dict[str, Any] = {
+def battery_chart_options(battery_data: pd.DataFrame) -> dict[str, Any]:
+    return {
         "tooltip": {"trigger": "axis"},
         "legend": {"data": ["Available energy", "State of charge"]},
-        "grid": time_chart_grid(),
+        "grid": {"left": "3%", "right": "4%", "bottom": "8%", "containLabel": True},
         "xAxis": {
             "type": "category",
             "data": dataframe_column(battery_data, "time").tolist(),
@@ -384,6 +392,8 @@ def battery_chart_options(
                 "type": "line",
                 "showSymbol": False,
                 "yAxisIndex": 0,
+                "lineStyle": {"color": BATTERY_COLOR},
+                "itemStyle": {"color": BATTERY_COLOR},
                 "data": chart_values(
                     dataframe_column(battery_data, "available_energy_kwh")
                 ),
@@ -393,13 +403,12 @@ def battery_chart_options(
                 "type": "line",
                 "showSymbol": False,
                 "yAxisIndex": 1,
+                "lineStyle": {"color": NO_SOLAR_COST_COLOR},
+                "itemStyle": {"color": NO_SOLAR_COST_COLOR},
                 "data": chart_values(dataframe_column(battery_data, "soc_percent")),
             },
         ],
     }
-    if zoom_start is not None and zoom_end is not None:
-        options["dataZoom"] = time_data_zoom_options(zoom_start, zoom_end)
-    return options
 
 
 def time_chart_grid() -> dict[str, Any]:

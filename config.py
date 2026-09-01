@@ -51,6 +51,7 @@ class ForecastConfig:
 class DashboardConfig:
     port: int
     host: str
+    live_update_interval_seconds: float
     actuals_to_forecast: dict[str, int]
 
 
@@ -121,6 +122,7 @@ def validate_config(config: Config) -> None:
     if (
         config.actuals.scheduler.interval_seconds <= 0
         or config.forecast.interval_seconds <= 0
+        or config.dashboard.live_update_interval_seconds <= 0
     ):
         raise ValueError("scheduler, live, and forecast intervals must be greater than zero")
 

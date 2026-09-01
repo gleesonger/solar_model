@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from datetime import date, datetime, timedelta, tzinfo
+from dataclasses import dataclass
+from datetime import date, datetime, time, timedelta, tzinfo
 from pathlib import Path
 from typing import Any, cast
 from zoneinfo import ZoneInfo
@@ -13,8 +14,9 @@ from sqlalchemy import create_engine, func, select
 from sqlalchemy.orm import Session
 
 from config import SolarArrayConfig
-from database import ForecastSolarSample, SigenStorDevice, SigenStorModbusSample
+from database import ForecastSolarSample, SigenStorDevice, SigenStorModbusSample, create_engine_for_database
 from .models import (
+    AnalysisRangeData,
     HOURLY_PERIOD_DAYS,
     HOURLY_PERIODS,
     HourlyRangeData,
@@ -67,7 +69,7 @@ def load_day(
     now = datetime.now(timezone)
     day_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
 
-    engine = create_engine(f"sqlite:///{Path(database_path)}", future=True)
+    engine = create_engine_for_database(database_path)
     try:
         with Session(engine) as session:
             forecast_rows = load_forecast_for_day(session, day_start)
@@ -104,7 +106,7 @@ def load_recent_daily_energy(
 
 
 def load_lifetime_start_date(database_path: str, fallback: date) -> date:
-    engine = create_engine(f"sqlite:///{Path(database_path)}", future=True)
+    engine = create_engine_for_database(database_path)
     try:
         with Session(engine) as session:
             actual_start = session.scalar(
@@ -200,7 +202,7 @@ def load_daily_energy_totals(
     current_time = datetime.now(timezone)
     start_text = start_date.isoformat()
     end_text = end_date.isoformat()
-    engine = create_engine(f"sqlite:///{Path(database_path)}", future=True)
+    engine = create_engine_for_database(database_path)
     try:
         with Session(engine) as session:
             actual_date = func.substr(
@@ -455,7 +457,7 @@ def load_hourly_range(
 
     timezone = ZoneInfo(timezone_name)
     daily_energy: list[pd.DataFrame] = []
-    engine = create_engine(f"sqlite:///{Path(database_path)}", future=True)
+    engine = create_engine_for_database(database_path)
     try:
         with Session(engine) as session:
             selected_samples = list(session.scalars(
@@ -491,6 +493,147 @@ def load_hourly_range(
     return HourlyRangeData(energy=energy, power=power, battery=battery)
 
 
+@dataclass(frozen=True)
+class AnalysisRangeBounds:
+    start_date: date
+    end_date: date
+    start_at: datetime
+    end_at: datetime
+
+
+def analysis_range_bounds(
+    end_date: date,
+    count: int,
+    unit: str,
+    timezone: tzinfo,
+) -> AnalysisRangeBounds:
+    """Return the single, inclusive time range used by every Analysis chart."""
+    calendar_start = historical_start_date(end_date, count, unit)
+    end_at = datetime.combine(end_date, time.max, tzinfo=timezone)
+    if unit == "hours":
+        bucket_end = end_at.replace(minute=0, second=0, microsecond=0)
+        start_at = bucket_end - timedelta(hours=count - 1)
+    elif unit == "minutes":
+        bucket_end = end_at.replace(second=0, microsecond=0)
+        start_at = bucket_end - timedelta(minutes=count - 1)
+    else:
+        start_at = datetime.combine(calendar_start, time.min, tzinfo=timezone)
+    return AnalysisRangeBounds(start_at.date(), end_date, start_at, end_at)
+
+
+def load_analysis_range(
+    database_path: str,
+    timezone_name: str,
+    bounds: AnalysisRangeBounds,
+    frequency: str,
+    power_interval_minutes: int,
+    forecast_arrays: tuple[SolarArrayConfig, ...],
+    actuals_to_forecast: dict[str, int],
+) -> AnalysisRangeData:
+    """Load every Analysis dataset through one database session and date range."""
+    if power_interval_minutes < 1:
+        raise ValueError("Power interval must be at least one minute")
+
+    timezone = ZoneInfo(timezone_name)
+    engine = create_engine_for_database(database_path)
+    try:
+        with Session(engine) as session:
+            samples = list(session.scalars(
+                select(SigenStorModbusSample)
+                .where(func.substr(SigenStorModbusSample.collected_at_local, 1, 10) >= bounds.start_date.isoformat())
+                .where(func.substr(SigenStorModbusSample.collected_at_local, 1, 10) <= bounds.end_date.isoformat())
+                .order_by(SigenStorModbusSample.collected_at_utc)
+            ).all())
+            forecast_rows = list(session.scalars(
+                select(ForecastSolarSample)
+                .where(ForecastSolarSample.collection_guid.is_not(None))
+                .where(func.substr(ForecastSolarSample.collected_at_local, 1, 10) >= bounds.start_date.isoformat())
+                .where(func.substr(ForecastSolarSample.collected_at_local, 1, 10) <= bounds.end_date.isoformat())
+                .order_by(ForecastSolarSample.collected_at_local, ForecastSolarSample.collected_at_utc)
+            ).all())
+    finally:
+        engine.dispose()
+
+    daily_frames = analysis_daily_energy_frames(
+        samples,
+        forecast_rows,
+        timezone,
+        bounds.start_date,
+        bounds.end_date,
+        forecast_arrays,
+        actuals_to_forecast,
+    )
+    energy = historical_energy_from_frames(
+        daily_frames,
+        frequency,
+        bounds.start_at,
+        bounds.end_at,
+    )
+    power, battery = average_telemetry_by_interval(
+        samples,
+        timezone,
+        power_interval_minutes,
+        actuals_to_forecast,
+    )
+    return AnalysisRangeData(energy=energy, power=power, battery=battery)
+
+
+def analysis_daily_energy_frames(
+    samples: list[SigenStorModbusSample],
+    forecast_rows: list[ForecastSolarSample],
+    timezone: tzinfo,
+    start_date: date,
+    end_date: date,
+    forecast_arrays: tuple[SolarArrayConfig, ...],
+    actuals_to_forecast: dict[str, int],
+) -> list[pd.DataFrame]:
+    """Build Analysis energy frames from the range's already-loaded records."""
+    samples_by_date: dict[str, list[SigenStorModbusSample]] = {}
+    for sample in samples:
+        samples_by_date.setdefault(sample.collected_at_local[:10], []).append(sample)
+
+    first_guid_by_date: dict[str, str] = {}
+    forecasts_by_guid: dict[str, list[ForecastSolarSample]] = {}
+    for row in forecast_rows:
+        if row.collection_guid is None:
+            continue
+        collection_date = row.collected_at_local[:10]
+        first_guid_by_date.setdefault(collection_date, row.collection_guid)
+        forecasts_by_guid.setdefault(row.collection_guid, []).append(row)
+
+    hours = pd.DataFrame({"hour": [f"{index:02d}:00" for index in range(24)]})
+    actual_columns = [actual_column_name(panel_id) for panel_id in actuals_to_forecast.values()]
+    frames: list[pd.DataFrame] = []
+    for day_offset in range((end_date - start_date).days + 1):
+        selected_date = start_date + timedelta(days=day_offset)
+        date_text = selected_date.isoformat()
+        day_start = datetime(selected_date.year, selected_date.month, selected_date.day, tzinfo=timezone)
+        day_samples = samples_by_date.get(date_text, [])
+        if day_samples:
+            actual = actual_hourly_from_samples(day_samples, day_start, fill_missing=False)
+            actual_by_array = actual_arrays_hourly_from_samples(
+                day_samples, day_start, actuals_to_forecast, fill_missing=False
+            )
+        else:
+            actual = hours.assign(
+                solar=float("nan"), load=float("nan"), battery=float("nan"),
+                grid_import=float("nan"), grid_export=float("nan"),
+                grid_import_cost=float("nan"), grid_export_revenue=float("nan"),
+                net_cost=float("nan"), no_solar_battery_import_cost=float("nan"),
+            )
+            actual_by_array = hours.assign(**{column: float("nan") for column in actual_columns})
+        forecast = aggregate_forecast(
+            forecasts_by_guid.get(first_guid_by_date.get(date_text, ""), []),
+            day_start,
+            forecast_arrays,
+            fill_missing=False,
+        )
+        frame = actual.merge(actual_by_array, on="hour", how="left").merge(forecast, on="hour", how="left")
+        frame["date"] = date_text
+        frames.append(frame)
+    return frames
+
+
 def load_historical_energy(
     database_path: str,
     timezone_name: str,
@@ -509,7 +652,7 @@ def load_historical_energy(
         raise ValueError(f"Unsupported historical frequency: {frequency}")
 
     timezone = ZoneInfo(timezone_name)
-    engine = create_engine(f"sqlite:///{Path(database_path)}", future=True)
+    engine = create_engine_for_database(database_path)
     try:
         with Session(engine) as session:
             daily_frames = load_daily_energy_frames(
@@ -523,26 +666,6 @@ def load_historical_energy(
     finally:
         engine.dispose()
 
-    combined = pd.concat(daily_frames, ignore_index=True)
-    value_columns = [column for column in combined.columns if column not in {"date", "hour"}]
-    for column in value_columns:
-        combined[column] = pd.to_numeric(combined[column], errors="coerce")
-    if start_at is not None or end_at is not None:
-        timestamps = pd.to_datetime(
-            dataframe_column(combined, "date") + " " + dataframe_column(combined, "hour")
-        )
-        if start_at is not None:
-            combined = combined.loc[timestamps >= start_at.replace(tzinfo=None)]
-            timestamps = timestamps.loc[combined.index]
-        if end_at is not None:
-            combined = combined.loc[timestamps <= end_at.replace(tzinfo=None)]
-    if frequency == "hour":
-        grouped = cast(
-            pd.DataFrame,
-            combined.groupby("hour", as_index=False)[value_columns].sum(min_count=1),
-        )
-        grouped["period"] = dataframe_column(grouped, "hour")
-        return cast(pd.DataFrame, grouped[["period", *value_columns]])
     if frequency == "minute":
         return load_historical_minute_energy(
             database_path,
@@ -554,6 +677,38 @@ def load_historical_energy(
             start_at=start_at,
             end_at=end_at,
         )
+    return historical_energy_from_frames(
+        daily_frames,
+        frequency,
+        start_at or datetime.combine(start_date, time.min, tzinfo=timezone),
+        end_at or datetime.combine(end_date, time.max, tzinfo=timezone),
+    )
+
+
+def historical_energy_from_frames(
+    daily_frames: list[pd.DataFrame],
+    frequency: str,
+    start_at: datetime,
+    end_at: datetime,
+) -> pd.DataFrame:
+    combined = pd.concat(daily_frames, ignore_index=True)
+    value_columns = [column for column in combined.columns if column not in {"date", "hour"}]
+    for column in value_columns:
+        combined[column] = pd.to_numeric(combined[column], errors="coerce")
+    timestamps = pd.to_datetime(
+        dataframe_column(combined, "date") + " " + dataframe_column(combined, "hour")
+    )
+    combined = combined.loc[
+        (timestamps >= start_at.replace(tzinfo=None))
+        & (timestamps <= end_at.replace(tzinfo=None))
+    ]
+    if frequency == "hour":
+        grouped = cast(
+            pd.DataFrame,
+            combined.groupby("hour", as_index=False)[value_columns].sum(min_count=1),
+        )
+        grouped["period"] = dataframe_column(grouped, "hour")
+        return cast(pd.DataFrame, grouped[["period", *value_columns]])
     combined["bucket_start"] = dataframe_column(combined, "date").map(
         lambda value: historical_bucket_start(date.fromisoformat(str(value)), frequency)
     )
@@ -580,7 +735,7 @@ def load_historical_minute_energy(
 ) -> pd.DataFrame:
     """Aggregate stored per-sample energy and tariff values into calendar minutes."""
     timezone = ZoneInfo(timezone_name)
-    engine = create_engine(f"sqlite:///{Path(database_path)}", future=True)
+    engine = create_engine_for_database(database_path)
     try:
         with Session(engine) as session:
             samples = list(session.scalars(
@@ -816,7 +971,7 @@ def load_telemetry(
 ) -> TelemetryData:
     timezone = ZoneInfo(timezone_name)
     day_start = datetime.now(timezone).replace(hour=0, minute=0, second=0, microsecond=0)
-    engine = create_engine(f"sqlite:///{Path(database_path)}", future=True)
+    engine = create_engine_for_database(database_path)
     try:
         with Session(engine) as session:
             samples = list(session.scalars(
@@ -1010,7 +1165,7 @@ def average_telemetry_by_interval(
 
 
 def load_device_information(database_path: str) -> list[dict[str, str]]:
-    engine = create_engine(f"sqlite:///{Path(database_path)}", future=True)
+    engine = create_engine_for_database(database_path)
     try:
         with Session(engine) as session:
             rows = session.scalars(
@@ -1041,6 +1196,84 @@ def load_forecast_for_day(session: Session, day_start: datetime) -> list[Forecas
     return list(session.scalars(
         select(ForecastSolarSample).where(ForecastSolarSample.collection_guid == first_forecast)
     ).all())
+
+
+def actual_hourly_from_samples(
+    samples: list[SigenStorModbusSample],
+    day_start: datetime,
+    *,
+    fill_missing: bool,
+) -> pd.DataFrame:
+    hours = pd.DataFrame({"hour": [f"{index:02d}:00" for index in range(24)]})
+    totals: dict[tuple[str, str], float] = {}
+    columns = (
+        ("solar", "plant_pv_total_kwh_period"),
+        ("load", "plant_load_total_kwh_period"),
+        ("battery_charge", "plant_battery_charge_total_kwh_period"),
+        ("battery_discharge", "plant_battery_discharge_total_kwh_period"),
+        ("grid_import", "plant_grid_import_total_kwh_period"),
+        ("grid_export", "plant_grid_export_total_kwh_period"),
+        ("grid_import_cost", "grid_import_cost_period"),
+        ("grid_export_revenue", "grid_export_revenue_period"),
+        ("net_cost", "net_cost_period"),
+        ("no_solar_battery_import_cost", "no_solar_battery_import_cost_period"),
+    )
+    for sample in samples:
+        timestamp = parse_time(sample.collected_at_local, day_start.tzinfo or ZoneInfo("UTC"))
+        if timestamp <= day_start:
+            continue
+        hour = format_hour(timestamp - timedelta(microseconds=1), day_start)
+        if hour is None:
+            continue
+        for name, attribute in columns:
+            value = getattr(sample, attribute)
+            if value is not None:
+                totals[(hour, name)] = totals.get((hour, name), 0.0) + value
+
+    rows: list[dict[str, float | str]] = []
+    for hour in dataframe_column(hours, "hour"):
+        row: dict[str, float | str] = {"hour": hour}
+        for name, _ in columns:
+            row[name] = totals.get((hour, name), float("nan"))
+        row["battery"] = row["battery_charge"] - row["battery_discharge"]
+        rows.append(row)
+    result = pd.DataFrame(rows).drop(columns=["battery_charge", "battery_discharge"])
+    return result.fillna(0.0) if fill_missing else result
+
+
+def actual_arrays_hourly_from_samples(
+    samples: list[SigenStorModbusSample],
+    day_start: datetime,
+    actuals_to_forecast: dict[str, int],
+    *,
+    fill_missing: bool,
+) -> pd.DataFrame:
+    hours = pd.DataFrame({"hour": [f"{index:02d}:00" for index in range(24)]})
+    totals: dict[tuple[str, str], float] = {}
+    previous_timestamp: datetime | None = None
+    previous_power: dict[str, float | None] = {}
+    timezone = day_start.tzinfo or ZoneInfo("UTC")
+    for sample in samples:
+        timestamp = parse_time(sample.collected_at_local, timezone)
+        current_power: dict[str, float | None] = {}
+        for pv_string in actuals_to_forecast:
+            voltage, current = PV_STRING_READERS[pv_string](sample)
+            current_power[pv_string] = max(voltage * current, 0.0) / 1000 if voltage is not None and current is not None else None
+        if previous_timestamp is not None:
+            duration_hours = (timestamp - previous_timestamp).total_seconds() / 3600
+            hour = format_hour(timestamp - timedelta(microseconds=1), day_start)
+            if hour is not None and duration_hours > 0:
+                for pv_string, panel_id in actuals_to_forecast.items():
+                    before, after = previous_power.get(pv_string), current_power[pv_string]
+                    if before is not None and after is not None:
+                        column = actual_column_name(panel_id)
+                        totals[(hour, column)] = totals.get((hour, column), 0.0) + (before + after) / 2 * duration_hours
+        previous_timestamp, previous_power = timestamp, current_power
+    for panel_id in actuals_to_forecast.values():
+        column = actual_column_name(panel_id)
+        missing = 0.0 if fill_missing else float("nan")
+        hours[column] = dataframe_column(hours, "hour").map(lambda hour: totals.get((hour, column), missing))
+    return hours
 
 
 def load_actual_hourly(

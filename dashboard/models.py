@@ -9,7 +9,7 @@ from nicegui.elements.table import Table
 
 from .chart_display import ChartDataDisplay
 
-PANEL_COLORS = ("#5470c6", "#91cc75", "#fac858", "#ee6666")
+PANEL_COLORS = ("#009E73", "#56B4E9", "#F9C74F", "#CC79A7")
 SUMMARY_LATEST_KEYS = {
     "Solar": "solar",
     "Battery": "battery",
@@ -37,6 +37,13 @@ class TelemetryData:
 
 @dataclass(frozen=True)
 class HourlyRangeData:
+    energy: pd.DataFrame
+    power: pd.DataFrame
+    battery: pd.DataFrame
+
+
+@dataclass(frozen=True)
+class AnalysisRangeData:
     energy: pd.DataFrame
     power: pd.DataFrame
     battery: pd.DataFrame

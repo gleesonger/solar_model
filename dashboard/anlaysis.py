@@ -146,53 +146,28 @@ class AnalysisTab:
             ui.notify(f"Unable to update historical data: {error}", type="negative")
 
     def _load_historical_data(self):
-        as_of = self.state.historical_as_of
-        start_at, end_at = self._historical_time_bounds(as_of)
-        start = (
-            start_at.date()
-            if start_at is not None
-            else data.historical_start_date(
-                as_of,
-                self.state.historical_count,
-                self.state.historical_unit,
-            )
+        bounds = data.analysis_range_bounds(
+            self.state.historical_as_of,
+            self.state.historical_count,
+            self.state.historical_unit,
+            self.timezone,
         )
-        historical = data.load_historical_energy(
+        analysis_data = data.load_analysis_range(
             self.config.database.path,
             self.config.timezone,
-            start,
-            as_of,
+            bounds,
             self.state.historical_frequency,
-            self.config.forecast.arrays,
-            self.config.dashboard.actuals_to_forecast,
-            start_at=start_at,
-            end_at=end_at,
-        )
-        hourly_data = data.load_hourly_range(
-            self.config.database.path,
-            self.config.timezone,
-            start,
-            as_of,
             self.state.historical_power_interval_minutes,
             self.config.forecast.arrays,
             self.config.dashboard.actuals_to_forecast,
         )
-        return historical, hourly_data.power, hourly_data.battery, start, as_of
-
-    def _historical_time_bounds(self, as_of: date) -> tuple[datetime | None, datetime | None]:
-        if self.state.historical_unit not in {"hours", "minutes"}:
-            return None, None
-        today = datetime.now(self.timezone).date()
-        end_at = (
-            datetime.now(self.timezone)
-            if as_of == today
-            else datetime.combine(as_of, time.max, tzinfo=self.timezone)
+        return (
+            analysis_data.energy,
+            analysis_data.power,
+            analysis_data.battery,
+            bounds.start_date,
+            bounds.end_date,
         )
-        if self.state.historical_unit == "hours":
-            bucket_end = end_at.replace(minute=0, second=0, microsecond=0)
-            return bucket_end - timedelta(hours=self.state.historical_count - 1), end_at
-        bucket_end = end_at.replace(second=0, microsecond=0)
-        return bucket_end - timedelta(minutes=self.state.historical_count - 1), end_at
 
     def _refresh_historical_time_zoom(self, event) -> None:
         zoom_range = charts.data_zoom_range(event)
@@ -209,10 +184,9 @@ class AnalysisTab:
             return
         chart_elements = self.elements.historical_charts
         if chart_elements is not None:
-            for display in (chart_elements.power, chart_elements.battery):
-                chart = display.chart
-                if chart is not getattr(event, "sender", None):
-                    chart.run_chart_method(
-                        "dispatchAction",
-                        {"type": "dataZoom", "start": zoom_range[0], "end": zoom_range[1]},
-                    )
+            chart = chart_elements.power.chart
+            if chart is not getattr(event, "sender", None):
+                chart.run_chart_method(
+                    "dispatchAction",
+                    {"type": "dataZoom", "start": zoom_range[0], "end": zoom_range[1]},
+                )

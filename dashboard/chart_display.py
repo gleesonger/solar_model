@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
 import re
 from collections.abc import Callable
 from numbers import Real
@@ -64,9 +65,14 @@ class ChartDataDisplay:
         self.table.rows = self._table_rows()
         self.table.update()
         if self._chart_options is not None:
+            options = self._chart_options(dataframe)
             self.chart.options.clear()
-            self.chart.options.update(self._chart_options(dataframe))
-            self.chart.update()
+            self.chart.options.update(options)
+            browser_options = deepcopy(options)
+            legend = browser_options.get("legend")
+            if isinstance(legend, dict):
+                legend.pop("selected", None)
+            self.chart.run_chart_method("setOption", browser_options)
 
     @staticmethod
     def _text(value: str | Callable[[], str]) -> str:

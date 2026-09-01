@@ -218,10 +218,10 @@ def money_dataframe(data: pd.DataFrame) -> pd.DataFrame:
 
 def money_chart_options(data: pd.DataFrame, category_column: str) -> dict[str, Any]:
     selected = {
-        "Import Cost": False,
-        "Export Revenue": False,
-        "Net Cost": True,
-        "Net Cost if No Solar": True,
+        "Import Cost": True,
+        "Export Revenue": True,
+        "Net Cost": False,
+        "Net Cost if No Solar": False,
     }
     return {
         "tooltip": {"trigger": "axis"},

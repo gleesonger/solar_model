@@ -26,9 +26,11 @@ class HistoricalTab:
 
     def render_historical_tab(self) -> None:
         with ui.row().classes("w-full items-end gap-3"):
+            ui.button("<", on_click=lambda: move_as_of(-1)).props("dense outline")
             as_of_input = ui.input("As of", value=self.state.historical_as_of.isoformat()).props(
                 f"type=date outlined dense max={datetime.now(self.timezone).date().isoformat()}"
             ).classes("w-40")
+            ui.button(">", on_click=lambda: move_as_of(1)).props("dense outline")
             count_input = ui.number("Last", value=self.state.historical_count, min=1, step=1).props(
                 "outlined dense"
             ).classes("w-28")
@@ -74,6 +76,34 @@ class HistoricalTab:
                 self.state.historical_unit = unit
                 self.state.historical_frequency = frequency
                 self._try_refresh_historical_tab()
+
+            def move_as_of(direction: int) -> None:
+                try:
+                    as_of = date.fromisoformat(str(as_of_input.value))
+                    raw_count = float(count_input.value)
+                    count = int(raw_count)
+                except (TypeError, ValueError):
+                    ui.notify("Enter a valid As of date and Last value", type="negative")
+                    return
+                if count < 1 or raw_count != count:
+                    ui.notify("Last must be a positive whole number", type="negative")
+                    return
+                unit = str(unit_input.value)
+                if unit == "hours":
+                    moved = as_of + timedelta(hours=direction * count)
+                elif unit == "days":
+                    moved = as_of + timedelta(days=direction * count)
+                elif unit == "weeks":
+                    moved = as_of + timedelta(weeks=direction * count)
+                elif unit == "months":
+                    moved = data.shift_date_by_months(as_of, direction * count)
+                elif unit == "years":
+                    moved = data.shift_date_by_months(as_of, direction * 12 * count)
+                else:
+                    ui.notify("Select a valid period", type="negative")
+                    return
+                as_of_input.set_value(min(moved, datetime.now(self.timezone).date()).isoformat())
+                apply_range()
 
             ui.button("Apply", on_click=apply_range, icon="date_range")
 

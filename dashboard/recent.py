@@ -67,18 +67,23 @@ class RecentTab:
         self.elements.live_status_label = ui.label().classes("text-sm mt-1")
         self._update_live_status(live_power.collected_at_utc)
 
+        ui.label("Live / Today").classes("text-base font-semibold")
+
+        self.elements.battery_status_label = ui.label(
+            self._battery_status_text(live_power)
+        ).classes("text-sm font-medium mt-1")
+
         latest = self._live_table_values(live_power)
         self._set_full_updated_timestamp(telemetry.full_updated_last_local)
         self._set_live_today_values(live_power)
+
         self.elements.live_table = render_live_today_table(
             day,
             latest,
             self.config.forecast.arrays,
         )
         self._update_live_table_rows(live_power)
-        self.elements.battery_status_label = ui.label(
-            self._battery_status_text(live_power)
-        ).classes("text-sm font-medium mt-1")
+
         self.elements.recent_daily_table = render_energy_summary_table(
             recent_daily, "Past 7 days (kWh)", "Date"
         )
@@ -348,7 +353,6 @@ def render_live_today_table(
     latest: dict[str, float | None],
     forecast_arrays: tuple[SolarArrayConfig, ...],
 ) -> Table:
-    ui.label("Live / Today").classes("text-base font-semibold")
     columns = [
         {"name": "metric", "label": "", "field": "metric", "align": "left"},
         {"name": "latest", "label": "Latest (kW)", "field": "latest", "align": "right"},

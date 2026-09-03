@@ -56,11 +56,7 @@ class LivePowerCollector:
         self._timezone_name = timezone_name
         self._database_path = database_path
         self._collection_interval_seconds = collection_interval_seconds
-        self._registers = load_registers(
-            REGISTER_MAP_PATH,
-            modbus.default_device_id,
-            metrics=self._metrics(),
-        )
+        self._registers = load_registers(REGISTER_MAP_PATH, modbus.default_device_id, metrics=self._metrics())
         self._lock = Lock()
         self._stop_event = Event()
         self._active_event = Event()
@@ -88,10 +84,7 @@ class LivePowerCollector:
         LOGGER.info("Live collector stopped")
 
     def refresh_browser_activity(self) -> None:
-        has_connected_browser = any(
-            client.has_socket_connection
-            for client in Client.instances.values()
-        )
+        has_connected_browser = any(client.has_socket_connection for client in Client.instances.values())
         with self._lock:
             was_active = self._active_event.is_set()
             if has_connected_browser:
@@ -114,13 +107,10 @@ class LivePowerCollector:
             )
 
     def _metrics(self) -> set[str]:
-        metrics = LIVE_POWER_METRICS | LIVE_BATTERY_METRICS | LIVE_TODAY_METRICS
-        return metrics
+        return LIVE_POWER_METRICS | LIVE_BATTERY_METRICS | LIVE_TODAY_METRICS
 
     def _empty_values(self) -> dict[str, float | None]:
-        values: dict[str, float | None] = {
-            key: None for key in SUMMARY_LATEST_KEYS.values()
-        }
+        values: dict[str, float | None] = {key: None for key in SUMMARY_LATEST_KEYS.values()}
         values["battery_available_energy_kwh"] = None
         values["battery_soc_percent"] = None
         values.update({
@@ -156,11 +146,7 @@ class LivePowerCollector:
 
     def _connect(self) -> ModbusTcpClient | None:
         try:
-            client = ModbusTcpClient(
-                self._modbus.host,
-                port=self._modbus.port,
-                timeout=self._modbus.timeout_seconds,
-            )
+            client = ModbusTcpClient(self._modbus.host, port=self._modbus.port, timeout=self._modbus.timeout_seconds)
             if client.connect():
                 return client
             client.close()
@@ -221,17 +207,11 @@ class LivePowerCollector:
                 raise ValueError(f"live daily metric {metric!r} returned text")
             values[key] = value
 
-        grid_totals = {
-            "today_grid_import": "plant_grid_import_total_kwh",
-            "today_grid_export": "plant_grid_export_total_kwh",
-        }
+        grid_totals = {"today_grid_import": "plant_grid_import_total_kwh", "today_grid_export": "plant_grid_export_total_kwh"}
         day = collected_at_local[:10]
         if self._grid_energy_day != day:
             self._grid_energy_day = day
-            self._grid_energy_start = data.load_grid_energy_day_start(
-                self._database_path,
-                day,
-            )
+            self._grid_energy_start = data.load_grid_energy_day_start(self._database_path, day)
         for key, metric in grid_totals.items():
             value, _, _ = readings[metric]
             if isinstance(value, str):

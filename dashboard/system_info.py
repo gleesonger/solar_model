@@ -36,6 +36,4 @@ def render_system_information(device_information: list[dict[str, str]]) -> Table
         {"name": "value", "label": "Value", "field": "value", "align": "right"},
         {"name": "unit", "label": "Unit", "field": "unit", "align": "left"},
     ]
-    return ui.table(columns=columns, rows=device_information, row_key="variable").props(
-        "dense flat bordered"
-    ).classes("w-full max-w-3xl")
+    return ui.table(columns=columns, rows=device_information, row_key="variable").props("dense flat bordered").classes("w-full max-w-3xl")

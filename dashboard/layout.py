@@ -56,9 +56,7 @@ class DashboardLayout:
                         system_info = ui.tab("System Info")
                     self.historical_tab.render_mobile_controls_trigger()
                 with ui.row().classes("w-full justify-end"):
-                    self.elements.updated_at_label = ui.label().classes(
-                        "text-sm font-semibold text-white bg-red-600 border-4 border-red-900 rounded px-2 py-1"
-                    )
+                    self.elements.updated_at_label = ui.label().classes("text-sm font-semibold text-white bg-red-600 border-4 border-red-900 rounded px-2 py-1")
                     self.elements.updated_at_label.set_visibility(False)
                 self.historical_tab.render_historical_controls()
                 self.historical_tab.set_controls_visibility(self.state.active_tab in {"Analysis", "Historical"})

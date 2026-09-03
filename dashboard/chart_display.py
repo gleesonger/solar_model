@@ -49,11 +49,7 @@ class ChartDataDisplay:
                 ui.button(icon="content_copy", on_click=self._copy_data).props("flat round dense").tooltip("Copy data for Excel")
                 ui.button(icon="download", on_click=self._download_data).props("flat round dense").tooltip("Download CSV")
                 ui.button(icon="table_chart", on_click=self._toggle_layout).props("flat round dense").tooltip("Show table")
-        self.hint = (
-            ui.label(self._text(hint)).classes("text-sm text-gray-600")
-            if hint is not None
-            else None
-        )
+        self.hint = ui.label(self._text(hint)).classes("text-sm text-gray-600") if hint is not None else None
 
         self.chart_container = ui.column().classes("w-full")
         with self.chart_container:
@@ -106,17 +102,10 @@ class ChartDataDisplay:
     def _table_column_names(self) -> list[str]:
         if self._table_column_order is None:
             return list(self.dataframe.columns)
-        return [
-            column for column in self._table_column_order
-            if column in self.dataframe
-        ]
+        return [column for column in self._table_column_order if column in self.dataframe]
 
     def _table_rows(self) -> list[dict[str, object]]:
-        rows = (
-            self.dataframe.astype(object)
-            .where(pd.notna(self.dataframe), "")
-            .to_dict(orient="records")
-        )
+        rows = self.dataframe.astype(object).where(pd.notna(self.dataframe), "").to_dict(orient="records")
         formatted_rows = [
             {
                 "_row": index,
@@ -130,9 +119,7 @@ class ChartDataDisplay:
                 if index == 0:
                     total_row[column] = "Total"
                 elif pd.api.types.is_numeric_dtype(self.dataframe[column]):
-                    total_row[column] = self._format_table_value(
-                        self.dataframe[column].sum(min_count=1)
-                    )
+                    total_row[column] = self._format_table_value(self.dataframe[column].sum(min_count=1))
                 else:
                     total_row[column] = ""
             formatted_rows.append(total_row)

@@ -31,12 +31,8 @@ class HourlyTab:
 
     def render_hourly_tab(self) -> None:
         with ui.row().classes("w-full items-end gap-3"):
-            start_input = ui.input("First date", value=self.state.hourly_start.isoformat()).props(
-                "type=date outlined dense"
-            )
-            end_input = ui.input("End date", value=self.state.hourly_end.isoformat()).props(
-                "type=date outlined dense"
-            )
+            start_input = ui.input("First date", value=self.state.hourly_start.isoformat()).props("type=date outlined dense")
+            end_input = ui.input("End date", value=self.state.hourly_end.isoformat()).props("type=date outlined dense")
         updating_inputs = False
 
         def select_range(start: date, end: date, period: str) -> None:

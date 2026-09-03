@@ -278,9 +278,7 @@ def render_live_today_table(
         columns=columns,
         rows=data.summary_rows(dataframe, latest),
         row_key="metric",
-    ).props(
-        "dense flat bordered"
-    ).classes("live-today-table max-w-full").style("width: fit-content")
+    ).props("dense flat bordered").classes("live-today-table max-w-full").style("width: fit-content")
 
 
 def render_energy_summary_table(dataframe: pd.DataFrame, title: str, period_label: str) -> Table:
@@ -297,6 +295,4 @@ def render_energy_summary_table(dataframe: pd.DataFrame, title: str, period_labe
         {"name": "net_cost", "label": "Net Cost", "field": "net_cost", "align": "right"},
         {"name": "no_solar_battery_import_cost", "label": "No Solar Cost", "field": "no_solar_battery_import_cost", "align": "right"},
     ]
-    return ui.table(columns=columns, rows=data.energy_summary_rows(dataframe), row_key="period").props(
-        "dense flat bordered"
-    ).classes("max-w-full").style("width: fit-content")
+    return ui.table(columns=columns, rows=data.energy_summary_rows(dataframe), row_key="period").props("dense flat bordered").classes("max-w-full").style("width: fit-content")

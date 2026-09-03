@@ -41,9 +41,7 @@ class AnalysisTab:
         self.mobile_controls_drawer = drawer
 
     def render_mobile_controls_trigger(self):
-        self.mobile_controls_trigger = ui.button(
-            icon="menu", on_click=self.mobile_controls_drawer.toggle,
-        ).props("round flat dense").classes("analysis-mobile-controls-trigger")
+        self.mobile_controls_trigger = ui.button(icon="menu", on_click=self.mobile_controls_drawer.toggle).props("round flat dense").classes("analysis-mobile-controls-trigger")
         return self.mobile_controls_trigger
 
     def set_controls_visibility(self, visible: bool) -> None:
@@ -70,20 +68,14 @@ class AnalysisTab:
             if compact:
                 with ui.row().classes("w-full items-end gap-2"):
                     ui.button("<", on_click=lambda: move_as_of(-1)).props("dense outline")
-                    as_of_input = ui.input("As of", value=self.state.historical_as_of.isoformat()).props(
-                        f"type=date outlined dense max={datetime.now(self.timezone).date().isoformat()}"
-                    ).classes("flex-grow")
+                    as_of_input = ui.input("As of", value=self.state.historical_as_of.isoformat()).props(f"type=date outlined dense max={datetime.now(self.timezone).date().isoformat()}").classes("flex-grow")
                     ui.button(">", on_click=lambda: move_as_of(1)).props("dense outline")
             else:
                 ui.button("<", on_click=lambda: move_as_of(-1)).props("dense outline")
-                as_of_input = ui.input("As of", value=self.state.historical_as_of.isoformat()).props(
-                    f"type=date outlined dense max={datetime.now(self.timezone).date().isoformat()}"
-                ).classes("w-40")
+                as_of_input = ui.input("As of", value=self.state.historical_as_of.isoformat()).props(f"type=date outlined dense max={datetime.now(self.timezone).date().isoformat()}").classes("w-40")
                 ui.button(">", on_click=lambda: move_as_of(1)).props("dense outline")
 
-            count_input = ui.number("Last", value=self.state.historical_count, min=1, step=1).props(
-                "outlined dense"
-            ).classes("w-full" if compact else "w-28")
+            count_input = ui.number("Last", value=self.state.historical_count, min=1, step=1).props("outlined dense").classes("w-full" if compact else "w-28")
             unit_input = ui.select(
                 ["hours", "days", "weeks", "months", "years"],
                 value=self.state.historical_unit,
@@ -142,11 +134,7 @@ class AnalysisTab:
                     return
                 as_of, count, unit, _ = selection
                 bounds = data.analysis_range_bounds(as_of, count, unit, self.timezone)
-                show_download_data_dialog(
-                    self.config.database.path,
-                    bounds,
-                    self.timezone,
-                )
+                show_download_data_dialog(self.config.database.path, bounds, self.timezone)
                 if after_action is not None:
                     after_action()
 
@@ -181,9 +169,7 @@ class AnalysisTab:
             ui.button("Apply", on_click=apply_range, icon="date_range").classes("w-full" if compact else "")
             if not compact:
                 ui.space()
-            ui.button("Download Data", on_click=download_data, icon="download").classes(
-                "w-full" if compact else ""
-            )
+            ui.button("Download Data", on_click=download_data, icon="download").classes("w-full" if compact else "")
 
         return controls
 
@@ -240,13 +226,7 @@ class AnalysisTab:
             self.config.forecast.arrays,
             self.config.dashboard.actuals_to_forecast,
         )
-        return (
-            analysis_data.energy,
-            analysis_data.power,
-            analysis_data.battery,
-            bounds.start_date,
-            bounds.end_date,
-        )
+        return analysis_data.energy, analysis_data.power, analysis_data.battery, bounds.start_date, bounds.end_date
 
     def _refresh_historical_time_zoom(self, event) -> None:
         zoom_range = charts.data_zoom_range(event)
@@ -265,7 +245,4 @@ class AnalysisTab:
         if chart_elements is not None:
             chart = chart_elements.power.chart
             if chart is not getattr(event, "sender", None):
-                chart.run_chart_method(
-                    "dispatchAction",
-                    {"type": "dataZoom", "start": zoom_range[0], "end": zoom_range[1]},
-                )
+                chart.run_chart_method("dispatchAction", {"type": "dataZoom", "start": zoom_range[0], "end": zoom_range[1]})

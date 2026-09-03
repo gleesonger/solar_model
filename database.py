@@ -6,10 +6,13 @@ import re
 from datetime import datetime
 from pathlib import Path
 from typing import Any, cast
+from zoneinfo import ZoneInfo
 
-from sqlalchemy import Float, Index, Integer, String, Table, create_engine, inspect, select
+from sqlalchemy import Index, Integer, String, Table, create_engine, func, inspect, select
 from sqlalchemy.engine import Engine
+from sqlalchemy.ext.hybrid import hybrid_property
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
+from sqlalchemy.types import TypeDecorator
 
 from config import SolarArrayConfig, TariffsConfig
 from datasheets import SIGENSTOR_MODEL_SPECIFICATIONS
@@ -22,16 +25,61 @@ def column_name(metric: str, unit: str) -> str:
     return metric if metric.endswith(f"_{suffix}") else f"{metric}_{suffix}"
 
 
+class ScaledInteger(TypeDecorator[float]):
+    """Store measurements as integers while presenting their original units."""
+
+    impl = Integer
+    cache_ok = True
+
+    def process_bind_param(self, value: float | None, dialect) -> int | None:
+        return None if value is None else round(value * 10_000)
+
+    def process_result_value(self, value: int | None, dialect) -> float | None:
+        return None if value is None else value / 10_000
+
+
+class EpochSeconds(TypeDecorator[str]):
+    """Store timestamps as UTC epoch seconds while keeping the existing API."""
+
+    impl = Integer
+    cache_ok = True
+
+    def process_bind_param(self, value: str | datetime | int | None, dialect) -> int | None:
+        if value is None:
+            return None
+        if isinstance(value, int):
+            return value
+        timestamp = datetime.fromisoformat(value) if isinstance(value, str) else value
+        if timestamp.tzinfo is None:
+            timestamp = timestamp.replace(tzinfo=ZoneInfo("Europe/Dublin"))
+        return round(timestamp.timestamp())
+
+    def process_result_value(self, value: int | None, dialect) -> str | None:
+        return None if value is None else datetime.fromtimestamp(value, ZoneInfo("UTC")).isoformat()
+
+
+# Existing model declarations use ``Float`` for every measurement. Keeping this
+# alias preserves their readable field declarations while changing storage.
+Float = ScaledInteger
+
+
 class Base(DeclarativeBase):
     pass
 
 
 class SigenStorModbusSample(Base):
-    __tablename__ = "sigenstor_samples"
+    __tablename__ = "sigenstor"
 
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    collected_at_utc: Mapped[str] = mapped_column(String, nullable=False)
-    collected_at_local: Mapped[str] = mapped_column(String, nullable=False)
+    collected_at_utc: Mapped[str] = mapped_column(EpochSeconds, primary_key=True)
+
+    @hybrid_property
+    def collected_at_local(self) -> str:
+        return datetime.fromisoformat(self.collected_at_utc).astimezone().isoformat()
+
+    @collected_at_local.expression
+    @classmethod
+    def collected_at_local(cls):
+        return func.strftime("%Y-%m-%dT%H:%M:%S", cls.collected_at_utc, "unixepoch", "localtime")
 
     plant_grid_power_kw: Mapped[float | None] = mapped_column(Float)
     plant_pv_power_kw: Mapped[float | None] = mapped_column(Float)
@@ -105,14 +153,20 @@ class SigenStorDevice(Base):
 
 
 class ForecastSolarSample(Base):
-    __tablename__ = "forecast_solar_samples"
-    __table_args__ = (Index("idx_forecast_collection_time", "collection_guid", "forecast_time", unique=True),)
+    __tablename__ = "forecast_solar"
+    __table_args__ = (Index("idx_forecast_time", "forecast_time"),)
 
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    collection_guid: Mapped[str | None] = mapped_column(String(36))
-    collected_at_utc: Mapped[str] = mapped_column(String, nullable=False)
-    collected_at_local: Mapped[str] = mapped_column(String, nullable=False)
-    forecast_time: Mapped[str] = mapped_column(String, nullable=False)
+    collected_at_utc: Mapped[str] = mapped_column(EpochSeconds, primary_key=True)
+    forecast_time: Mapped[str] = mapped_column(EpochSeconds, primary_key=True)
+
+    @hybrid_property
+    def collected_at_local(self) -> str:
+        return datetime.fromisoformat(self.collected_at_utc).astimezone().isoformat()
+
+    @collected_at_local.expression
+    @classmethod
+    def collected_at_local(cls):
+        return func.strftime("%Y-%m-%dT%H:%M:%S", cls.collected_at_utc, "unixepoch", "localtime")
 
     panel_1_watts: Mapped[float | None] = mapped_column(Float)
     panel_1_watt_hours: Mapped[float | None] = mapped_column(Float)
@@ -153,7 +207,6 @@ class SolarDatabase:
         array: SolarArrayConfig,
         payload: dict,
         collected: tuple[str, str],
-        collection_guid: str,
     ) -> int:
         result = payload.get("result", {})
         watts = result.get("watts", {})
@@ -170,16 +223,14 @@ class SolarDatabase:
         with self.sessions.begin() as session:
             for forecast_time in sorted(set(watts) | set(watt_hours)):
                 values: dict[str, Any] = {
-                    "collection_guid": collection_guid,
                     "collected_at_utc": collected[0],
-                    "collected_at_local": collected[1],
                     "forecast_time": forecast_time,
                     fields[0]: watts.get(forecast_time),
                     fields[1]: watt_hours.get(forecast_time),
                     fields[2]: daily.get(forecast_time[:10]),
                 }
                 row = session.scalar(select(ForecastSolarSample).where(
-                    ForecastSolarSample.collection_guid == collection_guid,
+                    ForecastSolarSample.collected_at_utc == collected[0],
                     ForecastSolarSample.forecast_time == forecast_time,
                 ))
                 if row is None:
@@ -197,10 +248,7 @@ class SolarDatabase:
         collected: tuple[str, str],
         tariffs: TariffsConfig,
     ) -> None:
-        row: dict[str, Any] = {
-            "collected_at_utc": collected[0],
-            "collected_at_local": collected[1],
-        }
+        row: dict[str, Any] = {"collected_at_utc": collected[0]}
         for metric, (value, unit, cumulative) in values.items():
             name = column_name(metric, unit)
             if name not in SigenStorModbusSample.__table__.c:

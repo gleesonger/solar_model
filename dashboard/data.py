@@ -288,27 +288,27 @@ def load_daily_energy_totals(
             collections = session.execute(
                 select(
                     forecast_date,
-                    ForecastSolarSample.collection_guid,
+                    ForecastSolarSample.collected_at_utc,
                     ForecastSolarSample.collected_at_utc,
                 )
-                .where(ForecastSolarSample.collection_guid.is_not(None))
+                .where(ForecastSolarSample.collected_at_utc.is_not(None))
                 .where(forecast_date >= start_text)
                 .where(forecast_date <= end_text)
                 .distinct()
                 .order_by(forecast_date, ForecastSolarSample.collected_at_utc)
             ).all()
-            first_guid_by_date: dict[str, str] = {}
-            for collection_date, collection_guid, _ in collections:
-                if collection_guid is not None:
+            first_run_id_by_date: dict[str, int] = {}
+            for collection_date, collection_timestamp, _ in collections:
+                if collection_timestamp is not None:
                     first_guid_by_date.setdefault(
                         str(collection_date),
-                        str(collection_guid),
+                        str(collection_timestamp),
                     )
             selected_guids = set(first_guid_by_date.values())
             forecast_rows = (
                 list(session.scalars(
                     select(ForecastSolarSample)
-                    .where(ForecastSolarSample.collection_guid.in_(selected_guids))
+                    .where(ForecastSolarSample.collected_at_utc.in_(selected_guids))
                     .order_by(ForecastSolarSample.forecast_time)
                 ).all())
                 if selected_guids
@@ -320,9 +320,9 @@ def load_daily_energy_totals(
     actual_by_date = {str(row["date"]): row for row in actual_rows}
     forecast_rows_by_guid: dict[str, list[ForecastSolarSample]] = {}
     for forecast_row in forecast_rows:
-        if forecast_row.collection_guid is not None:
+        if forecast_row.collected_at_utc is not None:
             forecast_rows_by_guid.setdefault(
-                forecast_row.collection_guid,
+                forecast_row.collected_at_utc,
                 [],
             ).append(forecast_row)
 
@@ -604,7 +604,7 @@ SAMPLE_EXPORT_COLUMNS = tuple(
 FORECAST_EXPORT_COLUMNS = tuple(
     column.name
     for column in ForecastSolarSample.__table__.columns
-    if column.name not in {"id", "collection_guid", "collected_at_utc", "collected_at_local", "forecast_time"}
+    if column.name not in {"collected_at_utc", "collected_at_local", "forecast_time"}
 )
 
 # Retain the familiar wording for the fields already shown in Analysis.  All
@@ -711,15 +711,15 @@ def analysis_forecast_export_records(
     first_guid_by_date: dict[str, str] = {}
     rows_by_guid: dict[str, list[ForecastSolarSample]] = {}
     for row in forecast_rows:
-        if row.collection_guid is not None:
-            first_guid_by_date.setdefault(row.collected_at_local[:10], row.collection_guid)
-            rows_by_guid.setdefault(row.collection_guid, []).append(row)
+        if row.collected_at_utc is not None:
+            first_guid_by_date.setdefault(row.collected_at_local[:10], row.collected_at_utc)
+            rows_by_guid.setdefault(row.collected_at_utc, []).append(row)
     records: list[dict[str, object]] = []
-    for collection_guid in first_guid_by_date.values():
+    for collection_timestamp in first_guid_by_date.values():
         # Preserve the chart behaviour of using the first forecast collection
         # captured on a date, then export every stored metric from that
         # collection at its forecast timestamp.
-        for row in rows_by_guid.get(collection_guid, []):
+        for row in rows_by_guid.get(collection_timestamp, []):
             timestamp = parse_time(row.forecast_time, timezone)
             if not bounds.start_at <= timestamp <= bounds.end_at:
                 continue
@@ -795,11 +795,11 @@ def analysis_daily_energy_frames(
     first_guid_by_date: dict[str, str] = {}
     forecasts_by_guid: dict[str, list[ForecastSolarSample]] = {}
     for row in forecast_rows:
-        if row.collection_guid is None:
+        if row.collected_at_utc is None:
             continue
         collection_date = row.collected_at_local[:10]
-        first_guid_by_date.setdefault(collection_date, row.collection_guid)
-        forecasts_by_guid.setdefault(row.collection_guid, []).append(row)
+        first_guid_by_date.setdefault(collection_date, row.collected_at_utc)
+        forecasts_by_guid.setdefault(row.collected_at_utc, []).append(row)
 
     hours = pd.DataFrame({"hour": [f"{index:02d}:00" for index in range(24)]})
     actual_columns = [actual_column_name(panel_id) for panel_id in actuals_to_forecast.values()]
@@ -1396,8 +1396,8 @@ def load_device_information(database_path: str) -> list[dict[str, str]]:
 
 def load_forecast_for_day(session: Session, day_start: datetime) -> list[ForecastSolarSample]:
     first_forecast = session.scalar(
-        select(ForecastSolarSample.collection_guid)
-        .where(ForecastSolarSample.collection_guid.is_not(None))
+        select(ForecastSolarSample.collected_at_utc)
+        .where(ForecastSolarSample.collected_at_utc.is_not(None))
         .where(func.substr(ForecastSolarSample.collected_at_local, 1, 10) == day_start.strftime("%Y-%m-%d"))
         .order_by(ForecastSolarSample.collected_at_utc.asc())
         .limit(1)
@@ -1405,7 +1405,7 @@ def load_forecast_for_day(session: Session, day_start: datetime) -> list[Forecas
     if not first_forecast:
         return []
     return list(session.scalars(
-        select(ForecastSolarSample).where(ForecastSolarSample.collection_guid == first_forecast)
+        select(ForecastSolarSample).where(ForecastSolarSample.collected_at_utc == first_forecast)
     ).all())
 
 

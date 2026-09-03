@@ -166,6 +166,7 @@ def render_historical_charts(
         render_chart=lambda: ui.echart(battery_chart_options(battery_data)).classes("w-full h-96"),
         chart_options=battery_chart_options,
         column_labels=column_labels,
+        decimal_places={"available_energy_kwh": 1},
         show_total=True,
     )
     array_energy_display = ChartDataDisplay(
@@ -453,11 +454,15 @@ def power_chart_options(
 
 def battery_chart_options(battery_data: pd.DataFrame) -> dict[str, Any]:
     estimated_capacity = estimated_battery_capacity_kwh(battery_data)
-    energy_axis: dict[str, Any] = {"type": "value", "name": "kWh", "min": 0}
+    energy_axis: dict[str, Any] = {
+        "type": "value",
+        "name": "kWh",
+        "min": 0,
+        "axisLabel": {":formatter": "value => Number(value).toFixed(1)"},
+    }
     if estimated_capacity is not None:
         energy_axis["max"] = estimated_capacity
         energy_axis["interval"] = estimated_capacity / 5
-        energy_axis["axisLabel"] = {":formatter": "value => Number(value).toFixed(1)"}
     return {
         "tooltip": {"trigger": "axis"},
         "legend": {"data": ["Available energy", "State of charge"]},

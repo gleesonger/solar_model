@@ -30,6 +30,7 @@ class ChartDataDisplay:
         hint: str | Callable[[], str] | None = None,
         chart_options: Callable[[pd.DataFrame], dict[str, Any]] | None = None,
         column_labels: Mapping[str, str] | None = None,
+        decimal_places: Mapping[str, int] | None = None,
         table_columns: Sequence[str] | None = None,
         show_total: bool = False,
     ) -> None:
@@ -38,6 +39,7 @@ class ChartDataDisplay:
         self._hint = hint
         self._chart_options = chart_options
         self._column_labels = column_labels or {}
+        self._decimal_places = decimal_places or {}
         self._table_column_order = table_columns
         self._show_total = show_total
         self._showing_table = False
@@ -109,7 +111,7 @@ class ChartDataDisplay:
         formatted_rows = [
             {
                 "_row": index,
-                **{column: self._format_table_value(value) for column, value in row.items()},
+                **{column: self._format_table_value(value, column) for column, value in row.items()},
             }
             for index, row in enumerate(rows)
         ]
@@ -119,16 +121,15 @@ class ChartDataDisplay:
                 if index == 0:
                     total_row[column] = "Total"
                 elif pd.api.types.is_numeric_dtype(self.dataframe[column]):
-                    total_row[column] = self._format_table_value(self.dataframe[column].sum(min_count=1))
+                    total_row[column] = self._format_table_value(self.dataframe[column].sum(min_count=1), column)
                 else:
                     total_row[column] = ""
             formatted_rows.append(total_row)
         return formatted_rows
 
-    @staticmethod
-    def _format_table_value(value: object) -> object:
+    def _format_table_value(self, value: object, column: str) -> object:
         if isinstance(value, Real) and not isinstance(value, bool):
-            return f"{float(value):.2f}"
+            return f"{float(value):.{self._decimal_places.get(column, 2)}f}"
         return value
 
     def _copy_data(self) -> None:

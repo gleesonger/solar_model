@@ -297,7 +297,7 @@ def load_daily_energy_totals(
                 .distinct()
                 .order_by(forecast_date, ForecastSolarSample.collected_at_utc)
             ).all()
-            first_run_id_by_date: dict[str, int] = {}
+            first_guid_by_date: dict[str, str] = {}
             for collection_date, collection_timestamp, _ in collections:
                 if collection_timestamp is not None:
                     first_guid_by_date.setdefault(

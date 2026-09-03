@@ -40,12 +40,6 @@ tariffs:
 
 For each new actual sample, the collector stores the selected import and export rates, import cost, export revenue, net cost (`import - export`), and the positive import cost that would have applied without solar or battery (`load × import rate`). These values are not retroactively recalculated when rates change; the Recent tables aggregate the values stored with each sample.
 
-To backfill an older database using the current tariff configuration, run the one-off migration. It drops the obsolete `sigenstor_live` table and recalculates every sample using the current rules, so make a database backup first.
-
-```powershell
-python migrate_tariff_history.py M:\media-server\config\solar-model\solar.db
-```
-
 ## Forecast
 
 The arrays are parameterized in `config.yaml`:

@@ -1,0 +1,98 @@
+﻿[
+  {
+    "supplier": "Electric Ireland",
+    "plan": "Energysaver Nightsaver (Current)",
+    "enabled": true,
+    "energy_plans": ["NoSolarOrBattery", "Energysaver Nightsaver (Current)", "Fill_2am_to_6am_Dump_at_EoD", "Optimise_Energysaver_Nightsaver"],
+    "standing_charge_c_per_day": 90.89,
+    "standing_charge_c_per_day__": 0,
+    "rates": [
+      {"period": "night", "import_c_per_kwh": 18.38, "export_c_per_kwh": 19.5, "start": "00:00", "end": "08:00"},
+      {"period": "day", "import_c_per_kwh": 37.27, "export_c_per_kwh": 19.5, "start": "08:00", "end": "23:00"},
+      {"period": "night", "import_c_per_kwh": 18.38, "export_c_per_kwh": 19.5, "start": "23:00", "end": "24:00"}
+    ]
+  },
+  {
+    "supplier": "Bord Gais Energy",
+    "plan": "Smart EV Electricity",
+    "enabled": true,
+    "energy_plans": ["NoSolarOrBattery", "Energysaver Nightsaver (Current)", "Fill_2am_to_6am_Dump_at_EoD", "Optimise_Smart_EV_Electricity"],
+    "standing_charge_c_per_day": 107.08,
+    "rates": [
+      {"period": "night", "import_c_per_kwh": 26.26, "export_c_per_kwh": 18.5, "start": "00:00", "end": "02:00"},
+      {"period": "ev", "import_c_per_kwh": 8.87, "export_c_per_kwh": 18.5, "start": "02:00", "end": "05:00"},
+      {"period": "night", "import_c_per_kwh": 26.26, "export_c_per_kwh": 18.5, "start": "05:00", "end": "08:00"},
+      {"period": "day", "import_c_per_kwh": 34.82, "export_c_per_kwh": 18.5, "start": "08:00", "end": "17:00"},
+      {"period": "peak", "import_c_per_kwh": 48.57, "export_c_per_kwh": 18.5, "start": "17:00", "end": "19:00"},
+      {"period": "day", "import_c_per_kwh": 34.82, "export_c_per_kwh": 18.5, "start": "19:00", "end": "23:00"},
+      {"period": "night", "import_c_per_kwh": 26.26, "export_c_per_kwh": 18.5, "start": "23:00", "end": "24:00"}
+    ]
+  },
+  {
+    "supplier": "Energia",
+    "plan": "EV Smart Drive",
+    "enabled": true,
+    "energy_plans": ["NoSolarOrBattery", "Energysaver Nightsaver (Current)", "Fill_2am_to_6am_Dump_at_EoD", "Optimise_EV_Smart_Drive"],
+    "standing_charge_c_per_day": 72.61,
+    "rates": [
+      {"period": "other", "import_c_per_kwh": 40.16, "export_c_per_kwh": 18.5, "start": "00:00", "end": "02:00"},
+      {"period": "ev", "import_c_per_kwh": 9.42, "export_c_per_kwh": 18.5, "start": "02:00", "end": "06:00"},
+      {"period": "other", "import_c_per_kwh": 40.16, "export_c_per_kwh": 18.5, "start": "06:00", "end": "24:00"}
+    ]
+  },
+  {
+    "supplier": "Energia",
+    "plan": "EV Smart Drive Plus",
+    "enabled": true,
+    "energy_plans": ["NoSolarOrBattery", "Energysaver Nightsaver (Current)", "Fill_2am_to_6am_Dump_at_EoD", "Optimise_EV_Smart_Drive"],
+    "standing_charge_c_per_day": 72.61,
+    "rates": [
+      {"period": "night", "import_c_per_kwh": 23.99, "export_c_per_kwh": 18.5, "start": "00:00", "end": "02:00"},
+      {"period": "ev", "import_c_per_kwh": 11.03, "export_c_per_kwh": 18.5, "start": "02:00", "end": "06:00"},
+      {"period": "night", "import_c_per_kwh": 23.99, "export_c_per_kwh": 18.5, "start": "06:00", "end": "08:00"},
+      {"period": "day", "import_c_per_kwh": 38.93, "export_c_per_kwh": 18.5, "start": "08:00", "end": "17:00"},
+      {"period": "peak", "import_c_per_kwh": 51.08, "export_c_per_kwh": 18.5, "start": "17:00", "end": "19:00"},
+      {"period": "day", "import_c_per_kwh": 38.93, "export_c_per_kwh": 18.5, "start": "19:00", "end": "23:00"},
+      {"period": "night", "import_c_per_kwh": 23.99, "export_c_per_kwh": 18.5, "start": "23:00", "end": "24:00"}
+    ]
+  },
+  {
+    "supplier": "Electric Ireland",
+    "plan": "Night Boost",
+    "enabled": true,
+    "energy_plans": ["NoSolarOrBattery", "Energysaver Nightsaver (Current)", "Fill_2am_to_6am_Dump_at_EoD", "Optimise_Night_Boost"],
+    "standing_charge_c_per_day": 90.14,
+    "rates": [
+      {"period": "night", "import_c_per_kwh": 18.54, "export_c_per_kwh": 19.5, "start": "00:00", "end": "02:00"},
+      {"period": "boost", "import_c_per_kwh": 10.88, "export_c_per_kwh": 19.5, "start": "02:00", "end": "04:00"},
+      {"period": "night", "import_c_per_kwh": 18.54, "export_c_per_kwh": 19.5, "start": "04:00", "end": "08:00"},
+      {"period": "day", "import_c_per_kwh": 37.6, "export_c_per_kwh": 19.5, "start": "08:00", "end": "24:00"}
+    ]
+  },
+  {
+    "supplier": "Yuno Energy",
+    "plan": "EV Variable",
+    "enabled": true,
+    "energy_plans": ["NoSolarOrBattery", "Energysaver Nightsaver (Current)", "Fill_2am_to_6am_Dump_at_EoD", "Optimise_EV_Smart_Drive"],
+    "standing_charge_c_per_day": 98.1,
+    "rates": [
+      {"period": "other", "import_c_per_kwh": 36.7, "export_c_per_kwh": 17.16, "start": "00:00", "end": "02:00"},
+      {"period": "ev", "import_c_per_kwh": 12.11, "export_c_per_kwh": 17.16, "start": "02:00", "end": "06:00"},
+      {"period": "other", "import_c_per_kwh": 36.7, "export_c_per_kwh": 17.16, "start": "06:00", "end": "24:00"}
+    ]
+  },
+  {
+    "supplier": "Yuno Energy",
+    "plan": "Variable Smart",
+    "enabled": true,
+    "energy_plans": ["NoSolarOrBattery", "Energysaver Nightsaver (Current)", "Fill_2am_to_6am_Dump_at_EoD", "Optimise_Variable_Smart"],
+    "standing_charge_c_per_day": 98.1,
+    "rates": [
+      {"period": "night", "import_c_per_kwh": 22.98, "export_c_per_kwh": 17.16, "start": "00:00", "end": "08:00"},
+      {"period": "day", "import_c_per_kwh": 37.56, "export_c_per_kwh": 17.16, "start": "08:00", "end": "17:00"},
+      {"period": "peak", "import_c_per_kwh": 40.76, "export_c_per_kwh": 17.16, "start": "17:00", "end": "19:00"},
+      {"period": "day", "import_c_per_kwh": 37.56, "export_c_per_kwh": 17.16, "start": "19:00", "end": "23:00"},
+      {"period": "night", "import_c_per_kwh": 22.98, "export_c_per_kwh": 17.16, "start": "23:00", "end": "24:00"}
+    ]
+  }
+]

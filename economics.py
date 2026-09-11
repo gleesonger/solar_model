@@ -2,9 +2,44 @@
 
 from __future__ import annotations
 
+import logging
+import math
+import re
 from datetime import datetime
+from urllib.parse import urlparse
+from zoneinfo import ZoneInfo
 
-from config import TariffRule, TariffsConfig, tariff_rule_matches
+from config import Config, TariffRule, TariffsConfig
+
+WEEKDAYS = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
+
+
+def tariff_time_minutes(value: str, *, allow_end_of_day: bool = False) -> int:
+    if allow_end_of_day and value == "24:00":
+        return 1440
+    if not re.fullmatch(r"(?:[01]\d|2[0-3]):[0-5]\d", value):
+        maximum = "24:00" if allow_end_of_day else "23:59"
+        raise ValueError(f"tariff time must use HH:MM from 00:00 to {maximum}: {value!r}")
+    hours, minutes = value.split(":")
+    return int(hours) * 60 + int(minutes)
+
+
+def tariff_rule_matches(rule: TariffRule, weekday_index: int, minute_of_day: int) -> bool:
+    start_minute, end_minute = tariff_time_minutes(rule.start_time), tariff_time_minutes(rule.end_time, allow_end_of_day=True)
+    weekday = WEEKDAYS[weekday_index]
+    if start_minute == end_minute:
+        return weekday in rule.days
+    if start_minute < end_minute:
+        return weekday in rule.days and start_minute <= minute_of_day < end_minute
+    return (weekday in rule.days and minute_of_day >= start_minute) or (WEEKDAYS[(weekday_index - 1) % 7] in rule.days and minute_of_day < end_minute)
+
+
+def tariff_rules_for_timestamp(tariffs: TariffsConfig, timestamp: datetime) -> tuple[tuple[TariffRule, ...], tuple[TariffRule, ...]]:
+    local_date = timestamp.date().isoformat()
+    for period in reversed(tariffs.periods):
+        if period.effective_from <= local_date:
+            return period.import_, period.export
+    raise ValueError(f"no tariff period covers {local_date}")
 
 
 def tariff_rate(rules: tuple[TariffRule, ...], timestamp: datetime) -> float:
@@ -27,8 +62,9 @@ def economic_period_values(
     collected_at_local: datetime,
 ) -> dict[str, float | None]:
     """Calculate amounts for the energy accumulated since the prior sample."""
-    import_rate = tariff_rate(tariffs.import_, collected_at_local)
-    export_rate = tariff_rate(tariffs.export, collected_at_local)
+    import_rules, export_rules = tariff_rules_for_timestamp(tariffs, collected_at_local)
+    import_rate = tariff_rate(import_rules, collected_at_local)
+    export_rate = tariff_rate(export_rules, collected_at_local)
     import_cost = (
         grid_import_kwh * import_rate if grid_import_kwh is not None else None
     )

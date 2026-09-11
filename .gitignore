@@ -1,3 +1,7 @@
+*.xlsx
+*.csv
+*.db
+
 # Byte-compiled / optimized Python
 __pycache__/
 *.py[cod]
@@ -44,3 +48,4 @@ htmlcov/
 .DS_Store
 
 solar.db
+check-tariffs/minute_data_summer.csv

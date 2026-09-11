@@ -234,51 +234,41 @@ def load_daily_energy_totals(
     engine = create_engine_for_database(database_path)
     try:
         with Session(engine) as session:
-            actual_date = func.substr(
-                SigenStorModbusSample.collected_at_local,
-                1,
-                10,
-            ).label("date")
-            actual_rows = session.execute(
-                select(
-                    actual_date,
-                    func.sum(
-                        SigenStorModbusSample.plant_pv_total_kwh_period
-                    ).label("solar_actual"),
-                    func.sum(
-                        SigenStorModbusSample.plant_load_total_kwh_period
-                    ).label("load"),
-                    func.sum(
-                        SigenStorModbusSample.plant_grid_import_total_kwh_period
-                    ).label("grid_import"),
-                    func.sum(
-                        SigenStorModbusSample.plant_grid_export_total_kwh_period
-                    ).label("grid_export"),
-                    func.sum(
-                        SigenStorModbusSample.grid_import_cost_period
-                    ).label("grid_import_cost"),
-                    func.sum(
-                        SigenStorModbusSample.grid_export_revenue_period
-                    ).label("grid_export_revenue"),
-                    func.sum(
-                        SigenStorModbusSample.net_cost_period
-                    ).label("net_cost"),
-                    func.sum(
-                        SigenStorModbusSample.no_solar_battery_import_cost_period
-                    ).label("no_solar_battery_import_cost"),
-                )
-                .where(actual_date >= start_text)
-                .where(actual_date <= end_text)
-                .where(
-                    func.substr(
-                        SigenStorModbusSample.collected_at_local,
-                        12,
-                        8,
-                    )
-                    != "00:00:00"
-                )
-                .group_by(actual_date)
-            ).mappings().all()
+            actual_start = datetime.combine(start_date, time.min, tzinfo=timezone)
+            actual_end = datetime.combine(
+                end_date + timedelta(days=1),
+                time.min,
+                tzinfo=timezone,
+            )
+            actual_samples = list(session.scalars(
+                select(SigenStorModbusSample)
+                .where(SigenStorModbusSample.collected_at_utc >= actual_start.isoformat())
+                .where(SigenStorModbusSample.collected_at_utc < actual_end.isoformat())
+                .order_by(SigenStorModbusSample.collected_at_utc)
+            ).all())
+
+            actual_totals: dict[str, dict[str, float]] = {}
+            actual_columns = (
+                ("solar_actual", "plant_pv_total_kwh_period"),
+                ("load", "plant_load_total_kwh_period"),
+                ("grid_import", "plant_grid_import_total_kwh_period"),
+                ("grid_export", "plant_grid_export_total_kwh_period"),
+                ("grid_import_cost", "grid_import_cost_period"),
+                ("grid_export_revenue", "grid_export_revenue_period"),
+                ("net_cost", "net_cost_period"),
+                ("no_solar_battery_import_cost", "no_solar_battery_import_cost_period"),
+            )
+            for sample in actual_samples:
+                actual_date = parse_time(sample.collected_at_utc, timezone).date().isoformat()
+                totals = actual_totals.setdefault(actual_date, {})
+                for output_name, attribute in actual_columns:
+                    value = getattr(sample, attribute)
+                    if value is not None:
+                        totals[output_name] = totals.get(output_name, 0.0) + value
+            actual_rows = [
+                {"date": actual_date, **totals}
+                for actual_date, totals in actual_totals.items()
+            ]
 
             forecast_date = func.substr(
                 ForecastSolarSample.collected_at_local,

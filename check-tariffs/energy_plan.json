@@ -1,0 +1,108 @@
+{
+  "version": 1,
+  "plans": {
+    "NoSolarOrBattery": {
+      "enabled": true,
+      "date_ranges": [
+        {
+          "start_date": "01-Jan", "end_date": "31-Dec",
+          "time_ranges": [
+            {"start_time": "00:00", "end_time": "24:00", "model_solar": false, "fill_battery_from_grid": {"enabled": false, "min_soc": 0.8}, "empty_battery_to_grid": {"enabled": false, "max_soc": 0.2}, "export_surplus_pv": {"min_soc": 0.8}}
+          ]
+        }
+      ]
+    },
+    "Energysaver Nightsaver (Current)": {
+      "enabled": true,
+      "date_ranges": [
+        {
+          "start_date": "01-Jan", "end_date": "31-Dec",
+          "time_ranges": [
+            {"start_time": "00:00", "end_time": "08:00", "model_solar": true, "fill_battery_from_grid": {"enabled": true, "min_soc": 1.0}, "empty_battery_to_grid": {"enabled": false, "max_soc": 0.2}, "export_surplus_pv": {"min_soc": 0.8}},
+            {"start_time": "08:00", "end_time": "17:00", "model_solar": true, "fill_battery_from_grid": {"enabled": false, "min_soc": 0.8}, "empty_battery_to_grid": {"enabled": false, "max_soc": 0.2}, "export_surplus_pv": {"min_soc": 0.9}},
+            {"start_time": "08:00", "end_time": "21:00", "model_solar": true, "fill_battery_from_grid": {"enabled": false, "min_soc": 0.8}, "empty_battery_to_grid": {"enabled": false, "max_soc": 0.2}, "export_surplus_pv": {"min_soc": 0.95}},
+            {"start_time": "21:00", "end_time": "24:00", "model_solar": true, "fill_battery_from_grid": {"enabled": false, "min_soc": 0.8}, "empty_battery_to_grid": {"enabled": false, "max_soc": 0.2}, "export_surplus_pv": {"min_soc": 1.0}}
+          ]
+        }
+      ]
+    },
+    "Fill_2am_to_6am_Dump_at_EoD": {
+      "enabled": true,
+      "date_ranges": [
+        {
+          "start_date": "01-Jan", "end_date": "31-Dec",
+          "time_ranges": [
+            {"start_time": "00:00", "end_time": "02:00", "model_solar": true, "fill_battery_from_grid": {"enabled": false, "min_soc": 0.9}, "empty_battery_to_grid": {"enabled": false, "max_soc": 0.2}, "export_surplus_pv": {"min_soc": 0.9}},
+            {"start_time": "02:00", "end_time": "06:00", "model_solar": true, "fill_battery_from_grid": {"enabled": true, "min_soc": 1.0}, "empty_battery_to_grid": {"enabled": false, "max_soc": null}, "export_surplus_pv": {"min_soc": 0.8}},
+            {"start_time": "06:00", "end_time": "22:00", "model_solar": true, "fill_battery_from_grid": {"enabled": false, "min_soc": 0.9}, "empty_battery_to_grid": {"enabled": false, "max_soc": null}, "export_surplus_pv": {"min_soc": 0.9}},
+            {"start_time": "22:00", "end_time": "24:00", "model_solar": true, "fill_battery_from_grid": {"enabled": false, "min_soc": 0.9}, "empty_battery_to_grid": {"enabled": true, "max_soc": 0.1}, "export_surplus_pv": {"min_soc": 0.8}}
+          ]
+        }
+      ]
+    },
+    "Optimise_Energysaver_Nightsaver": {
+      "enabled": true,
+      "date_ranges": [
+        {
+          "start_date": "01-Jan", "end_date": "31-Dec",
+          "time_ranges": [
+            {"start_time": "08:00", "end_time": "21:00", "model_solar": true, "fill_battery_from_grid": {"enabled": false, "min_soc": 1.0}, "empty_battery_to_grid": {"enabled": false, "max_soc": 0.2}, "export_surplus_pv": {"min_soc": 0.8}},
+            {"start_time": "21:00", "end_time": "23:00", "model_solar": true, "fill_battery_from_grid": {"enabled": false, "min_soc": 1.0}, "empty_battery_to_grid": {"enabled": true, "max_soc": 0.2}, "export_surplus_pv": {"min_soc": 0.8}},
+            {"start_time": "23:00", "end_time": "08:00", "model_solar": true, "fill_battery_from_grid": {"enabled": true, "min_soc": 1.0}, "empty_battery_to_grid": {"enabled": false, "max_soc": 0.2}, "export_surplus_pv": {"min_soc": 0.8}}
+          ]
+        }
+      ]
+    },
+    "Optimise_Smart_EV_Electricity": {
+      "enabled": true,
+      "date_ranges": [
+        {
+          "start_date": "01-Jan", "end_date": "31-Dec",
+          "time_ranges": [
+            {"start_time": "05:00", "end_time": "24:00", "model_solar": true, "fill_battery_from_grid": {"enabled": false, "min_soc": 1.0}, "empty_battery_to_grid": {"enabled": false, "max_soc": 0.2}, "export_surplus_pv": {"min_soc": 0.8}},
+            {"start_time": "00:00", "end_time": "02:00", "model_solar": true, "fill_battery_from_grid": {"enabled": false, "min_soc": 1.0}, "empty_battery_to_grid": {"enabled": true, "max_soc": 0.2}, "export_surplus_pv": {"min_soc": 0.8}},
+            {"start_time": "02:00", "end_time": "05:00", "model_solar": true, "fill_battery_from_grid": {"enabled": true, "min_soc": 1.0}, "empty_battery_to_grid": {"enabled": false, "max_soc": 0.2}, "export_surplus_pv": {"min_soc": 0.8}}
+          ]
+        }
+      ]
+    },
+    "Optimise_EV_Smart_Drive": {
+      "enabled": true,
+      "date_ranges": [
+        {
+          "start_date": "01-Jan", "end_date": "31-Dec",
+          "time_ranges": [
+            {"start_time": "06:00", "end_time": "24:00", "model_solar": true, "fill_battery_from_grid": {"enabled": false, "min_soc": 1.0}, "empty_battery_to_grid": {"enabled": false, "max_soc": 0.2}, "export_surplus_pv": {"min_soc": 0.8}},
+            {"start_time": "00:00", "end_time": "02:00", "model_solar": true, "fill_battery_from_grid": {"enabled": false, "min_soc": 1.0}, "empty_battery_to_grid": {"enabled": true, "max_soc": 0.2}, "export_surplus_pv": {"min_soc": 0.8}},
+            {"start_time": "02:00", "end_time": "06:00", "model_solar": true, "fill_battery_from_grid": {"enabled": true, "min_soc": 1.0}, "empty_battery_to_grid": {"enabled": false, "max_soc": 0.2}, "export_surplus_pv": {"min_soc": 0.8}}
+          ]
+        }
+      ]
+    },
+    "Optimise_Night_Boost": {
+      "enabled": true,
+      "date_ranges": [
+        {
+          "start_date": "01-Jan", "end_date": "31-Dec",
+          "time_ranges": [
+            {"start_time": "04:00", "end_time": "24:00", "model_solar": true, "fill_battery_from_grid": {"enabled": false, "min_soc": 1.0}, "empty_battery_to_grid": {"enabled": false, "max_soc": 0.2}, "export_surplus_pv": {"min_soc": 0.8}},
+            {"start_time": "00:00", "end_time": "02:00", "model_solar": true, "fill_battery_from_grid": {"enabled": false, "min_soc": 1.0}, "empty_battery_to_grid": {"enabled": true, "max_soc": 0.2}, "export_surplus_pv": {"min_soc": 0.8}},
+            {"start_time": "02:00", "end_time": "04:00", "model_solar": true, "fill_battery_from_grid": {"enabled": true, "min_soc": 1.0}, "empty_battery_to_grid": {"enabled": false, "max_soc": 0.2}, "export_surplus_pv": {"min_soc": 0.8}}
+          ]
+        }
+      ]
+    },
+    "Optimise_Variable_Smart": {
+      "enabled": true,
+      "date_ranges": [
+        {
+          "start_date": "01-Jan", "end_date": "31-Dec",
+          "time_ranges": [
+            {"start_time": "08:00", "end_time": "23:00", "model_solar": true, "fill_battery_from_grid": {"enabled": false, "min_soc": 1.0}, "empty_battery_to_grid": {"enabled": false, "max_soc": 0.2}, "export_surplus_pv": {"min_soc": 0.8}},
+            {"start_time": "23:00", "end_time": "08:00", "model_solar": true, "fill_battery_from_grid": {"enabled": true, "min_soc": 1.0}, "empty_battery_to_grid": {"enabled": false, "max_soc": 0.2}, "export_surplus_pv": {"min_soc": 0.8}}
+          ]
+        }
+      ]
+    }
+  }
+}

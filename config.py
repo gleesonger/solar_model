@@ -4,6 +4,7 @@ import logging
 import math
 import re
 from dataclasses import dataclass
+from datetime import date
 from pathlib import Path
 from urllib.parse import urlparse
 from zoneinfo import ZoneInfo
@@ -60,11 +61,25 @@ class TariffRule:
     end_time: str
     rate: float
 
+    @property
+    def start_minutes(self) -> int:
+        return tariff_time_minutes(self.start_time)
+
+    @property
+    def end_minutes(self) -> int:
+        return tariff_time_minutes(self.end_time, allow_end_of_day=True)
+
+
+@dataclass(frozen=True)
+class TariffPeriod:
+    effective_from: str
+    import_: tuple[TariffRule, ...]
+    export: tuple[TariffRule, ...]
+
 
 @dataclass(frozen=True)
 class TariffsConfig:
-    import_: tuple[TariffRule, ...]
-    export: tuple[TariffRule, ...]
+    periods: tuple[TariffPeriod, ...]
 
 
 @dataclass(frozen=True)
@@ -98,12 +113,16 @@ def load_config(path: str | Path = "config.yaml") -> Config:
         raw_config = yaml.safe_load(file)
 
     try:
+        tariff_data = raw_config.get("tariffs") if isinstance(raw_config, dict) else None
+        if isinstance(tariff_data, dict) and isinstance(tariff_data.get("periods"), list):
+            for period in tariff_data["periods"]:
+                if isinstance(period, dict) and "import" in period:
+                    period["import_"] = period.pop("import")
         config = dacite.from_dict(
             data_class=Config,
             data=raw_config,
             config=dacite.Config(
                 cast=[tuple],
-                convert_key=lambda field_name: field_name.removesuffix("_"),
             ),
         )
         validate_config(config)
@@ -132,9 +151,19 @@ def validate_config(config: Config) -> None:
     if config.logging.level not in logging.getLevelNamesMapping():
         raise ValueError(f"logging.level is not valid: {config.logging.level}")
 
-    validate_tariff_rules("import", config.tariffs.import_)
-
-    validate_tariff_rules("export", config.tariffs.export)
+    if not config.tariffs.periods:
+        raise ValueError("tariffs.periods must contain at least one period")
+    previous_date: date | None = None
+    for period in config.tariffs.periods:
+        try:
+            effective_date = date.fromisoformat(period.effective_from)
+        except ValueError as error:
+            raise ValueError(f"tariff effective_from must use YYYY-MM-DD: {period.effective_from!r}") from error
+        if previous_date is not None and effective_date <= previous_date:
+            raise ValueError("tariff periods must be in ascending effective_from order")
+        previous_date = effective_date
+        validate_tariff_rules(f"period {period.effective_from} import", period.import_)
+        validate_tariff_rules(f"period {period.effective_from} export", period.export)
 
     endpoint = urlparse(config.forecast.endpoint)
     if endpoint.scheme not in {"http", "https"} or not endpoint.netloc:
@@ -198,9 +227,7 @@ def tariff_time_minutes(value: str, *, allow_end_of_day: bool = False) -> int:
         return 24 * 60
     if not re.fullmatch(r"(?:[01]\d|2[0-3]):[0-5]\d", value):
         maximum = "24:00" if allow_end_of_day else "23:59"
-        raise ValueError(
-            f"tariff time must use HH:MM from 00:00 to {maximum}: {value!r}"
-        )
+        raise ValueError(f"tariff time must use HH:MM from 00:00 to {maximum}: {value!r}")
     hours, minutes = value.split(":")
     return int(hours) * 60 + int(minutes)
 

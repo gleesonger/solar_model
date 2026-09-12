@@ -28,6 +28,10 @@ class SystemInfoTab:
         if self.elements.system_table is not None:
             self.elements.system_table.rows = data.load_device_information(self.config.database.path)
 
+    def apply_loaded_data(self, device_information: list[dict[str, str]]) -> None:
+        if self.elements.system_table is not None:
+            self.elements.system_table.rows = device_information
+
 
 def render_system_information(device_information: list[dict[str, str]]) -> Table:
     ui.label("System information").classes("text-lg font-semibold")

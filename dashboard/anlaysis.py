@@ -72,22 +72,27 @@ class AnalysisTab:
                     ui.button(">", on_click=lambda: move_as_of(1)).props("dense outline")
             else:
                 ui.button("<", on_click=lambda: move_as_of(-1)).props("dense outline")
-                as_of_input = ui.input("As of", value=self.state.historical_as_of.isoformat()).props(f"type=date outlined dense max={datetime.now(self.timezone).date().isoformat()}").classes("w-40")
+                as_of_input = ui.input("As of", value=self.state.historical_as_of.isoformat()).props(f"type=date outlined dense max={datetime.now(self.timezone).date().isoformat()}").classes("w-40").style("width: 8rem")
                 ui.button(">", on_click=lambda: move_as_of(1)).props("dense outline")
 
-            count_input = ui.number("Last", value=self.state.historical_count, min=1, step=1).props("outlined dense").classes("w-full" if compact else "w-28")
+            count_input = ui.number("Last", value=self.state.historical_count, min=1, step=1).props("outlined dense").classes("w-full" if compact else "w-28").style("" if compact else "width: 4.2rem")
             unit_input = ui.select(
                 ["hours", "days", "weeks", "months", "years"],
                 value=self.state.historical_unit,
                 label="Period",
-            ).props("outlined dense").classes("w-full" if compact else "w-36")
+            ).props("outlined dense").classes("w-full" if compact else "w-36").style("" if compact else "width: 6.75rem")
             frequency_input = ui.select(
                 ["hour", "day", "week", "month", "season", "year"],
                 value=self.state.historical_frequency,
                 label="Group by",
-            ).props("outlined dense").classes("w-full" if compact else "w-48")
+            ).props("outlined dense").classes("w-full" if compact else "w-48").style("" if compact else "width: 9rem")
+            aggregation_input = ui.select(
+                ["Sum", "Average"],
+                value=self.state.historical_aggregation,
+                label="Aggregation",
+            ).props("outlined dense").classes("w-full" if compact else "w-32").style("" if compact else "width: 7.2rem")
 
-            def selected_range() -> tuple[date, int, str, str] | None:
+            def selected_range() -> tuple[date, int, str, str, str] | None:
                 try:
                     raw_count = float(count_input.value)
                     count = int(raw_count)
@@ -113,7 +118,11 @@ class AnalysisTab:
                 if frequency not in {"hour", "day", "week", "month", "season", "year"}:
                     ui.notify("Select a valid grouping", type="negative")
                     return None
-                return as_of, count, unit, frequency
+                aggregation = str(aggregation_input.value)
+                if aggregation not in {"Sum", "Average"}:
+                    ui.notify("Select a valid aggregation", type="negative")
+                    return None
+                return as_of, count, unit, frequency, aggregation
 
             with ui.row().classes("items-center gap-2") as progress:
                 ui.spinner(size="sm")
@@ -130,11 +139,12 @@ class AnalysisTab:
                 selection = selected_range()
                 if selection is None:
                     return
-                as_of, count, unit, frequency = selection
+                as_of, count, unit, frequency, aggregation = selection
                 self.state.historical_as_of = as_of
                 self.state.historical_count = count
                 self.state.historical_unit = unit
                 self.state.historical_frequency = frequency
+                self.state.historical_aggregation = aggregation
                 bounds = data.analysis_range_bounds(as_of, count, unit, self.timezone)
                 loading = True
                 progress.set_visibility(True)
@@ -150,6 +160,7 @@ class AnalysisTab:
                         self.state.historical_power_interval_minutes,
                         self.config.forecast.arrays,
                         self.config.dashboard.actuals_to_forecast,
+                        aggregation.lower(),
                     )
                     self._update_historical_charts(analysis_data, refresh_battery=True)
                     if after_action is not None:
@@ -166,7 +177,7 @@ class AnalysisTab:
                 selection = selected_range()
                 if selection is None:
                     return
-                as_of, count, unit, _ = selection
+                as_of, count, unit, _, _ = selection
                 bounds = data.analysis_range_bounds(as_of, count, unit, self.timezone)
                 show_download_data_dialog(self.config.database.path, bounds, self.timezone)
                 if after_action is not None:
@@ -226,10 +237,6 @@ class AnalysisTab:
             self._refresh_historical_time_zoom,
         )
 
-    def refresh_historical_tab(self, *, refresh_battery: bool = True) -> None:
-        analysis_data = self._load_historical_data()
-        self._update_historical_charts(analysis_data, refresh_battery=refresh_battery)
-
     def _update_historical_charts(self, analysis_data, *, refresh_battery: bool = True) -> None:
         historical = analysis_data.energy
         power = analysis_data.power
@@ -244,12 +251,6 @@ class AnalysisTab:
             chart_elements.battery.update(battery)
         chart_elements.array_energy.update(historical)
         chart_elements.money.update(charts.money_dataframe(historical))
-
-    def _try_refresh_historical_tab(self, *, refresh_battery: bool = True) -> None:
-        try:
-            self.refresh_historical_tab(refresh_battery=refresh_battery)
-        except Exception as error:
-            ui.notify(f"Unable to update historical data: {error}", type="negative")
 
     def _load_historical_data(self):
         bounds = data.analysis_range_bounds(
@@ -279,7 +280,6 @@ class AnalysisTab:
         interval = charts.power_interval_for_zoom(*zoom_range)
         if interval != self.state.historical_power_interval_minutes:
             self.state.historical_power_interval_minutes = interval
-            self._try_refresh_historical_tab(refresh_battery=False)
             return
         chart_elements = self.elements.historical_charts
         if chart_elements is not None:

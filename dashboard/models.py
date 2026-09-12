@@ -106,6 +106,7 @@ class DashboardState:
     historical_count: int = 1
     historical_unit: str = "days"
     historical_frequency: str = "hour"
+    historical_aggregation: str = "Sum"
     historical_power_interval_minutes: int = 60
     historical_time_zoom_start: float = 0.0
     historical_time_zoom_end: float = 100.0

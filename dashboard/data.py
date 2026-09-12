@@ -40,6 +40,7 @@ FORECAST_WATT_HOURS_READERS: dict[int, ForecastWattHoursReader] = {
     3: lambda row: row.panel_3_watt_hours,
     4: lambda row: row.panel_4_watt_hours,
 }
+IMPORT_COST_TARIFF_PREFIX = "import_cost_tariff__"
 ENERGY_SUMMARY_COLUMNS = (
     "solar_actual",
     "solar_forecast",
@@ -728,6 +729,7 @@ def load_analysis_range(
     power_interval_minutes: int,
     forecast_arrays: tuple[SolarArrayConfig, ...],
     actuals_to_forecast: dict[str, int],
+    aggregation: str = "sum",
 ) -> AnalysisRangeData:
     """Load every Analysis dataset through one database session and date range."""
     if power_interval_minutes < 1:
@@ -750,6 +752,7 @@ def load_analysis_range(
         frequency,
         bounds.start_at,
         bounds.end_at,
+        aggregation=aggregation,
     )
     power, _ = average_telemetry_by_interval(
         source.samples,
@@ -882,7 +885,12 @@ def historical_energy_from_frames(
     frequency: str,
     start_at: datetime,
     end_at: datetime,
+    *,
+    aggregation: str = "sum",
 ) -> pd.DataFrame:
+    if aggregation not in {"sum", "average"}:
+        raise ValueError(f"Unsupported energy aggregation: {aggregation}")
+    aggregation_method = "mean" if aggregation == "average" else "sum"
     combined = pd.concat(daily_frames, ignore_index=True)
     value_columns = [column for column in combined.columns if column not in {"date", "hour"}]
     rate_columns = [column for column in ("import_rate", "export_rate") if column in value_columns]
@@ -898,7 +906,7 @@ def historical_energy_from_frames(
     ]
     if frequency == "hour":
         grouped = cast(pd.DataFrame, combined.groupby("hour", as_index=False).agg({
-            **{column: "sum" for column in sum_columns},
+            **{column: aggregation_method for column in sum_columns},
             **{column: "mean" for column in rate_columns},
         }))
         grouped["period"] = dataframe_column(grouped, "hour")
@@ -907,7 +915,7 @@ def historical_energy_from_frames(
         lambda value: historical_bucket_start(date.fromisoformat(str(value)), frequency)
     )
     grouped = cast(pd.DataFrame, combined.groupby("bucket_start", as_index=False).agg({
-        **{column: "sum" for column in sum_columns},
+        **{column: aggregation_method for column in sum_columns},
         **{column: "mean" for column in rate_columns},
     }))
     grouped["period"] = dataframe_column(grouped, "bucket_start").map(
@@ -1423,6 +1431,7 @@ def actual_hourly_from_samples(
     rate_columns = (("import_rate", "import_rate"), ("export_rate", "export_rate"))
     rate_totals: dict[tuple[str, str], float] = {}
     rate_counts: dict[tuple[str, str], int] = {}
+    tariff_bands: set[str] = set()
     for sample in samples:
         timestamp = parse_time(sample.collected_at_utc, day_start.tzinfo or ZoneInfo("UTC"))
         if timestamp <= day_start:
@@ -1434,6 +1443,11 @@ def actual_hourly_from_samples(
             value = getattr(sample, attribute)
             if value is not None:
                 totals[(hour, name)] = totals.get((hour, name), 0.0) + value
+        tariff_band = sample.import_tariff_band or "Unknown"
+        tariff_column = f"{IMPORT_COST_TARIFF_PREFIX}{tariff_band}"
+        tariff_bands.add(tariff_column)
+        if sample.grid_import_cost_period is not None:
+            totals[(hour, tariff_column)] = totals.get((hour, tariff_column), 0.0) + sample.grid_import_cost_period
         for name, attribute in rate_columns:
             value = getattr(sample, attribute)
             if value is not None:
@@ -1444,6 +1458,8 @@ def actual_hourly_from_samples(
     for hour in dataframe_column(hours, "hour"):
         row: dict[str, float | str] = {"hour": hour}
         for name, _ in columns:
+            row[name] = totals.get((hour, name), float("nan"))
+        for name in sorted(tariff_bands):
             row[name] = totals.get((hour, name), float("nan"))
         for name, _ in rate_columns:
             count = rate_counts.get((hour, name), 0)

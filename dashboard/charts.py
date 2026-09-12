@@ -10,7 +10,7 @@ from nicegui.elements.echart import EChart
 from config import SolarArrayConfig
 
 from .chart_display import ChartDataDisplay
-from .data import actual_column_name, chart_values, dataframe_column, forecast_column_name
+from .data import IMPORT_COST_TARIFF_PREFIX, actual_column_name, chart_values, dataframe_column, forecast_column_name
 from .models import DashboardState, HistoricalCharts, HourlyCharts, PANEL_COLORS
 
 
@@ -53,6 +53,7 @@ def analysis_column_labels(
     for array in forecast_arrays:
         labels[actual_column_name(array.panel_id)] = f"{array.name} Actual"
         labels[forecast_column_name(array.panel_id)] = f"{array.name} Forecast"
+    # Tariff band columns are added dynamically from stored sample metadata.
     return labels
 
 
@@ -183,13 +184,63 @@ def render_historical_charts(
         show_total=True,
     )
     money_data = money_dataframe(data)
+    money_column_labels = {
+        **column_labels,
+        **{
+            column: f"Import - {column.removeprefix(IMPORT_COST_TARIFF_PREFIX)}"
+            for column in money_data.columns
+            if column.startswith(IMPORT_COST_TARIFF_PREFIX)
+        },
+    }
+    split_import_cost = {"value": True}
+    selected_money_series: dict[str, bool] = {}
+
+    def tariff_import_labels() -> list[str]:
+        return [
+            f"Import - {column.removeprefix(IMPORT_COST_TARIFF_PREFIX)}"
+            for column in money_data.columns
+            if column.startswith(IMPORT_COST_TARIFF_PREFIX)
+        ]
+
+    async def toggle_import_view(event) -> None:
+        chart_options = await money_display.chart.run_chart_method("getOption")
+        legend_options = chart_options.get("legend", []) if isinstance(chart_options, dict) else []
+        if isinstance(legend_options, list) and legend_options and isinstance(legend_options[0], dict):
+            selected = legend_options[0].get("selected", {})
+            if isinstance(selected, dict):
+                selected_money_series.clear()
+                selected_money_series.update(selected)
+        was_split = split_import_cost["value"]
+        import_selected = (
+            selected_money_series.get("Import Cost", True)
+            if not was_split
+            else any(selected_money_series.get(label, True) for label in tariff_import_labels())
+        )
+        split_import_cost["value"] = bool(event.value)
+        if split_import_cost["value"]:
+            for label in tariff_import_labels():
+                selected_money_series[label] = import_selected
+        else:
+            selected_money_series["Import Cost"] = import_selected
+        money_display.refresh_chart()
+
     money_display = ChartDataDisplay(
         dataframe=money_data,
         title=lambda: f"Costs by {state.historical_frequency}",
-        render_chart=lambda: ui.echart(money_chart_options(money_data, "period")).classes("w-full h-96"),
-        chart_options=lambda dataframe: money_chart_options(dataframe, "period"),
-        column_labels=column_labels,
+        render_chart=lambda: ui.echart(
+            money_chart_options(money_data, "period", split_import_cost["value"], selected_money_series)
+        ).classes("w-full h-96"),
+        chart_options=lambda dataframe: money_chart_options(
+            dataframe, "period", split_import_cost["value"], selected_money_series
+        ),
+        column_labels=money_column_labels,
         show_total=True,
+        total_aggregations={column: "mean" for _, column, _ in MONEY_RATE_SERIES},
+        header_controls=lambda: ui.checkbox(
+            "Split tariff",
+            value=split_import_cost["value"],
+            on_change=toggle_import_view,
+        ).props("dense"),
     )
     return HistoricalCharts(
         energy=energy_display,
@@ -289,26 +340,45 @@ def forecast_item_style(color: str) -> dict[str, Any]:
 
 
 def money_dataframe(data: pd.DataFrame) -> pd.DataFrame:
-    columns = ["period", *[column for _, column, _ in MONEY_SERIES], *[column for _, column, _ in MONEY_RATE_SERIES]]
+    tariff_columns = sorted(column for column in data.columns if column.startswith(IMPORT_COST_TARIFF_PREFIX))
+    columns = ["period", *[column for _, column, _ in MONEY_SERIES], *tariff_columns, *[column for _, column, _ in MONEY_RATE_SERIES]]
     result = data.reindex(columns=columns).copy()
     for _, column, _ in MONEY_RATE_SERIES:
         result[column] = result[column] * 100
     return result
 
 
-def money_chart_options(data: pd.DataFrame, category_column: str) -> dict[str, Any]:
+def money_chart_options(
+    data: pd.DataFrame,
+    category_column: str,
+    split_import_cost: bool = True,
+    selected_series: dict[str, bool] | None = None,
+) -> dict[str, Any]:
+    tariff_columns = sorted(column for column in data.columns if column.startswith(IMPORT_COST_TARIFF_PREFIX))
+    tariff_colors = (GRID_IMPORT_COLOR, "#E76F51", "#F4A261", "#2A9D8F", "#264653")
+    import_cost_series = (
+        [
+            (f"Import - {column.removeprefix(IMPORT_COST_TARIFF_PREFIX)}", column, tariff_colors[index % len(tariff_colors)])
+            for index, column in enumerate(tariff_columns)
+        ]
+        if split_import_cost and tariff_columns
+        else [MONEY_SERIES[0]]
+    )
+    money_series = [*import_cost_series, *MONEY_SERIES[1:]]
     selected = {
-        "Import Cost": True,
+        **{label: True for label, _, _ in money_series},
         "Export Revenue": True,
         "Net Cost": False,
         "Net Cost if No Solar": False,
         "Import Rate": True,
         "Export Rate": True,
     }
+    if selected_series:
+        selected.update(selected_series)
     return {
         "tooltip": {"trigger": "axis"},
         "legend": {
-            "data": [label for label, _, _ in (*MONEY_SERIES, *MONEY_RATE_SERIES)],
+            "data": [label for label, _, _ in (*money_series, *MONEY_RATE_SERIES)],
             "selected": selected,
         },
         "xAxis": {"type": "category", "data": dataframe_column(data, category_column).tolist()},
@@ -322,8 +392,9 @@ def money_chart_options(data: pd.DataFrame, category_column: str) -> dict[str, A
                 "type": "bar",
                 "data": chart_values(dataframe_column(data, column)),
                 "itemStyle": {"color": color},
+                **({"stack": "import-cost"} if column.startswith(IMPORT_COST_TARIFF_PREFIX) else {}),
             }
-            for label, column, color in MONEY_SERIES
+            for label, column, color in money_series
         ] + [
             {
                 "name": label,

@@ -33,6 +33,8 @@ class ChartDataDisplay:
         decimal_places: Mapping[str, int] | None = None,
         table_columns: Sequence[str] | None = None,
         show_total: bool = False,
+        total_aggregations: Mapping[str, str] | None = None,
+        header_controls: Callable[[], None] | None = None,
     ) -> None:
         self.dataframe = dataframe
         self._title = title
@@ -42,12 +44,15 @@ class ChartDataDisplay:
         self._decimal_places = decimal_places or {}
         self._table_column_order = table_columns
         self._show_total = show_total
+        self._total_aggregations = total_aggregations or {}
         self._showing_table = False
 
         with ui.row().classes("w-full items-center justify-between gap-4 mt-4"):
             self.title = ui.label(self._text(title)).classes("text-lg font-semibold")
 
             with ui.row().classes("items-center gap-1 rounded border p-1"):
+                if header_controls is not None:
+                    header_controls()
                 ui.button(icon="content_copy", on_click=self._copy_data).props("flat round dense").tooltip("Copy data for Excel")
                 ui.button(icon="download", on_click=self._download_data).props("flat round dense").tooltip("Download CSV")
                 ui.button(icon="table_chart", on_click=self._toggle_layout).props("flat round dense").tooltip("Show table")
@@ -77,6 +82,16 @@ class ChartDataDisplay:
             if isinstance(legend, dict):
                 legend.pop("selected", None)
             self.chart.run_chart_method("setOption", browser_options)
+
+    def refresh_chart(self) -> None:
+        """Re-render the chart from the current dataframe and chart options."""
+        if self._chart_options is None:
+            return
+        options = self._chart_options(self.dataframe)
+        self.chart.options.clear()
+        self.chart.options.update(options)
+        browser_options = deepcopy(options)
+        self.chart.run_chart_method("setOption", browser_options, {"notMerge": True})
 
     @staticmethod
     def _text(value: str | Callable[[], str]) -> str:
@@ -121,7 +136,13 @@ class ChartDataDisplay:
                 if index == 0:
                     total_row[column] = "Total"
                 elif pd.api.types.is_numeric_dtype(self.dataframe[column]):
-                    total_row[column] = self._format_table_value(self.dataframe[column].sum(min_count=1), column)
+                    series = self.dataframe[column]
+                    aggregation = self._total_aggregations.get(column, "sum")
+                    if aggregation == "mean":
+                        value = series.mean()
+                    else:
+                        value = series.sum(min_count=1)
+                    total_row[column] = self._format_table_value(value, column)
                 else:
                     total_row[column] = ""
             formatted_rows.append(total_row)

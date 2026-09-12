@@ -69,7 +69,10 @@ class RecentTab:
         self.elements.live_timestamp = live_power.collected_at_utc
 
     def refresh_recent_tab(self) -> None:
-        day, telemetry, live_power, recent_daily, recent_monthly = self._load_data()
+        self.apply_loaded_data(self._load_data())
+
+    def apply_loaded_data(self, loaded_data) -> None:
+        day, telemetry, live_power, recent_daily, recent_monthly = loaded_data
         latest = self._live_table_values(live_power)
         self._set_full_updated_timestamp(telemetry.full_updated_last_local)
         self._set_live_today_values(live_power)

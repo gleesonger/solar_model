@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any, cast
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import Index, Integer, String, Table, create_engine, func, inspect, select
+from sqlalchemy import Index, Integer, String, Table, Text, create_engine, func, inspect, select
 from sqlalchemy.engine import Engine
 from sqlalchemy.ext.hybrid import hybrid_property
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
@@ -98,6 +98,7 @@ class SigenStorModbusSample(Base):
     plant_grid_import_total_kwh_period: Mapped[float | None] = mapped_column(Float)
     plant_grid_export_total_kwh: Mapped[float | None] = mapped_column(Float)
     plant_grid_export_total_kwh_period: Mapped[float | None] = mapped_column(Float)
+    import_tariff_band: Mapped[str | None] = mapped_column(Text)
     import_rate: Mapped[float | None] = mapped_column(Float)
     export_rate: Mapped[float | None] = mapped_column(Float)
     grid_import_cost_period: Mapped[float | None] = mapped_column(Float)

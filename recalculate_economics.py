@@ -11,8 +11,8 @@ from zoneinfo import ZoneInfo
 from sqlalchemy.exc import SQLAlchemyError
 
 from config import Config, load_config
-from economics import tariff_rate
-from database import SolarDatabase, create_engine_for_database
+from economics import tariff_rule
+from database import open_database
 
 
 def parse_date(value: str) -> date:
@@ -32,6 +32,7 @@ class IntervalRow:
     start_time: str
     end_time: str
     import_rate: int
+    import_tariff_band: str | None
     export_rate: int
 
     def sql_values(self) -> dict[str, str | int | None]:
@@ -51,7 +52,8 @@ def interval_rows(config: Config) -> list[IntervalRow]:
             boundaries = sorted(boundaries)
             for start, end in zip(boundaries, boundaries[1:]):
                 timestamp = datetime(2024, 1, 1 + weekday, start // 60, start % 60)
-                rows.append(IntervalRow(period.effective_from, next_date, (weekday + 1) % 7, f"{start // 60:02d}:{start % 60:02d}", f"{end // 60:02d}:{end % 60:02d}", round(tariff_rate(period.import_, timestamp) * 10000), round(tariff_rate(period.export, timestamp) * 10000)))
+                import_rule = tariff_rule(period.import_, timestamp)
+                rows.append(IntervalRow(period.effective_from, next_date, (weekday + 1) % 7, f"{start // 60:02d}:{start % 60:02d}", f"{end // 60:02d}:{end % 60:02d}", round(import_rule.rate * 10000), import_rule.name, round(tariff_rule(period.export, timestamp).rate * 10000)))
     return rows
 
 
@@ -72,7 +74,7 @@ def main(argv: list[str] | None = None) -> int:
         zone = ZoneInfo(config.timezone)
         minimum = int(datetime.combine(args.start, datetime.min.time(), zone).timestamp())
         maximum = None if args.end is None or args.end == date.max else int(datetime.combine(date.fromordinal(args.end.toordinal() + 1), datetime.min.time(), zone).timestamp())
-        database = SolarDatabase(create_engine_for_database(path))
+        database = open_database(path)
         try:
             with database.engine.connect() as connection:
                 raw = connection.connection.driver_connection
@@ -83,14 +85,15 @@ def main(argv: list[str] | None = None) -> int:
 
                 raw.create_function("configured_localtime", 1, configured_localtime)
                 raw.execute("BEGIN IMMEDIATE")
-                raw.execute("CREATE TEMP TABLE tariff_intervals (effective_from TEXT, next_effective TEXT, weekday INTEGER, start_time TEXT, end_time TEXT, import_rate INTEGER, export_rate INTEGER)")
-                raw.executemany("INSERT INTO tariff_intervals VALUES (:effective_from, :next_effective, :weekday, :start_time, :end_time, :import_rate, :export_rate)", [row.sql_values() for row in interval_rows(config)])
+                raw.execute("CREATE TEMP TABLE tariff_intervals (effective_from TEXT, next_effective TEXT, weekday INTEGER, start_time TEXT, end_time TEXT, import_rate INTEGER, import_tariff_band TEXT, export_rate INTEGER)")
+                raw.executemany("INSERT INTO tariff_intervals VALUES (:effective_from, :next_effective, :weekday, :start_time, :end_time, :import_rate, :import_tariff_band, :export_rate)", [row.sql_values() for row in interval_rows(config)])
                 params = {"minimum": minimum, "maximum": maximum}
                 raw.execute("""
                 WITH matched AS (
                     SELECT
                         sample.collected_at_utc,
                         tariff.import_rate,
+                        tariff.import_tariff_band,
                         tariff.export_rate
                     FROM sigenstor AS sample
                     JOIN tariff_intervals AS tariff
@@ -104,6 +107,7 @@ def main(argv: list[str] | None = None) -> int:
                 )
                 UPDATE sigenstor AS sample
                    SET import_rate = matched.import_rate,
+                       import_tariff_band = matched.import_tariff_band,
                        export_rate = matched.export_rate,
                        grid_import_cost_period = ROUND(sample.plant_grid_import_total_kwh_period * matched.import_rate / 10000.0),
                        grid_export_revenue_period = ROUND(sample.plant_grid_export_total_kwh_period * matched.export_rate / 10000.0),

@@ -42,15 +42,15 @@ def tariff_rules_for_timestamp(tariffs: TariffsConfig, timestamp: datetime) -> t
     raise ValueError(f"no tariff period covers {local_date}")
 
 
-def tariff_rate(rules: tuple[TariffRule, ...], timestamp: datetime) -> float:
-    """Return the rate for a local timestamp.
+def tariff_rule(rules: tuple[TariffRule, ...], timestamp: datetime) -> TariffRule:
+    """Return the matching tariff rule for a local timestamp.
 
     Configuration validation guarantees that precisely one rule matches.
     """
     minute_of_day = timestamp.hour * 60 + timestamp.minute
     for rule in rules:
         if tariff_rule_matches(rule, timestamp.weekday(), minute_of_day):
-            return rule.rate
+            return rule
     raise ValueError(f"no tariff rule matches {timestamp:%a %H:%M}")
 
 
@@ -60,11 +60,12 @@ def economic_period_values(
     load_kwh: float | None,
     tariffs: TariffsConfig,
     collected_at_local: datetime,
-) -> dict[str, float | None]:
+) -> dict[str, float | str | None]:
     """Calculate amounts for the energy accumulated since the prior sample."""
     import_rules, export_rules = tariff_rules_for_timestamp(tariffs, collected_at_local)
-    import_rate = tariff_rate(import_rules, collected_at_local)
-    export_rate = tariff_rate(export_rules, collected_at_local)
+    import_rule = tariff_rule(import_rules, collected_at_local)
+    import_rate = import_rule.rate
+    export_rate = tariff_rule(export_rules, collected_at_local).rate
     import_cost = (
         grid_import_kwh * import_rate if grid_import_kwh is not None else None
     )
@@ -73,6 +74,7 @@ def economic_period_values(
     )
     return {
         "import_rate": import_rate,
+        "import_tariff_band": import_rule.name,
         "export_rate": export_rate,
         "grid_import_cost_period": import_cost,
         "grid_export_revenue_period": export_revenue,

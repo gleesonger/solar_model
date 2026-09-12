@@ -60,7 +60,7 @@ def interval_rows(config: Config) -> list[IntervalRow]:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", type=Path, default=Path("config.yaml"))
-    parser.add_argument("--from", dest="start", required=True, type=parse_date)
+    parser.add_argument("--from", dest="start", default=datetime(2000,1,1).date(), type=parse_date)
     parser.add_argument("--to", dest="end", type=parse_date)
     args = parser.parse_args(argv)
     if args.end is not None and args.end < args.start:

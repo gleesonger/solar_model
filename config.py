@@ -60,6 +60,7 @@ class TariffRule:
     start_time: str
     end_time: str
     rate: float
+    name: str | None = None
 
     @property
     def start_minutes(self) -> int:
@@ -275,6 +276,9 @@ def validate_tariff_rules(direction: str, rules: tuple[TariffRule, ...]) -> None
 
         if not math.isfinite(rule.rate) or rule.rate < 0:
             raise ValueError(f"tariffs.{direction} rates must be finite and non-negative")
+
+        if direction.endswith(" import") and (not rule.name or not rule.name.strip()):
+            raise ValueError(f"tariffs.{direction} import rules must specify a tariff band name")
 
     for weekday_index, day in enumerate(WEEKDAYS):
         for minute_of_day in range(24 * 60):

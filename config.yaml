@@ -16,16 +16,20 @@ dashboard:
 tariffs:
   periods:
     - effective_from: "2000-01-01"
+      name: "Electric Ireland - Energysaver Nightsaver"
       import:
         - days: [Mon, Tue, Wed, Thu, Fri, Sat, Sun]
+          name: night
           start_time: "00:00"
           end_time: "08:00"
           rate: 0.2003
         - days: [Mon, Tue, Wed, Thu, Fri, Sat, Sun]
+          name: day
           start_time: "08:00"
           end_time: "23:00"
           rate: 0.4062
         - days: [Mon, Tue, Wed, Thu, Fri, Sat, Sun]
+          name: night
           start_time: "23:00"
           end_time: "24:00"
           rate: 0.2003
@@ -34,6 +38,49 @@ tariffs:
           start_time: "00:00"
           end_time: "24:00"
           rate: 0.195
+    - effective_from: "2026-09-18"
+      name: "Yuno Energy - EV Variable Smart"
+      import:
+        - days: [Mon, Tue, Wed, Thu, Fri, Sat, Sun]
+          name: night
+          start_time: "00:00"
+          end_time: "02:00"
+          rate: 0.2146
+        - days: [Mon, Tue, Wed, Thu, Fri, Sat, Sun]
+          name: EV
+          start_time: "02:00"
+          end_time: "06:00"
+          rate: 0.0859
+        - days: [Mon, Tue, Wed, Thu, Fri, Sat, Sun]
+          name: night
+          start_time: "06:00"
+          end_time: "08:00"
+          rate: 0.2146
+        - days: [Mon, Tue, Wed, Thu, Fri, Sat, Sun]
+          name: day
+          start_time: "08:00"
+          end_time: "17:00"
+          rate: 0.4047
+        - days: [Mon, Tue, Wed, Thu, Fri, Sat, Sun]
+          name: peak
+          start_time: "17:00"
+          end_time: "19:00"
+          rate: 0.4538
+        - days: [Mon, Tue, Wed, Thu, Fri, Sat, Sun]
+          name: day
+          start_time: "19:00"
+          end_time: "23:00"
+          rate: 0.4047
+        - days: [Mon, Tue, Wed, Thu, Fri, Sat, Sun]
+          name: night
+          start_time: "23:00"
+          end_time: "24:00"
+          rate: 0.2146
+      export:
+        - days: [Mon, Tue, Wed, Thu, Fri, Sat, Sun]
+          start_time: "00:00"
+          end_time: "24:00"
+          rate: 0.1716
 
 forecast:
   interval_seconds: 3600

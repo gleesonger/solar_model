@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
-from nicegui import ui
+from nicegui import run, ui
 
 from common import LOGGER
 from config import Config
@@ -115,7 +115,18 @@ class AnalysisTab:
                     return None
                 return as_of, count, unit, frequency
 
-            def apply_range() -> None:
+            with ui.row().classes("items-center gap-2") as progress:
+                ui.spinner(size="sm")
+                ui.label("Updating...").classes("text-sm")
+            progress.set_visibility(False)
+
+            apply_button = None
+            loading = False
+
+            async def apply_range() -> None:
+                nonlocal loading
+                if loading:
+                    return
                 selection = selected_range()
                 if selection is None:
                     return
@@ -124,9 +135,32 @@ class AnalysisTab:
                 self.state.historical_count = count
                 self.state.historical_unit = unit
                 self.state.historical_frequency = frequency
-                self._try_refresh_historical_tab()
-                if after_action is not None:
-                    after_action()
+                bounds = data.analysis_range_bounds(as_of, count, unit, self.timezone)
+                loading = True
+                progress.set_visibility(True)
+                if apply_button is not None:
+                    apply_button.set_visibility(False)
+                try:
+                    analysis_data = await run.io_bound(
+                        data.load_analysis_range,
+                        self.config.database.path,
+                        self.config.timezone,
+                        bounds,
+                        frequency,
+                        self.state.historical_power_interval_minutes,
+                        self.config.forecast.arrays,
+                        self.config.dashboard.actuals_to_forecast,
+                    )
+                    self._update_historical_charts(analysis_data, refresh_battery=True)
+                    if after_action is not None:
+                        after_action()
+                except Exception as error:
+                    ui.notify(f"Unable to update historical data: {error}", type="negative")
+                finally:
+                    loading = False
+                    progress.set_visibility(False)
+                    if apply_button is not None:
+                        apply_button.set_visibility(True)
 
             def download_data() -> None:
                 selection = selected_range()
@@ -138,7 +172,7 @@ class AnalysisTab:
                 if after_action is not None:
                     after_action()
 
-            def move_as_of(direction: int) -> None:
+            async def move_as_of(direction: int) -> None:
                 try:
                     as_of = date.fromisoformat(str(as_of_input.value))
                     raw_count = float(count_input.value)
@@ -164,9 +198,10 @@ class AnalysisTab:
                     ui.notify("Select a valid period", type="negative")
                     return
                 as_of_input.set_value(min(moved, datetime.now(self.timezone).date()).isoformat())
-                apply_range()
+                # Keep the same async Apply path for the date navigation buttons.
+                await apply_range()
 
-            ui.button("Apply", on_click=apply_range, icon="date_range").classes("w-full" if compact else "")
+            apply_button = ui.button("Apply", on_click=apply_range, icon="date_range").classes("w-full" if compact else "")
             if not compact:
                 ui.space()
             ui.button("Download Data", on_click=download_data, icon="download").classes("w-full" if compact else "")
@@ -175,16 +210,16 @@ class AnalysisTab:
 
     def render_historical_tab(self) -> None:
         try:
-            historical, power, battery, start, as_of = self._load_historical_data()
+            analysis_data = self._load_historical_data()
         except Exception as error:
             LOGGER.exception("Dashboard historical data initial load failed")
             ui.notify(f"Unable to load historical data: {error}", type="negative")
             return
 
         self.elements.historical_charts = charts.render_historical_charts(
-            historical,
-            power,
-            battery,
+            analysis_data.energy,
+            analysis_data.power,
+            analysis_data.battery,
             self.state,
             self.config.forecast.arrays,
             self.config.dashboard.actuals_to_forecast,
@@ -192,7 +227,13 @@ class AnalysisTab:
         )
 
     def refresh_historical_tab(self, *, refresh_battery: bool = True) -> None:
-        historical, power, battery, start, as_of = self._load_historical_data()
+        analysis_data = self._load_historical_data()
+        self._update_historical_charts(analysis_data, refresh_battery=refresh_battery)
+
+    def _update_historical_charts(self, analysis_data, *, refresh_battery: bool = True) -> None:
+        historical = analysis_data.energy
+        power = analysis_data.power
+        battery = analysis_data.battery
 
         chart_elements = self.elements.historical_charts
         if chart_elements is None:
@@ -217,7 +258,7 @@ class AnalysisTab:
             self.state.historical_unit,
             self.timezone,
         )
-        analysis_data = data.load_analysis_range(
+        return data.load_analysis_range(
             self.config.database.path,
             self.config.timezone,
             bounds,
@@ -226,7 +267,6 @@ class AnalysisTab:
             self.config.forecast.arrays,
             self.config.dashboard.actuals_to_forecast,
         )
-        return analysis_data.energy, analysis_data.power, analysis_data.battery, bounds.start_date, bounds.end_date
 
     def _refresh_historical_time_zoom(self, event) -> None:
         zoom_range = charts.data_zoom_range(event)

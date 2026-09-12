@@ -103,6 +103,18 @@
           ]
         }
       ]
+    },
+    "Optimise_SSE_Smart_EV_Max": {
+      "enabled": true,
+      "date_ranges": [
+        {
+          "start_date": "01-Jan", "end_date": "31-Dec",
+          "time_ranges": [
+            {"start_time": "05:00", "end_time": "23:00", "model_solar": true, "fill_battery_from_grid": {"enabled": false, "min_soc": 1.0}, "empty_battery_to_grid": {"enabled": false, "max_soc": 0.2}, "export_surplus_pv": {"min_soc": 0.8}},
+            {"start_time": "23:00", "end_time": "05:00", "model_solar": true, "fill_battery_from_grid": {"enabled": true, "min_soc": 1.0}, "empty_battery_to_grid": {"enabled": false, "max_soc": 0.2}, "export_surplus_pv": {"min_soc": 0.8}}
+          ]
+        }
+      ]
     }
   }
 }

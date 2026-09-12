@@ -1,17 +1,14 @@
-﻿[
+[
   {
     "supplier": "Electric Ireland",
     "plan": "Energysaver Nightsaver (Current)",
     "enabled": true,
-    "prices_include_vat": true,
-    "effective_from": "2026-07-01",
-    "source_url": "https://www.electricireland.ie/switch/new-customer/price-plans?priceType=E",
-    "energy_plans": ["NoSolarOrBattery", "Energysaver Nightsaver (Current)", "Fill_2am_to_6am_Dump_at_EoD", "Optimise_Energysaver_Nightsaver"],
+    "energy_plans": ["Fill_2am_to_6am_Dump_at_EoD", "Optimise_Energysaver_Nightsaver"],
     "standing_charge_c_per_day": 90.02,
     "rates": [
-      {"period": "night", "import_c_per_kwh": 16.83, "export_c_per_kwh": 19.5, "start": "00:00", "end": "08:00"},
-      {"period": "day", "import_c_per_kwh": 34.12, "export_c_per_kwh": 19.5, "start": "08:00", "end": "23:00"},
-      {"period": "night", "import_c_per_kwh": 16.83, "export_c_per_kwh": 19.5, "start": "23:00", "end": "24:00"}
+      {"period": "night", "import_c_per_kwh": 20.03, "export_c_per_kwh": 19.5, "start": "00:00", "end": "08:00"},
+      {"period": "day", "import_c_per_kwh": 40.62, "export_c_per_kwh": 19.5, "start": "08:00", "end": "23:00"},
+      {"period": "night", "import_c_per_kwh": 20.03, "export_c_per_kwh": 19.5, "start": "23:00", "end": "24:00"}
     ]
   },
   {
@@ -21,7 +18,7 @@
     "prices_include_vat": true,
     "effective_from": "2026-10-09",
     "source_url": "https://www.bordgaisenergy.ie/home/compare-electricity-price-plans",
-    "energy_plans": ["NoSolarOrBattery", "Energysaver Nightsaver (Current)", "Fill_2am_to_6am_Dump_at_EoD", "Optimise_Smart_EV_Electricity"],
+    "energy_plans": ["Fill_2am_to_6am_Dump_at_EoD", "Optimise_Smart_EV_Electricity"],
     "standing_charge_c_per_day": 67.06,
     "rates": [
       {"period": "night", "import_c_per_kwh": 26.57, "export_c_per_kwh": 18.5, "start": "00:00", "end": "02:00"},
@@ -34,14 +31,32 @@
     ]
   },
   {
+    "supplier": "Bord Gais Energy",
+    "plan": "Smart EV Plus Electricity Discount",
+    "enabled": true,
+    "effective_from": "2026-08-19",
+    "source_url": "https://www.bordgaisenergy.ie/home/our-plans/a0pSh000000icWDIAY",
+    "offer_code": "Aug26EVPNewElecOnly",
+    "energy_plans": ["Fill_2am_to_6am_Dump_at_EoD", "Optimise_Smart_EV_Electricity"],
+    "standing_charge_c_per_day": 99.89,
+    "rates": [
+      {"period": "night", "import_c_per_kwh": 24.19, "export_c_per_kwh": 18.5, "start": "00:00", "end": "02:00"},
+      {"period": "ev", "import_c_per_kwh": 12.52, "export_c_per_kwh": 18.5, "start": "02:00", "end": "05:00"},
+      {"period": "night", "import_c_per_kwh": 24.19, "export_c_per_kwh": 18.5, "start": "05:00", "end": "08:00"},
+      {"period": "day", "import_c_per_kwh": 32.00, "export_c_per_kwh": 18.5, "start": "08:00", "end": "17:00"},
+      {"period": "peak", "import_c_per_kwh": 40.83, "export_c_per_kwh": 18.5, "start": "17:00", "end": "19:00"},
+      {"period": "day", "import_c_per_kwh": 32.00, "export_c_per_kwh": 18.5, "start": "19:00", "end": "23:00"},
+      {"period": "night", "import_c_per_kwh": 24.19, "export_c_per_kwh": 18.5, "start": "23:00", "end": "24:00"}
+    ]
+  },
+  {
     "supplier": "Energia",
     "plan": "EV Smart Drive",
-    "enabled": true,
-    "prices_include_vat": true,
+    "enabled": false,
     "effective_from": "2026-10-12",
     "source_url": "https://www.energia.ie/about-energia/our-tariffs",
     "usage_thresholds": [{"period": "ev", "billing_period": "bi-monthly", "included_kwh": 1000, "excess_import_c_per_kwh": 15.42}],
-    "energy_plans": ["NoSolarOrBattery", "Energysaver Nightsaver (Current)", "Fill_2am_to_6am_Dump_at_EoD", "Optimise_EV_Smart_Drive"],
+    "energy_plans": ["Fill_2am_to_6am_Dump_at_EoD", "Optimise_EV_Smart_Drive"],
     "standing_charge_c_per_day": 92.94,
     "rates": [
       {"period": "other", "import_c_per_kwh": 40.16, "export_c_per_kwh": 18.5, "start": "00:00", "end": "02:00"},
@@ -52,12 +67,11 @@
   {
     "supplier": "Energia",
     "plan": "EV Smart Drive Plus",
-    "enabled": true,
-    "prices_include_vat": true,
+    "enabled": false,
     "effective_from": "2026-10-12",
     "source_url": "https://www.energia.ie/about-energia/our-tariffs",
     "usage_thresholds": [{"period": "ev", "billing_period": "bi-monthly", "included_kwh": 1000, "excess_import_c_per_kwh": 23.62}],
-    "energy_plans": ["NoSolarOrBattery", "Energysaver Nightsaver (Current)", "Fill_2am_to_6am_Dump_at_EoD", "Optimise_EV_Smart_Drive"],
+    "energy_plans": ["Fill_2am_to_6am_Dump_at_EoD", "Optimise_EV_Smart_Drive"],
     "standing_charge_c_per_day": 92.94,
     "rates": [
       {"period": "night", "import_c_per_kwh": 23.99, "export_c_per_kwh": 18.5, "start": "00:00", "end": "02:00"},
@@ -73,10 +87,9 @@
     "supplier": "Electric Ireland",
     "plan": "Night Boost",
     "enabled": true,
-    "prices_include_vat": true,
     "effective_from": "2026-07-01",
     "source_url": "https://www.electricireland.ie/residential/electricity-and-gas/ev-night-boost",
-    "energy_plans": ["NoSolarOrBattery", "Energysaver Nightsaver (Current)", "Fill_2am_to_6am_Dump_at_EoD", "Optimise_Night_Boost"],
+    "energy_plans": ["Fill_2am_to_6am_Dump_at_EoD", "Optimise_Night_Boost"],
     "standing_charge_c_per_day": 90.02,
     "rates": [
       {"period": "night", "import_c_per_kwh": 18.54, "export_c_per_kwh": 19.5, "start": "00:00", "end": "02:00"},
@@ -87,12 +100,30 @@
   },
   {
     "supplier": "Yuno Energy",
-    "plan": "EV Variable",
+    "plan": "EV Variable Smart",
     "enabled": true,
     "prices_include_vat": true,
     "effective_from": "2026-07-15",
     "source_url": "https://yunoenergy.ie/pricing-page",
-    "energy_plans": ["NoSolarOrBattery", "Energysaver Nightsaver (Current)", "Fill_2am_to_6am_Dump_at_EoD", "Optimise_EV_Smart_Drive"],
+    "energy_plans": ["Fill_2am_to_6am_Dump_at_EoD", "Optimise_EV_Smart_Drive"],
+    "standing_charge_c_per_day": 98.10,
+    "rates": [
+      {"period": "night", "import_c_per_kwh": 21.46, "export_c_per_kwh": 17.16, "start": "00:00", "end": "02:00"},
+      {"period": "ev", "import_c_per_kwh": 8.59, "export_c_per_kwh": 17.16, "start": "02:00", "end": "06:00"},
+      {"period": "night", "import_c_per_kwh": 21.46, "export_c_per_kwh": 17.16, "start": "06:00", "end": "08:00"},
+      {"period": "day", "import_c_per_kwh": 40.47, "export_c_per_kwh": 17.16, "start": "08:00", "end": "17:00"},
+      {"period": "peak", "import_c_per_kwh": 45.38, "export_c_per_kwh": 17.16, "start": "17:00", "end": "19:00"},
+      {"period": "day", "import_c_per_kwh": 40.47, "export_c_per_kwh": 17.16, "start": "19:00", "end": "23:00"},
+      {"period": "night", "import_c_per_kwh": 21.46, "export_c_per_kwh": 17.16, "start": "23:00", "end": "24:00"}
+    ]
+  },
+  {
+    "supplier": "Yuno Energy",
+    "plan": "EV Variable",
+    "enabled": false,
+    "effective_from": "2026-07-15",
+    "source_url": "https://yunoenergy.ie/pricing-page",
+    "energy_plans": ["Fill_2am_to_6am_Dump_at_EoD", "Optimise_EV_Smart_Drive"],
     "standing_charge_c_per_day": 91.56,
     "rates": [
       {"period": "other", "import_c_per_kwh": 36.7, "export_c_per_kwh": 17.16, "start": "00:00", "end": "02:00"},
@@ -103,11 +134,10 @@
   {
     "supplier": "Yuno Energy",
     "plan": "Variable Smart",
-    "enabled": true,
-    "prices_include_vat": true,
+    "enabled": false,
     "effective_from": "2026-07-15",
     "source_url": "https://yunoenergy.ie/pricing-page",
-    "energy_plans": ["NoSolarOrBattery", "Energysaver Nightsaver (Current)", "Fill_2am_to_6am_Dump_at_EoD", "Optimise_Variable_Smart"],
+    "energy_plans": ["Fill_2am_to_6am_Dump_at_EoD", "Optimise_Variable_Smart"],
     "standing_charge_c_per_day": 64.59,
     "rates": [
       {"period": "night", "import_c_per_kwh": 22.98, "export_c_per_kwh": 17.16, "start": "00:00", "end": "08:00"},
@@ -115,6 +145,40 @@
       {"period": "peak", "import_c_per_kwh": 40.76, "export_c_per_kwh": 17.16, "start": "17:00", "end": "19:00"},
       {"period": "day", "import_c_per_kwh": 37.56, "export_c_per_kwh": 17.16, "start": "19:00", "end": "23:00"},
       {"period": "night", "import_c_per_kwh": 22.98, "export_c_per_kwh": 17.16, "start": "23:00", "end": "24:00"}
+    ]
+  },
+  {
+    "supplier": "Flogas",
+    "plan": "Smart EV Night Charge 29% Electricity Loyalty Discount",
+    "enabled": true,
+    "prices_include_vat": true,
+    "effective_from": "2026-07-20",
+    "source_url": "https://quantumenergy.ie/wp-content/uploads/2026/07/Electricity-28-Loyalty-Discount-4-1.pdf",
+    "energy_plans": ["Fill_2am_to_6am_Dump_at_EoD", "Optimise_Smart_EV_Electricity"],
+    "standing_charge_c_per_day": 106.07,
+    "rates": [
+      {"period": "night", "import_c_per_kwh": 24.66, "export_c_per_kwh": 18.5, "start": "00:00", "end": "02:00"},
+      {"period": "ev", "import_c_per_kwh": 9.96, "export_c_per_kwh": 18.5, "start": "02:00", "end": "05:00"},
+      {"period": "night", "import_c_per_kwh": 24.66, "export_c_per_kwh": 18.5, "start": "05:00", "end": "08:00"},
+      {"period": "day", "import_c_per_kwh": 31.76, "export_c_per_kwh": 18.5, "start": "08:00", "end": "17:00"},
+      {"period": "peak", "import_c_per_kwh": 40.95, "export_c_per_kwh": 18.5, "start": "17:00", "end": "19:00"},
+      {"period": "day", "import_c_per_kwh": 31.76, "export_c_per_kwh": 18.5, "start": "19:00", "end": "23:00"},
+      {"period": "night", "import_c_per_kwh": 24.66, "export_c_per_kwh": 18.5, "start": "23:00", "end": "24:00"}
+    ]
+  },
+  {
+    "supplier": "SSE Airtricity",
+    "plan": "Smart EV Max Electricity (30% DD & eBill)",
+    "enabled": true,
+    "prices_include_vat": true,
+    "effective_from": "2025-10-20",
+    "source_url": "https://www.sseairtricity.com/assets/Tariffs/ROI/Current/1YR-ELEC-30-EVMax.pdf",
+    "energy_plans": ["Fill_2am_to_6am_Dump_at_EoD", "Optimise_SSE_Smart_EV_Max"],
+    "standing_charge_c_per_day": 97.87,
+    "rates": [
+      {"period": "ev", "import_c_per_kwh": 12.13, "export_c_per_kwh": 19.5, "start": "00:00", "end": "05:00"},
+      {"period": "other", "import_c_per_kwh": 33.76, "export_c_per_kwh": 19.5, "start": "05:00", "end": "23:00"},
+      {"period": "ev", "import_c_per_kwh": 12.13, "export_c_per_kwh": 19.5, "start": "23:00", "end": "24:00"}
     ]
   }
 ]

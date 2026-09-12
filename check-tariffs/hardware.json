@@ -2,6 +2,5 @@
     "inverter_size_w": 5500,
     "battery_max_charge_rate_w": 10000,
     "battery_max_discharge_rate_w": 10000,
-    "battery_capacity_wh_": 18000,
-    "battery_capacity_wh": 27000
+    "battery_capacity_wh": 18000
 }

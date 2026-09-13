@@ -15,6 +15,7 @@ from config import Config
 from . import data
 from .live import LivePowerCollector
 from .models import DashboardElements, DashboardState, LivePowerData
+from .snapshot import RecentData, load_recent_data
 
 class RecentTab:
     def __init__(
@@ -32,9 +33,9 @@ class RecentTab:
         self._today_values: dict[str, float | None] = {}
         self._previous_live_for_today: LivePowerData | None = None
 
-    def render_recent_tab(self) -> None:
+    def render_recent_tab(self, loaded_data: RecentData) -> None:
         try:
-            day, telemetry, live_power, recent_daily, recent_monthly = self._load_data()
+            day, telemetry, live_power, recent_daily, recent_monthly = loaded_data
         except Exception as error:
             LOGGER.exception("Dashboard Recent tab initial load failed")
             ui.label(f"Unable to load Recent data: {error}").classes("text-red-600")
@@ -134,36 +135,10 @@ class RecentTab:
 
     def _load_data(self) -> tuple[pd.DataFrame, data.TelemetryData, LivePowerData, pd.DataFrame, pd.DataFrame]:
         LOGGER.info("Dashboard loading data from database")
-        today = datetime.now(self.timezone).date()
-        telemetry = data.load_telemetry(
-            self.config.database.path,
-            self.config.timezone,
-        )
+        loaded_data = load_recent_data(self.config, self.live_collector)
+        telemetry = loaded_data[1]
         self._log_database_staleness(telemetry.latest_collected_at_utc)
-        return (
-            data.load_day(
-                self.config.database.path,
-                self.config.timezone,
-                self.config.forecast.arrays,
-                self.config.dashboard.actuals_to_forecast,
-            ).copy(),
-            telemetry,
-            self.live_collector.snapshot(),
-            data.load_recent_daily_energy(
-                self.config.database.path,
-                self.config.timezone,
-                today,
-                7,
-                self.config.forecast.arrays,
-            ),
-            data.load_recent_monthly_energy(
-                self.config.database.path,
-                self.config.timezone,
-                today,
-                12,
-                self.config.forecast.arrays,
-            ),
-        )
+        return loaded_data
 
     @staticmethod
     def _live_table_values(live_power: LivePowerData) -> dict[str, float | None]:

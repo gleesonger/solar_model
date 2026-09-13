@@ -15,10 +15,10 @@ class SystemInfoTab:
         self.config = config
         self.elements = elements
 
-    def render_system_info_tab(self) -> None:
+    def render_system_info_tab(self, device_information: list[dict[str, str]]) -> None:
         try:
             self.elements.system_table = render_system_information(
-                data.load_device_information(self.config.database.path)
+                device_information
             )
         except Exception as error:
             LOGGER.exception("Dashboard system information initial load failed")

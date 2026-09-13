@@ -1,6 +1,7 @@
 *.xlsx
 *.csv
 *.db
+*.pkl
 
 # Byte-compiled / optimized Python
 __pycache__/
@@ -47,5 +48,5 @@ htmlcov/
 # OS files
 .DS_Store
 
-solar.db
-check-tariffs/minute_data_summer.csv
+
+

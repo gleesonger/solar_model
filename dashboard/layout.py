@@ -1,10 +1,9 @@
 from __future__ import annotations
 
-import asyncio
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-from nicegui import run, ui
+from nicegui import ui
 from nicegui.elements.column import Column
 
 from common import LOGGER
@@ -16,6 +15,7 @@ from .live import LivePowerCollector
 from .models import DashboardElements, DashboardState
 from .recent import RecentTab
 from .system_info import SystemInfoTab
+from .snapshot import DashboardSnapshot
 
 
 class DashboardLayout:
@@ -38,7 +38,7 @@ class DashboardLayout:
         self.historical_tab = AnalysisTab(config, self.state, self.elements)
         self.system_info_tab = SystemInfoTab(config, self.elements)
 
-    def render_dashboard_layout(self, container: Column) -> None:
+    def render_dashboard_layout(self, container: Column, snapshot: DashboardSnapshot) -> None:
         LOGGER.info("Dashboard page UI loading")
         container.clear()
 
@@ -74,28 +74,17 @@ class DashboardLayout:
 
             with ui.tab_panels(tabs, value=selected).classes("w-full"):
                 with ui.tab_panel(recent).classes("p-0"):
-                    self.recent_tab.render_recent_tab()
+                    self.recent_tab.render_recent_tab(snapshot.recent_data)
                 with ui.tab_panel(historical).classes("p-0") as historical_panel:
                     if self.state.active_tab == "Analysis":
                         self.historical_tab.render_historical_tab()
                 with ui.tab_panel(system_info).classes("p-0"):
-                    self.system_info_tab.render_system_info_tab()
+                    self.system_info_tab.render_system_info_tab(snapshot.device_information)
 
-    async def refresh_dashboard(self) -> None:
-        LOGGER.info("Dashboard database refresh started")
-        try:
-            recent_data, system_data = await asyncio.gather(
-                run.io_bound(self.recent_tab._load_data),
-                run.io_bound(data.load_device_information, self.config.database.path),
-            )
-            # Database work is complete; update NiceGUI elements on the UI thread.
-            self.recent_tab.apply_loaded_data(recent_data)
-            self.system_info_tab.apply_loaded_data(system_data)
-        except Exception as error:
-            LOGGER.exception("Dashboard database refresh failed")
-            ui.notify(f"Unable to refresh dashboard data: {error}", type="negative")
-            return
-        LOGGER.info("Dashboard database refresh completed")
+    def apply_snapshot(self, snapshot: DashboardSnapshot) -> None:
+        """Apply shared data to this client's existing UI elements."""
+        self.recent_tab.apply_loaded_data(snapshot.recent_data)
+        self.system_info_tab.apply_loaded_data(snapshot.device_information)
 
     def refresh_live_power(self) -> None:
         self.recent_tab.refresh_live_power()

@@ -1,0 +1,103 @@
+{
+  "load": {
+    "features": {
+      "names": [
+        "hour_local",
+        "hour_sin",
+        "hour_cos",
+        "day_sin",
+        "day_cos",
+        "weekday_sin",
+        "weekday_cos",
+        "weekend",
+        "load_lag_1h",
+        "load_lag_2h",
+        "load_lag_24h",
+        "load_lag_48h",
+        "load_lag_168h",
+        "load_mean_1h",
+        "load_std_1h",
+        "load_mean_3h",
+        "load_std_3h",
+        "load_mean_6h",
+        "load_std_6h",
+        "load_mean_24h",
+        "load_std_24h"
+      ]
+    },
+    "validation": {
+      "model": {
+        "rows": 48,
+        "mae_kw": 0.4453752529208111,
+        "rmse_kw": 0.6533722372029261,
+        "energy_bias_kwh": -9.17512563756349
+      },
+      "baseline": {
+        "rows": 48,
+        "mae_kw": 0.30563565646120033,
+        "rmse_kw": 0.4726951871134752,
+        "energy_bias_kwh": -10.481412320674599
+      }
+    },
+    "test": {
+      "model": {
+        "rows": 71,
+        "mae_kw": 0.4277269924504282,
+        "rmse_kw": 0.7073721247977731,
+        "energy_bias_kwh": 6.854640969018236
+      },
+      "baseline": {
+        "rows": 71,
+        "mae_kw": 0.43349932224479726,
+        "rmse_kw": 0.7840800473388795,
+        "energy_bias_kwh": 8.430384640038433
+      }
+    }
+  },
+  "solar": {
+    "features": {
+      "names": [
+        "raw_solar_kw",
+        "raw_solar_day_kwh",
+        "forecast_lead_hours",
+        "hour_local",
+        "hour_sin",
+        "hour_cos",
+        "day_sin",
+        "day_cos",
+        "pv_lag_1h",
+        "pv_lag_24h",
+        "residual_lag_1h",
+        "residual_mean_3h"
+      ]
+    },
+    "validation": {
+      "model": {
+        "rows": 44,
+        "mae_kw": 0.4349316820555524,
+        "rmse_kw": 0.6735716743613683,
+        "energy_bias_kwh": -1.2471234486035416
+      },
+      "baseline": {
+        "rows": 44,
+        "mae_kw": 0.5548367424242424,
+        "rmse_kw": 0.7822357478864442,
+        "energy_bias_kwh": 10.80905
+      }
+    },
+    "test": {
+      "model": {
+        "rows": 56,
+        "mae_kw": 0.42149043177665924,
+        "rmse_kw": 0.617564603771927,
+        "energy_bias_kwh": -5.258172515787555
+      },
+      "baseline": {
+        "rows": 56,
+        "mae_kw": 0.6002666666666666,
+        "rmse_kw": 0.810894610645189,
+        "energy_bias_kwh": 3.972766666666667
+      }
+    }
+  }
+}

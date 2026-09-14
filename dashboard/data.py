@@ -595,17 +595,23 @@ def analysis_date_bounds(
 def load_analysis_source_data(
     database_path: str,
     bounds: AnalysisRangeBounds,
+    *,
+    include_minute_samples: bool = True,
 ) -> AnalysisSourceData:
-    """Load the raw records shared by Analysis charts and downloads."""
+    """Load forecasts and, when needed, raw records for Analysis charts."""
     engine = create_engine_for_database(database_path)
     try:
         with Session(engine) as session:
-            samples = load_minute_samples(session,
-                select(SigenStorModbusSample)
-                .where(SigenStorModbusSample.collected_at_utc >= bounds.start_at.isoformat())
-                .where(SigenStorModbusSample.collected_at_utc <= bounds.end_at.isoformat())
-                .order_by(SigenStorModbusSample.collected_at_utc),
-                f"Analysis {bounds.start_at.isoformat()} to {bounds.end_at.isoformat()}",
+            samples = (
+                load_minute_samples(session,
+                    select(SigenStorModbusSample)
+                    .where(SigenStorModbusSample.collected_at_utc >= bounds.start_at.isoformat())
+                    .where(SigenStorModbusSample.collected_at_utc <= bounds.end_at.isoformat())
+                    .order_by(SigenStorModbusSample.collected_at_utc),
+                    f"Analysis {bounds.start_at.isoformat()} to {bounds.end_at.isoformat()}",
+                )
+                if include_minute_samples
+                else []
             )
             forecast_rows = list(session.scalars(
                 select(ForecastSolarSample)
@@ -616,6 +622,24 @@ def load_analysis_source_data(
     finally:
         engine.dispose()
     return AnalysisSourceData(samples=samples, forecast_rows=forecast_rows)
+
+
+def load_analysis_hourly_samples(
+    database_path: str,
+    bounds: AnalysisRangeBounds,
+) -> list[SigenStorHourlySample]:
+    """Load hourly rollup rows for an Analysis power/battery request."""
+    engine = create_engine_for_database(database_path)
+    try:
+        with Session(engine) as session:
+            return list(session.scalars(
+                select(SigenStorHourlySample)
+                .where(SigenStorHourlySample.hour_start_utc >= bounds.start_at.isoformat())
+                .where(SigenStorHourlySample.hour_start_utc <= bounds.end_at.isoformat())
+                .order_by(SigenStorHourlySample.hour_start_utc)
+            ).all())
+    finally:
+        engine.dispose()
 
 
 SAMPLE_EXPORT_COLUMNS = tuple(
@@ -768,7 +792,14 @@ def load_analysis_range(
         raise ValueError("Power interval must be at least one minute")
 
     timezone = ZoneInfo(timezone_name)
-    source = load_analysis_source_data(database_path, bounds)
+    requires_minute_samples = frequency == "minute" or power_interval_minutes < 60
+    if requires_minute_samples and bounds.end_date > shift_date_by_months(bounds.start_date, 1):
+        raise ValueError("Minute-level Analysis is limited to a maximum period of one month")
+    source = load_analysis_source_data(
+        database_path,
+        bounds,
+        include_minute_samples=requires_minute_samples,
+    )
 
     if frequency == "minute":
         daily_frames = analysis_daily_energy_frames(
@@ -798,20 +829,18 @@ def load_analysis_range(
         bounds.end_at,
         aggregation=aggregation,
     )
-    power, _ = average_telemetry_by_interval(
-        source.samples,
-        timezone,
-        power_interval_minutes,
-        actuals_to_forecast,
-    )
-    # Battery is deliberately fixed at an hourly view.  Unlike the power
-    # chart, it does not respond to the power chart's zoom level.
-    _, battery = average_telemetry_by_interval(
-        source.samples,
-        timezone,
-        60,
-        actuals_to_forecast,
-    )
+    if requires_minute_samples:
+        power, _ = average_telemetry_by_interval(
+            source.samples, timezone, power_interval_minutes, actuals_to_forecast,
+        )
+        _, battery = average_telemetry_by_interval(
+            source.samples, timezone, 60, actuals_to_forecast,
+        )
+    else:
+        hourly_samples = load_analysis_hourly_samples(database_path, bounds)
+        power, battery = average_hourly_rollup_telemetry(
+            hourly_samples, timezone, actuals_to_forecast,
+        )
     return AnalysisRangeData(energy=energy, power=power, battery=battery)
 
 
@@ -1459,6 +1488,65 @@ def average_telemetry_by_interval(
     ]
     battery_buckets = power_buckets
     return build_frame(power_names, power_buckets), build_frame(battery_names, battery_buckets)
+
+
+def average_hourly_rollup_telemetry(
+    samples: list[SigenStorHourlySample],
+    timezone: tzinfo,
+    actuals_to_forecast: dict[str, int],
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Build Analysis hourly power/battery views from hourly sum/count rows."""
+    power_names = (
+        "solar",
+        *(actual_column_name(panel_id) for panel_id in actuals_to_forecast.values()),
+        "load", "battery", "inverter", "grid_import", "grid_export",
+    )
+    battery_names = ("available_energy_kwh", "soc_percent")
+    totals: dict[tuple[str, str, str], float] = {}
+    counts: dict[tuple[str, str, str], int] = {}
+    for sample in samples:
+        timestamp = parse_time(sample.hour_start_utc, timezone)
+        day = timestamp.date().isoformat()
+        bucket = timestamp.strftime("%H:%M")
+        sample_count = sample.sample_count
+        grid_sum = sample.plant_grid_power_kw
+        values: dict[str, float | None] = {
+            "solar": sample.plant_pv_power_kw,
+            "load": sample.plant_load_power_kw,
+            "battery": sample.plant_battery_power_kw,
+            "inverter": sample.inverter_power_kw,
+            "grid_import": max(grid_sum, 0.0) if grid_sum is not None else None,
+            "grid_export": max(-grid_sum, 0.0) if grid_sum is not None else None,
+            "available_energy_kwh": sample.inverter_battery_available_discharge_kwh,
+            "soc_percent": sample.plant_battery_soc_percent,
+        }
+        for pv_string, panel_id in actuals_to_forecast.items():
+            values[actual_column_name(panel_id)] = getattr(
+                sample, PV_STRING_POWER_COLUMNS[pv_string]
+            )
+        for name, value in values.items():
+            if value is None:
+                continue
+            key = (day, bucket, name)
+            totals[key] = totals.get(key, 0.0) + value
+            counts[key] = counts.get(key, 0) + sample_count
+
+    def frame(names: tuple[str, ...]) -> pd.DataFrame:
+        rows: list[dict[str, float | str | None]] = []
+        for hour in range(24):
+            bucket = f"{hour:02d}:00"
+            row: dict[str, float | str | None] = {"time": bucket}
+            for name in names:
+                daily_values = [
+                    totals[key] / counts[key]
+                    for key in totals
+                    if key[1] == bucket and key[2] == name and counts[key]
+                ]
+                row[name] = sum(daily_values) / len(daily_values) if daily_values else None
+            rows.append(row)
+        return pd.DataFrame(rows)
+
+    return frame(power_names), frame(battery_names)
 
 
 @heavy_work("dashboard device-information query")

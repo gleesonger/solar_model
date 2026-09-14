@@ -155,7 +155,7 @@ class LivePowerCollector:
         LOGGER.warning("Live Modbus connection failed; retrying next cycle")
         return None
 
-    @heavy_work("live Modbus update")
+    #@heavy_work("live Modbus update")
     def _collect_once(self, client: ModbusTcpClient) -> bool:
         try:
             readings = read_registers(client, self._registers)

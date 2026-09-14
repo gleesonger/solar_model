@@ -792,37 +792,24 @@ def load_analysis_range(
         raise ValueError("Power interval must be at least one minute")
 
     timezone = ZoneInfo(timezone_name)
-    requires_minute_samples = frequency == "minute" or power_interval_minutes < 60
-    if requires_minute_samples and bounds.end_date > shift_date_by_months(bounds.start_date, 1):
-        raise ValueError("Minute-level Analysis is limited to a maximum period of one month")
+    # Analysis energy always comes from the hourly rollup. Raw snapshots are
+    # reserved for the detailed Power/Battery view of one local day only.
+    requires_minute_samples = bounds.start_date == bounds.end_date
     source = load_analysis_source_data(
         database_path,
         bounds,
         include_minute_samples=requires_minute_samples,
     )
 
-    if frequency == "minute":
-        daily_frames = analysis_daily_energy_frames(
-            source.samples,
-            source.forecast_rows,
-            timezone,
-            bounds.start_date,
-            bounds.end_date,
-            forecast_arrays,
-            actuals_to_forecast,
-        )
-    else:
-        # Energy grouped at an hour or wider can be reconstructed exactly
-        # from stored hourly period sums, including per-array period energy.
-        daily_frames = load_rollup_daily_energy_frames(
-            database_path,
-            timezone,
-            bounds.start_date,
-            bounds.end_date,
-            forecast_arrays,
-            actuals_to_forecast,
-            source.forecast_rows,
-        )
+    daily_frames = load_rollup_daily_energy_frames(
+        database_path,
+        timezone,
+        bounds.start_date,
+        bounds.end_date,
+        forecast_arrays,
+        actuals_to_forecast,
+        source.forecast_rows,
+    )
     energy = historical_energy_from_frames(
         daily_frames,
         frequency,
@@ -831,11 +818,14 @@ def load_analysis_range(
         aggregation=aggregation,
     )
     if requires_minute_samples:
+        # One day is small enough to send at minute resolution once. The
+        # browser's chart zoom then filters those points without re-querying.
+        power_interval_minutes = 1
         power, _ = average_telemetry_by_interval(
             source.samples, timezone, power_interval_minutes, actuals_to_forecast,
         )
         _, battery = average_telemetry_by_interval(
-            source.samples, timezone, 60, actuals_to_forecast,
+            source.samples, timezone, 1, actuals_to_forecast,
         )
     else:
         hourly_samples = load_analysis_hourly_samples(database_path, bounds)

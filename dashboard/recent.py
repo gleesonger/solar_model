@@ -16,6 +16,7 @@ from . import data
 from .live import LivePowerCollector
 from .models import DashboardElements, DashboardState, LivePowerData
 from .snapshot import RecentData, load_recent_data
+from .tables import mark_final_total_row
 
 class RecentTab:
     def __init__(
@@ -271,4 +272,9 @@ def render_energy_summary_table(dataframe: pd.DataFrame, title: str, period_labe
         {"name": "net_cost", "label": "Net Cost", "field": "net_cost", "align": "right"},
         {"name": "no_solar_battery_import_cost", "label": "No Solar Cost", "field": "no_solar_battery_import_cost", "align": "right"},
     ]
-    return ui.table(columns=columns, rows=data.energy_summary_rows(dataframe), row_key="period").props("dense flat bordered").classes("max-w-full").style("width: fit-content")
+    return mark_final_total_row(
+        ui.table(columns=columns, rows=data.energy_summary_rows(dataframe), row_key="period")
+        .props("dense flat bordered")
+        .classes("max-w-full")
+        .style("width: fit-content")
+    )

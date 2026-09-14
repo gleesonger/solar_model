@@ -176,4 +176,8 @@ def render_dashboard_styles() -> None:
             background-color: #0070C0 !important;
             color: #ffffff !important;
         }
+        .summary-total-table tbody tr:last-child td {
+            background-color: #f1f3f5 !important;
+            font-weight: 700;
+        }
     """)

@@ -146,6 +146,9 @@ class AnalysisTab:
                 self.state.historical_frequency = frequency
                 self.state.historical_aggregation = aggregation
                 bounds = data.analysis_range_bounds(as_of, count, unit, self.timezone)
+                self.state.historical_power_interval_minutes = (
+                    1 if bounds.start_date == bounds.end_date else 60
+                )
                 loading = True
                 progress.set_visibility(True)
                 if apply_button is not None:
@@ -277,7 +280,19 @@ class AnalysisTab:
         ):
             return
         self.state.historical_time_zoom_start, self.state.historical_time_zoom_end = zoom_range
-        interval = charts.power_interval_for_zoom(*zoom_range)
+        bounds = data.analysis_range_bounds(
+            self.state.historical_as_of,
+            self.state.historical_count,
+            self.state.historical_unit,
+            self.timezone,
+        )
+        if bounds.start_date == bounds.end_date:
+            # A one-day chart already contains minute points; zooming is a
+            # client-side operation and must not reload a coarser dataset.
+            return
+        interval = (
+            60
+        )
         if interval != self.state.historical_power_interval_minutes:
             self.state.historical_power_interval_minutes = interval
             return

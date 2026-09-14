@@ -10,6 +10,8 @@ from typing import Any
 
 import pandas as pd
 from nicegui import ui
+
+from .tables import mark_final_total_row
 from nicegui.elements.echart import EChart
 
 
@@ -99,11 +101,11 @@ class ChartDataDisplay:
 
     def _render_table(self):
         with self.table_container:
-            return ui.table(
+            return mark_final_total_row(ui.table(
                 columns=self._table_columns(),
                 rows=self._table_rows(),
                 row_key="_row",
-            ).props("dense flat bordered").classes("max-w-full").style("width: fit-content")
+            ).props("dense flat bordered").classes("max-w-full").style("width: fit-content"))
 
     def _table_columns(self) -> list[dict[str, str]]:
         return [

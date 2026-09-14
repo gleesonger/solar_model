@@ -1,14 +1,16 @@
 from __future__ import annotations
 
 from functools import cache
+import logging
 import math
 import re
 from datetime import datetime
 from pathlib import Path
+from time import perf_counter
 from typing import Any, cast
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import Column, Index, Integer, String, Table, Text, case, cast as sql_cast, create_engine, func, inspect, literal, select, update
+from sqlalchemy import Column, Index, Integer, String, Table, Text, case, cast as sql_cast, create_engine, event, func, inspect, literal, select, update
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.engine import Engine
 from sqlalchemy.ext.hybrid import hybrid_property
@@ -521,7 +523,17 @@ class SolarDatabase:
 
 @cache
 def create_engine_for_database(path: str | Path) -> Engine:
-    return create_engine(f"sqlite:///{Path(path)}", future=True)
+    engine = create_engine(f"sqlite:///{Path(path)}", future=True)
+    if LOGGER.isEnabledFor(logging.DEBUG):
+        @event.listens_for(engine, "before_cursor_execute")
+        def log_sql_start(connection, cursor, statement, parameters, context, executemany) -> None:
+            context._solar_sql_started_at = perf_counter()
+
+        @event.listens_for(engine, "after_cursor_execute")
+        def log_sql_end(connection, cursor, statement, parameters, context, executemany) -> None:
+            elapsed = perf_counter() - context._solar_sql_started_at
+            LOGGER.debug("SQL (%.3fs): %s | parameters=%r", elapsed, statement, parameters)
+    return engine
 
 def open_database(path: str | Path) -> SolarDatabase:
     engine = create_engine_for_database(path)

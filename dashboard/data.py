@@ -883,10 +883,18 @@ def load_rollup_daily_energy_frames(
 
     hours = pd.DataFrame({"hour": [f"{index:02d}:00" for index in range(24)]})
     actual_columns = [actual_column_name(panel_id) for panel_id in actuals_to_forecast.values()]
+    available_dates = sorted(
+        date_key
+        for date_key in (set(actual_by_date) | set(first_collection_by_date))
+        if start_date.isoformat() <= date_key <= end_date.isoformat()
+    )
+    # Preserve the chart contract for a range with no actuals or forecasts,
+    # without rebuilding every missing day in the requested range.
+    if not available_dates:
+        available_dates = [start_date.isoformat()]
     frames: list[pd.DataFrame] = []
-    for day_offset in range((end_date - start_date).days + 1):
-        selected_date = start_date + timedelta(days=day_offset)
-        date_key = selected_date.isoformat()
+    for date_key in available_dates:
+        selected_date = date.fromisoformat(date_key)
         day_start = datetime(selected_date.year, selected_date.month, selected_date.day, tzinfo=timezone)
         day_samples = actual_by_date.get(date_key, [])
         if day_samples:

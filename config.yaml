@@ -1,7 +1,7 @@
 timezone: Europe/Dublin
 
 logging:
-  level: INFO
+  level: DEBUG
 
 database:
   path: solar.db

@@ -47,7 +47,10 @@ def configure_logging(level: str) -> None:
     root_logger.setLevel(level)
     # DEBUG is useful for our own application and SQL diagnostics, but the
     # Modbus library emits low-level protocol traffic that is not actionable.
-    logging.getLogger("pymodbus").setLevel(logging.WARNING)
+    for logger_name in ("pymodbus", "pymodbus.logging"):
+        modbus_logger = logging.getLogger(logger_name)
+        modbus_logger.disabled = True
+        modbus_logger.propagate = False
 
 
 def utc_now() -> datetime:

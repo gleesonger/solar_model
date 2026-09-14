@@ -13,6 +13,7 @@ import pandas as pd
 from sqlalchemy import create_engine, func, select
 from sqlalchemy.orm import Session
 
+from common import heavy_work
 from config import SolarArrayConfig
 from database import ForecastSolarSample, SigenStorDevice, SigenStorModbusSample, create_engine_for_database
 from .models import (
@@ -60,6 +61,7 @@ CURRENCY_SUMMARY_COLUMNS = frozenset({
     "no_solar_battery_import_cost",
 })
 
+@heavy_work("dashboard current-day summary query")
 def load_day(
     database_path: str,
     timezone_name: str,
@@ -113,6 +115,7 @@ def load_grid_energy_day_start(
     }
 
 
+@heavy_work("dashboard recent daily energy summary")
 def load_recent_daily_energy(
     database_path: str,
     timezone_name: str,
@@ -164,6 +167,7 @@ def load_lifetime_start_date(database_path: str, fallback: date) -> date:
     return min(starts, default=fallback)
 
 
+@heavy_work("dashboard recent monthly and lifetime energy summary")
 def load_recent_monthly_energy(
     database_path: str,
     timezone_name: str,
@@ -218,6 +222,7 @@ def load_recent_monthly_energy(
     return append_energy_total(recent, "Lifetime", source=lifetime)
 
 
+@heavy_work("dashboard daily energy aggregation")
 def load_daily_energy_totals(
     database_path: str,
     timezone_name: str,
@@ -461,6 +466,7 @@ def empty_hourly_range(
     return HourlyRangeData(energy=energy, power=power, battery=battery)
 
 
+@heavy_work("dashboard hourly tab query and aggregation")
 def load_hourly_range(
     database_path: str,
     timezone_name: str,
@@ -562,6 +568,7 @@ def analysis_date_bounds(
     )
 
 
+@heavy_work("dashboard analysis source-data query")
 def load_analysis_source_data(
     database_path: str,
     bounds: AnalysisRangeBounds,
@@ -721,6 +728,7 @@ def analysis_forecast_export_records(
     return records
 
 
+@heavy_work("dashboard analysis query and aggregation")
 def load_analysis_range(
     database_path: str,
     timezone_name: str,
@@ -829,6 +837,7 @@ def analysis_daily_energy_frames(
     return frames
 
 
+@heavy_work("dashboard historical energy aggregation")
 def load_historical_energy(
     database_path: str,
     timezone_name: str,
@@ -924,6 +933,7 @@ def historical_energy_from_frames(
     return cast(pd.DataFrame, grouped[["period", *value_columns]])
 
 
+@heavy_work("dashboard historical minute-energy aggregation")
 def load_historical_minute_energy(
     database_path: str,
     timezone_name: str,
@@ -999,6 +1009,7 @@ def load_historical_minute_energy(
     )
 
 
+@heavy_work("dashboard daily energy frame aggregation")
 def load_daily_energy_frames(
     session: Session,
     timezone: tzinfo,
@@ -1168,6 +1179,7 @@ def historical_bucket_label(value: date, frequency: str) -> str:
     raise ValueError(f"Unsupported historical frequency: {frequency}")
 
 
+@heavy_work("dashboard telemetry query and aggregation")
 def load_telemetry(
     database_path: str,
     timezone_name: str,
@@ -1373,6 +1385,7 @@ def average_telemetry_by_interval(
     return build_frame(power_names, power_buckets), build_frame(battery_names, battery_buckets)
 
 
+@heavy_work("dashboard device-information query")
 def load_device_information(database_path: str) -> list[dict[str, str]]:
     engine = create_engine_for_database(database_path)
     try:

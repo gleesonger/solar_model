@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import requests
 
-from common import LOGGER, timestamps
+from common import LOGGER, heavy_work, timestamps
 from config import SolarArrayConfig
 
 
@@ -19,6 +19,7 @@ def fetch_array(session: requests.Session, array: SolarArrayConfig, endpoint: st
     return payload
 
 
+@heavy_work("solar forecast collection update")
 def collect_once(session: requests.Session, database, arrays: tuple[SolarArrayConfig, ...], endpoint: str, timeout_seconds: float, timezone_name: str) -> None:
     collected = timestamps(timezone_name=timezone_name)
     for array in arrays:

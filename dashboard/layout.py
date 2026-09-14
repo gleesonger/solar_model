@@ -60,9 +60,14 @@ class DashboardLayout:
                         historical = ui.tab("Analysis")
                         system_info = ui.tab("System Info")
                     self.historical_tab.render_mobile_controls_trigger()
-                with ui.row().classes("w-full justify-end"):
-                    self.elements.updated_at_label = ui.label().classes("text-sm font-semibold text-white bg-red-600 border-4 border-red-900 rounded px-2 py-1")
-                    self.elements.updated_at_label.set_visibility(False)
+                # This status is deliberately outside normal document flow.
+                # Its initial visibility update arrives over the WebSocket and
+                # must not make the tab content jump as it is hidden/shown.
+                self.elements.updated_at_label = ui.label().classes(
+                    "dashboard-updated-label text-sm font-semibold text-white "
+                    "bg-red-600 border-4 border-red-900 rounded px-2 py-1"
+                )
+                self.elements.updated_at_label.set_visibility(False)
                 self.historical_tab.render_historical_controls()
                 self.historical_tab.set_controls_visibility(self.state.active_tab in {"Analysis", "Historical"})
             selected = {
@@ -97,6 +102,12 @@ def render_dashboard_styles() -> None:
             top: 0;
             z-index: 30;
             background: white;
+        }
+        .dashboard-updated-label {
+            position: absolute;
+            top: 0.25rem;
+            right: 1rem;
+            z-index: 1;
         }
         .analysis-controls {
             background: white;

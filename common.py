@@ -3,13 +3,17 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 import time
+from functools import wraps
 from datetime import datetime, timezone
 from threading import Lock
+from typing import Callable, ParamSpec, TypeVar
 from zoneinfo import ZoneInfo
 
 
 LOGGER = logging.getLogger("solar_model")
 LOCAL_ZONE = ZoneInfo("Europe/Dublin")
+P = ParamSpec("P")
+T = TypeVar("T")
 
 
 class ThrottleFilter(logging.Filter):
@@ -22,6 +26,10 @@ class ThrottleFilter(logging.Filter):
         self._lock = Lock()
 
     def filter(self, record: logging.LogRecord) -> bool:
+        # Lifecycle and timing messages are deliberately never throttled: they
+        # are the audit trail for every scheduled piece of expensive work.
+        if record.levelno < logging.WARNING:
+            return True
         key = (record.name, record.levelno, str(record.msg))
         now = time.monotonic()
         with self._lock:
@@ -30,6 +38,28 @@ class ThrottleFilter(logging.Filter):
                 return False
             self._last_logged[key] = now
         return True
+
+
+def heavy_work(name: str) -> Callable[[Callable[P, T]], Callable[P, T]]:
+    """Log the start, completion time, and failure of a costly synchronous task."""
+    def decorate(function: Callable[P, T]) -> Callable[P, T]:
+        @wraps(function)
+        def wrapped(*args: P.args, **kwargs: P.kwargs) -> T:
+            started_at = time.perf_counter()
+            LOGGER.info("Heavy work started: %s", name)
+            try:
+                result = function(*args, **kwargs)
+            except Exception:
+                elapsed_seconds = time.perf_counter() - started_at
+                LOGGER.exception("Heavy work failed: %s (%.3fs)", name, elapsed_seconds)
+                raise
+            elapsed_seconds = time.perf_counter() - started_at
+            LOGGER.info("Heavy work completed: %s (%.3fs)", name, elapsed_seconds)
+            return result
+
+        return wrapped
+
+    return decorate
 
 
 def configure_logging(level: str, throttle_seconds: float = 300) -> None:
@@ -67,4 +97,3 @@ def source_path(path: str | Path) -> Path:
 
 def str_is_null_or_empty(value: str | None) -> bool:
     return value is None or value.strip() == ""
-

@@ -8,6 +8,7 @@ publishes immutable snapshot references to connected pages.
 from __future__ import annotations
 
 import asyncio
+from time import perf_counter
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
@@ -17,7 +18,7 @@ from zoneinfo import ZoneInfo
 import pandas as pd
 from nicegui import run
 
-from common import LOGGER
+from common import LOGGER, heavy_work
 from config import Config
 
 from . import data
@@ -36,6 +37,7 @@ class DashboardSnapshot:
     device_information: list[dict[str, str]]
 
 
+@heavy_work("dashboard shared Recent snapshot data")
 def load_recent_data(config: Config, live_collector: LivePowerCollector) -> RecentData:
     """Load the data common to every browser's Recent tab."""
     timezone = ZoneInfo(config.timezone)
@@ -98,14 +100,18 @@ class DashboardSnapshotStore:
 
     async def refresh(self) -> DashboardSnapshot | None:
         """Load a complete replacement snapshot without blocking NiceGUI's loop."""
-        LOGGER.info("Dashboard shared snapshot refresh started")
+        started_at = perf_counter()
+        LOGGER.info("Heavy work started: dashboard full shared snapshot refresh")
         try:
             recent_data, device_information = await asyncio.gather(
                 run.io_bound(load_recent_data, self._config, self._live_collector),
                 run.io_bound(data.load_device_information, self._config.database.path),
             )
         except Exception:
-            LOGGER.exception("Dashboard shared snapshot refresh failed")
+            LOGGER.exception(
+                "Heavy work failed: dashboard full shared snapshot refresh (%.3fs)",
+                perf_counter() - started_at,
+            )
             return None
 
         with self._lock:
@@ -124,7 +130,12 @@ class DashboardSnapshotStore:
                 listener(snapshot)
             except Exception:
                 LOGGER.exception("Dashboard snapshot listener failed")
-        LOGGER.info("Dashboard shared snapshot refresh completed (version %s)", snapshot.version)
+        LOGGER.info(
+            "Heavy work completed: dashboard full shared snapshot refresh "
+            "(version %s, %.3fs)",
+            snapshot.version,
+            perf_counter() - started_at,
+        )
         return snapshot
 
     async def run_forever(self) -> None:

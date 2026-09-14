@@ -6,7 +6,7 @@ from pathlib import Path
 
 from pymodbus.client import ModbusTcpClient
 
-from common import LOGGER, source_path, timestamps
+from common import LOGGER, heavy_work, source_path, timestamps
 from config import TariffsConfig
 
 
@@ -139,6 +139,7 @@ def read_registers(
     return values
 
 
+@heavy_work("full Modbus data collection update")
 def collect_once(
     client: ModbusTcpClient,
     database,

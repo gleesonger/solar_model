@@ -821,6 +821,7 @@ def load_analysis_range(
             bounds.end_date,
             forecast_arrays,
             actuals_to_forecast,
+            source.forecast_rows,
         )
     energy = historical_energy_from_frames(
         daily_frames,
@@ -851,21 +852,69 @@ def load_rollup_daily_energy_frames(
     end_date: date,
     forecast_arrays: tuple[SolarArrayConfig, ...],
     actuals_to_forecast: dict[str, int],
+    forecast_rows: list[ForecastSolarSample],
 ) -> list[pd.DataFrame]:
-    """Load Analysis energy frames from the hourly actual-data rollup."""
+    """Build Analysis energy frames from one hourly range query and forecasts."""
+    start_at = datetime.combine(start_date, time.min, tzinfo=timezone)
+    end_at = datetime.combine(end_date + timedelta(days=1), time.min, tzinfo=timezone)
     engine = create_engine_for_database(database_path)
     try:
         with Session(engine) as session:
-            return load_daily_energy_frames(
-                session,
-                timezone,
-                start_date,
-                end_date,
-                forecast_arrays,
-                actuals_to_forecast,
-            )
+            actual_samples = list(session.scalars(
+                select(SigenStorHourlySample)
+                .where(SigenStorHourlySample.hour_start_utc >= start_at.isoformat())
+                .where(SigenStorHourlySample.hour_start_utc < end_at.isoformat())
+                .order_by(SigenStorHourlySample.hour_start_utc)
+            ).all())
     finally:
         engine.dispose()
+
+    actual_by_date: dict[str, list[SigenStorHourlySample]] = {}
+    for sample in actual_samples:
+        date_key = parse_time(sample.hour_start_utc, timezone).date().isoformat()
+        actual_by_date.setdefault(date_key, []).append(sample)
+
+    first_collection_by_date: dict[str, str] = {}
+    forecasts_by_collection: dict[str, list[ForecastSolarSample]] = {}
+    for row in forecast_rows:
+        collection_date = parse_time(row.collected_at_utc, timezone).date().isoformat()
+        first_collection_by_date.setdefault(collection_date, row.collected_at_utc)
+        forecasts_by_collection.setdefault(row.collected_at_utc, []).append(row)
+
+    hours = pd.DataFrame({"hour": [f"{index:02d}:00" for index in range(24)]})
+    actual_columns = [actual_column_name(panel_id) for panel_id in actuals_to_forecast.values()]
+    frames: list[pd.DataFrame] = []
+    for day_offset in range((end_date - start_date).days + 1):
+        selected_date = start_date + timedelta(days=day_offset)
+        date_key = selected_date.isoformat()
+        day_start = datetime(selected_date.year, selected_date.month, selected_date.day, tzinfo=timezone)
+        day_samples = actual_by_date.get(date_key, [])
+        if day_samples:
+            actual = actual_hourly_from_rollup_samples(day_samples, day_start, fill_missing=False)
+            actual_by_array = actual_arrays_hourly_from_rollup_samples(
+                day_samples, day_start, actuals_to_forecast, fill_missing=False,
+            )
+        else:
+            actual = hours.assign(**{
+                column: float("nan")
+                for column in (
+                    "solar", "load", "battery", "grid_import", "grid_export",
+                    "grid_import_cost", "grid_export_revenue", "net_cost",
+                    "no_solar_battery_import_cost", "import_rate", "export_rate",
+                )
+            })
+            actual_by_array = hours.assign(**{column: float("nan") for column in actual_columns})
+        forecast = aggregate_forecast(
+            forecasts_by_collection.get(first_collection_by_date.get(date_key, ""), []),
+            day_start,
+            forecast_arrays,
+            fill_missing=False,
+        )
+        frame = actual.merge(actual_by_array, on="hour", how="left").merge(forecast, on="hour", how="left")
+        frame = allocate_solar_energy_to_arrays(frame, actuals_to_forecast)
+        frame["date"] = date_key
+        frames.append(frame)
+    return frames
 
 
 def analysis_daily_energy_frames(

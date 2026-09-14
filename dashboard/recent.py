@@ -230,7 +230,7 @@ class RecentTab:
             0.0,
             (datetime.now(ZoneInfo("UTC")) - data.parse_time(collected_at_utc, ZoneInfo("UTC"))).total_seconds(),
         )
-        if age_seconds > 30:
+        if age_seconds > 60*10:
             LOGGER.warning("Dashboard live data is stale")
             label.set_text(f"Warning: Live data is stale — last updated {data.human_readable_age(age_seconds)}.")
             label.set_visibility(True)

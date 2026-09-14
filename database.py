@@ -8,7 +8,8 @@ from pathlib import Path
 from typing import Any, cast
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import Index, Integer, String, Table, Text, create_engine, func, inspect, select
+from sqlalchemy import Column, Index, Integer, String, Table, Text, case, cast as sql_cast, create_engine, func, inspect, literal, select, update
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.engine import Engine
 from sqlalchemy.ext.hybrid import hybrid_property
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
@@ -17,6 +18,7 @@ from sqlalchemy.types import TypeDecorator
 from config import SolarArrayConfig, TariffsConfig
 from datasheets import SIGENSTOR_MODEL_SPECIFICATIONS
 from economics import economic_period_values
+from common import LOGGER, heavy_work
 
 
 def column_name(metric: str, unit: str) -> str:
@@ -132,6 +134,14 @@ class SigenStorModbusSample(Base):
     inverter_pv3_current_amps: Mapped[float | None] = mapped_column(Float)
     inverter_pv4_voltage_volts: Mapped[float | None] = mapped_column(Float)
     inverter_pv4_current_amps: Mapped[float | None] = mapped_column(Float)
+    inverter_pv1_power_kw: Mapped[float | None] = mapped_column(Float)
+    inverter_pv1_energy_kwh_period: Mapped[float | None] = mapped_column(Float)
+    inverter_pv2_power_kw: Mapped[float | None] = mapped_column(Float)
+    inverter_pv2_energy_kwh_period: Mapped[float | None] = mapped_column(Float)
+    inverter_pv3_power_kw: Mapped[float | None] = mapped_column(Float)
+    inverter_pv3_energy_kwh_period: Mapped[float | None] = mapped_column(Float)
+    inverter_pv4_power_kw: Mapped[float | None] = mapped_column(Float)
+    inverter_pv4_energy_kwh_period: Mapped[float | None] = mapped_column(Float)
     inverter_grid_frequency_hz: Mapped[float | None] = mapped_column(Float)
     inverter_phase_a_voltage_volts: Mapped[float | None] = mapped_column(Float)
     inverter_phase_b_voltage_volts: Mapped[float | None] = mapped_column(Float)
@@ -189,6 +199,38 @@ CUMULATIVE_COLUMNS = (
     "plant_battery_discharge_total_kwh", "inverter_battery_charge_daily_kwh",
     "inverter_battery_discharge_daily_kwh", "inverter_pv_daily_kwh", "inverter_pv_total_kwh",
 )
+PV_ARRAY_IDS = (1, 2, 3, 4)
+PV_ARRAY_POWER_COLUMNS = tuple(f"inverter_pv{panel_id}_power_kw" for panel_id in PV_ARRAY_IDS)
+PV_ARRAY_ENERGY_COLUMNS = tuple(
+    f"inverter_pv{panel_id}_energy_kwh_period" for panel_id in PV_ARRAY_IDS
+)
+PV_ARRAY_COLUMNS = PV_ARRAY_POWER_COLUMNS + PV_ARRAY_ENERGY_COLUMNS
+
+# The hourly table deliberately has the same measurement names as ``sigenstor``.
+# Its numeric values are aggregates: sums for readings and period values, and
+# maximums for cumulative meters. ``sample_count`` is used to recover averages.
+HOURLY_MEASUREMENT_COLUMNS = tuple(
+    column.name
+    for column in SigenStorModbusSample.__table__.columns
+    if column.name not in {"collected_at_utc", "import_tariff_band"}
+)
+
+
+class SigenStorHourlySample(Base):
+    __table__ = Table(
+        "sigenstor_hourly",
+        Base.metadata,
+        Column("hour_start_utc", EpochSeconds, primary_key=True),
+        # A non-null sentinel permits an hourly row even if a source sample is
+        # missing its tariff band, and keeps the composite key unambiguous.
+        Column("import_tariff_band", Text, primary_key=True, nullable=False),
+        Column("sample_count", Integer, nullable=False),
+        *(
+            Column(column.name, column.type, nullable=True)
+            for column in SigenStorModbusSample.__table__.columns
+            if column.name not in {"collected_at_utc", "import_tariff_band"}
+        ),
+    )
 
 class SolarDatabase:
     def __init__(self, engine: Engine):
@@ -201,7 +243,15 @@ class SolarDatabase:
     def load_previous_cumulatives(self) -> dict[str, float]:
         with self.sessions() as session:
             row = session.scalar(select(SigenStorModbusSample).order_by(SigenStorModbusSample.collected_at_utc.desc()).limit(1))
-        return {column: getattr(row, column) for column in CUMULATIVE_COLUMNS if row is not None and getattr(row, column) is not None}
+        previous = {
+            column: getattr(row, column)
+            for column in CUMULATIVE_COLUMNS
+            if row is not None and getattr(row, column) is not None
+        }
+        if row is not None:
+            previous["_collected_at_utc"] = row.collected_at_utc
+            previous.update({column: getattr(row, column) for column in PV_ARRAY_POWER_COLUMNS})
+        return previous
 
     def save_forecast(
         self,
@@ -264,9 +314,164 @@ class SolarDatabase:
             tariffs,
             datetime.fromisoformat(collected[1]),
         ))
+        self._add_pv_array_measurements(row, previous)
         with self.sessions.begin() as session:
             session.add(SigenStorModbusSample(**row))
+            self._add_hourly_sample(session, row)
         previous.update({column_name(metric, unit): value for metric, (value, unit, _) in values.items()})
+        previous["_collected_at_utc"] = collected[0]
+        previous.update({column: row.get(column) for column in PV_ARRAY_POWER_COLUMNS})
+
+    @staticmethod
+    def _add_pv_array_measurements(row: dict[str, Any], previous: dict[str, float]) -> None:
+        """Derive PV-string power and interval energy once at collection time."""
+        timestamp = datetime.fromisoformat(cast(str, row["collected_at_utc"]))
+        previous_timestamp_text = previous.get("_collected_at_utc")
+        previous_timestamp = (
+            datetime.fromisoformat(cast(str, previous_timestamp_text))
+            if previous_timestamp_text is not None
+            else None
+        )
+        elapsed_hours = (
+            (timestamp - previous_timestamp).total_seconds() / 3_600
+            if previous_timestamp is not None
+            else None
+        )
+        for panel_id in PV_ARRAY_IDS:
+            voltage = row.get(f"inverter_pv{panel_id}_voltage_volts")
+            current = row.get(f"inverter_pv{panel_id}_current_amps")
+            power_column = f"inverter_pv{panel_id}_power_kw"
+            energy_column = f"inverter_pv{panel_id}_energy_kwh_period"
+            power = (
+                max(cast(float, voltage) * cast(float, current), 0.0) / 1_000
+                if voltage is not None and current is not None
+                else None
+            )
+            row[power_column] = power
+            previous_power = previous.get(power_column)
+            row[energy_column] = (
+                (cast(float, previous_power) + power) / 2 * elapsed_hours
+                if power is not None
+                and previous_power is not None
+                and elapsed_hours is not None
+                and elapsed_hours > 0
+                else None
+            )
+
+    @staticmethod
+    def _add_hourly_sample(session, row: dict[str, Any]) -> None:
+        """Atomically add one raw sample to its hourly/tariff aggregate."""
+        timestamp = datetime.fromisoformat(cast(str, row["collected_at_utc"]))
+        hour_start_utc = int(timestamp.timestamp()) // 3600 * 3600
+        hourly_table = SigenStorHourlySample.__table__
+        hourly_values: dict[str, Any] = {
+            "hour_start_utc": hour_start_utc,
+            "import_tariff_band": row.get("import_tariff_band") or "Unknown",
+            "sample_count": 1,
+        }
+        hourly_values.update({name: row.get(name) for name in HOURLY_MEASUREMENT_COLUMNS})
+
+        statement = sqlite_insert(hourly_table).values(hourly_values)
+        update_values: dict[str, Any] = {
+            "sample_count": hourly_table.c.sample_count + statement.excluded.sample_count,
+        }
+        for name in HOURLY_MEASUREMENT_COLUMNS:
+            current = hourly_table.c[name]
+            incoming = statement.excluded[name]
+            if name in CUMULATIVE_COLUMNS:
+                update_values[name] = case(
+                    (current.is_(None), incoming),
+                    (incoming.is_(None), current),
+                    else_=func.max(current, incoming),
+                )
+            else:
+                update_values[name] = case(
+                    (current.is_(None), incoming),
+                    (incoming.is_(None), current),
+                    else_=current + incoming,
+                )
+        session.execute(statement.on_conflict_do_update(
+            index_elements=(hourly_table.c.hour_start_utc, hourly_table.c.import_tariff_band),
+            set_=update_values,
+        ))
+
+    @heavy_work("hourly rollup historical backfill")
+    def backfill_hourly_rollup(self) -> None:
+        """Populate a newly-created hourly table from all raw minute samples."""
+        source = SigenStorModbusSample.__table__
+        target = SigenStorHourlySample.__table__
+        hour_start = sql_cast(source.c.collected_at_utc / 3600, Integer) * 3600
+        tariff_band = func.coalesce(source.c.import_tariff_band, literal("Unknown"))
+        aggregate_values = [
+            (
+                func.max(source.c[name])
+                if name in CUMULATIVE_COLUMNS
+                else func.sum(source.c[name])
+            ).label(name)
+            for name in HOURLY_MEASUREMENT_COLUMNS
+        ]
+        source_query = select(
+            hour_start.label("hour_start_utc"),
+            tariff_band.label("import_tariff_band"),
+            func.count().label("sample_count"),
+            *aggregate_values,
+        ).group_by(hour_start, tariff_band)
+        statement = sqlite_insert(target).from_select(
+            ("hour_start_utc", "import_tariff_band", "sample_count", *HOURLY_MEASUREMENT_COLUMNS),
+            source_query,
+        ).prefix_with("OR IGNORE")
+        with self.engine.begin() as connection:
+            result = connection.execute(statement)
+        LOGGER.info("Hourly rollup historical backfill inserted %s rows", result.rowcount)
+
+    @heavy_work("PV-string raw measurement backfill")
+    def backfill_pv_array_measurements(self) -> None:
+        # TEMPORARY MIGRATION: do not remove before 2026-09-21, and only after
+        # explicit user confirmation that production has been upgraded.
+        """Populate derived PV-string power and interval-energy columns."""
+        previous: dict[str, float] = {}
+        with self.sessions.begin() as session:
+            samples = session.scalars(
+                select(SigenStorModbusSample).order_by(SigenStorModbusSample.collected_at_utc)
+            )
+            for sample in samples:
+                row: dict[str, Any] = {"collected_at_utc": sample.collected_at_utc}
+                for panel_id in PV_ARRAY_IDS:
+                    row[f"inverter_pv{panel_id}_voltage_volts"] = getattr(
+                        sample, f"inverter_pv{panel_id}_voltage_volts"
+                    )
+                    row[f"inverter_pv{panel_id}_current_amps"] = getattr(
+                        sample, f"inverter_pv{panel_id}_current_amps"
+                    )
+                self._add_pv_array_measurements(row, previous)
+                for column in PV_ARRAY_COLUMNS:
+                    setattr(sample, column, row[column])
+                previous["_collected_at_utc"] = sample.collected_at_utc
+                previous.update({column: row[column] for column in PV_ARRAY_POWER_COLUMNS})
+
+    @heavy_work("PV-string hourly rollup backfill")
+    def backfill_hourly_pv_array_measurements(self) -> None:
+        # TEMPORARY MIGRATION: do not remove before 2026-09-21, and only after
+        # explicit user confirmation that production has been upgraded.
+        """Populate new PV-string aggregate fields in an existing hourly table."""
+        source = SigenStorModbusSample.__table__
+        target = SigenStorHourlySample.__table__
+        hour_start = sql_cast(source.c.collected_at_utc / 3600, Integer) * 3600
+        tariff_band = func.coalesce(source.c.import_tariff_band, literal("Unknown"))
+        aggregates = [func.sum(source.c[column]).label(column) for column in PV_ARRAY_COLUMNS]
+        rows = []
+        with self.sessions.begin() as session:
+            rows = session.execute(
+                select(hour_start, tariff_band, *aggregates).group_by(hour_start, tariff_band)
+            ).all()
+            for hour, tariff, *values in rows:
+                session.execute(
+                    update(target)
+                    .where(target.c.hour_start_utc == hour)
+                    .where(target.c.import_tariff_band == tariff)
+                    .values(dict(zip(PV_ARRAY_COLUMNS, values, strict=True)))
+                )
+        LOGGER.info("PV-string hourly rollup backfill updated %s rows", len(rows))
 
     def save_device_info(
         self,
@@ -320,13 +525,47 @@ def create_engine_for_database(path: str | Path) -> Engine:
 
 def open_database(path: str | Path) -> SolarDatabase:
     engine = create_engine_for_database(path)
-    Base.metadata.create_all(engine)
+    inspector = inspect(engine)
+    raw_table_exists = inspector.has_table(SigenStorModbusSample.__table__.name)
+    hourly_table_missing = not inspector.has_table(SigenStorHourlySample.__table__.name)
+    raw_columns = (
+        {column["name"] for column in inspector.get_columns(SigenStorModbusSample.__table__.name)}
+        if raw_table_exists
+        else set()
+    )
+    # TEMPORARY MIGRATION: remove this detection and the two conditional
+    # backfills only after 2026-09-21 and explicit user confirmation that the
+    # production schema has been upgraded. Keep the normal hourly-table
+    # creation path below for brand-new databases.
+    pv_array_columns_missing = not raw_table_exists or any(
+        column not in raw_columns for column in PV_ARRAY_COLUMNS
+    )
+    # Create/migrate the raw source first. The hourly table mirrors its
+    # measurement columns, so it must only be created after this step.
+    Base.metadata.create_all(
+        engine,
+        tables=(
+            SigenStorModbusSample.__table__,
+            SigenStorDevice.__table__,
+            ForecastSolarSample.__table__,
+        ),
+    )
     _add_missing_columns(engine, SigenStorModbusSample)
     _add_missing_columns(engine, SigenStorDevice)
     _add_missing_columns(engine, ForecastSolarSample)
     _drop_columns(engine, SigenStorModbusSample, ("raw_registers_json",))
     _drop_columns(engine, ForecastSolarSample, ("raw_json",))
-    return SolarDatabase(engine)
+    database = SolarDatabase(engine)
+    if pv_array_columns_missing:
+        database.backfill_pv_array_measurements()
+    if hourly_table_missing:
+        SigenStorHourlySample.__table__.create(engine)
+        database.backfill_hourly_rollup()
+    else:
+        _add_missing_columns(engine, SigenStorHourlySample)
+        if pv_array_columns_missing:
+            database.backfill_hourly_pv_array_measurements()
+    return database
 
 
 def device_value_text(value: float | str) -> str | None:

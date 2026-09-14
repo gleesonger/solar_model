@@ -23,10 +23,10 @@ from config import Config
 
 from . import data
 from .live import LivePowerCollector
-from .models import LivePowerData, TelemetryData
+from .models import LivePowerData
 
 
-RecentData = tuple[pd.DataFrame, TelemetryData, LivePowerData, pd.DataFrame, pd.DataFrame]
+RecentData = tuple[pd.DataFrame, str | None, LivePowerData, pd.DataFrame, pd.DataFrame]
 
 
 @dataclass(frozen=True)
@@ -42,7 +42,6 @@ def load_recent_data(config: Config, live_collector: LivePowerCollector) -> Rece
     """Load the data common to every browser's Recent tab."""
     timezone = ZoneInfo(config.timezone)
     today = datetime.now(timezone).date()
-    telemetry = data.load_telemetry(config.database.path, config.timezone)
     return (
         data.load_day(
             config.database.path,
@@ -50,7 +49,7 @@ def load_recent_data(config: Config, live_collector: LivePowerCollector) -> Rece
             config.forecast.arrays,
             config.dashboard.actuals_to_forecast,
         ).copy(),
-        telemetry,
+        data.load_latest_collection_local(config.database.path, config.timezone),
         live_collector.snapshot(),
         data.load_recent_daily_energy(
             config.database.path,

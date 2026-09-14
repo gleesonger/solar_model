@@ -35,7 +35,7 @@ class RecentTab:
 
     def render_recent_tab(self, loaded_data: RecentData) -> None:
         try:
-            day, telemetry, live_power, recent_daily, recent_monthly = loaded_data
+            day, full_updated_last_local, live_power, recent_daily, recent_monthly = loaded_data
         except Exception as error:
             LOGGER.exception("Dashboard Recent tab initial load failed")
             ui.label(f"Unable to load Recent data: {error}").classes("text-red-600")
@@ -52,7 +52,7 @@ class RecentTab:
         ).classes("text-sm font-medium mt-1")
 
         latest = self._live_table_values(live_power)
-        self._set_full_updated_timestamp(telemetry.full_updated_last_local)
+        self._set_full_updated_timestamp(full_updated_last_local)
         self._set_live_today_values(live_power)
 
         self.elements.live_table = render_live_today_table(
@@ -73,9 +73,9 @@ class RecentTab:
         self.apply_loaded_data(self._load_data())
 
     def apply_loaded_data(self, loaded_data) -> None:
-        day, telemetry, live_power, recent_daily, recent_monthly = loaded_data
+        day, full_updated_last_local, live_power, recent_daily, recent_monthly = loaded_data
         latest = self._live_table_values(live_power)
-        self._set_full_updated_timestamp(telemetry.full_updated_last_local)
+        self._set_full_updated_timestamp(full_updated_last_local)
         self._set_live_today_values(live_power)
         if self.elements.live_table is not None:
             self.elements.live_table.rows = data.summary_rows(
@@ -133,11 +133,9 @@ class RecentTab:
         ))
         label.set_visibility(True)
 
-    def _load_data(self) -> tuple[pd.DataFrame, data.TelemetryData, LivePowerData, pd.DataFrame, pd.DataFrame]:
+    def _load_data(self) -> RecentData:
         LOGGER.info("Dashboard loading data from database")
         loaded_data = load_recent_data(self.config, self.live_collector)
-        telemetry = loaded_data[1]
-        self._log_database_staleness(telemetry.latest_collected_at_utc)
         return loaded_data
 
     @staticmethod

@@ -10,7 +10,7 @@ from time import perf_counter
 from typing import Any, cast
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import Column, Index, Integer, String, Table, Text, case, cast as sql_cast, create_engine, event, func, inspect, literal, select, update
+from sqlalchemy import Column, Index, Integer, String, Table, Text, case, cast as sql_cast, create_engine, event, func, inspect, literal, select
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.engine import Engine
 from sqlalchemy.ext.hybrid import hybrid_property
@@ -426,55 +426,6 @@ class SolarDatabase:
             result = connection.execute(statement)
         LOGGER.info("Hourly rollup historical backfill inserted %s rows", result.rowcount)
 
-    @heavy_work("PV-string raw measurement backfill")
-    def backfill_pv_array_measurements(self) -> None:
-        # TEMPORARY MIGRATION: do not remove before 2026-09-21, and only after
-        # explicit user confirmation that production has been upgraded.
-        """Populate derived PV-string power and interval-energy columns."""
-        previous: dict[str, float] = {}
-        with self.sessions.begin() as session:
-            samples = session.scalars(
-                select(SigenStorModbusSample).order_by(SigenStorModbusSample.collected_at_utc)
-            )
-            for sample in samples:
-                row: dict[str, Any] = {"collected_at_utc": sample.collected_at_utc}
-                for panel_id in PV_ARRAY_IDS:
-                    row[f"inverter_pv{panel_id}_voltage_volts"] = getattr(
-                        sample, f"inverter_pv{panel_id}_voltage_volts"
-                    )
-                    row[f"inverter_pv{panel_id}_current_amps"] = getattr(
-                        sample, f"inverter_pv{panel_id}_current_amps"
-                    )
-                self._add_pv_array_measurements(row, previous)
-                for column in PV_ARRAY_COLUMNS:
-                    setattr(sample, column, row[column])
-                previous["_collected_at_utc"] = sample.collected_at_utc
-                previous.update({column: row[column] for column in PV_ARRAY_POWER_COLUMNS})
-
-    @heavy_work("PV-string hourly rollup backfill")
-    def backfill_hourly_pv_array_measurements(self) -> None:
-        # TEMPORARY MIGRATION: do not remove before 2026-09-21, and only after
-        # explicit user confirmation that production has been upgraded.
-        """Populate new PV-string aggregate fields in an existing hourly table."""
-        source = SigenStorModbusSample.__table__
-        target = SigenStorHourlySample.__table__
-        hour_start = sql_cast(source.c.collected_at_utc / 3600, Integer) * 3600
-        tariff_band = func.coalesce(source.c.import_tariff_band, literal("Unknown"))
-        aggregates = [func.sum(source.c[column]).label(column) for column in PV_ARRAY_COLUMNS]
-        rows = []
-        with self.sessions.begin() as session:
-            rows = session.execute(
-                select(hour_start, tariff_band, *aggregates).group_by(hour_start, tariff_band)
-            ).all()
-            for hour, tariff, *values in rows:
-                session.execute(
-                    update(target)
-                    .where(target.c.hour_start_utc == hour)
-                    .where(target.c.import_tariff_band == tariff)
-                    .values(dict(zip(PV_ARRAY_COLUMNS, values, strict=True)))
-                )
-        LOGGER.info("PV-string hourly rollup backfill updated %s rows", len(rows))
-
     def save_device_info(
         self,
         values: dict[str, tuple[float | str, str, bool]],
@@ -542,20 +493,7 @@ def create_engine_for_database(path: str | Path) -> Engine:
 def open_database(path: str | Path) -> SolarDatabase:
     engine = create_engine_for_database(path)
     inspector = inspect(engine)
-    raw_table_exists = inspector.has_table(SigenStorModbusSample.__table__.name)
     hourly_table_missing = not inspector.has_table(SigenStorHourlySample.__table__.name)
-    raw_columns = (
-        {column["name"] for column in inspector.get_columns(SigenStorModbusSample.__table__.name)}
-        if raw_table_exists
-        else set()
-    )
-    # TEMPORARY MIGRATION: remove this detection and the two conditional
-    # backfills only after 2026-09-21 and explicit user confirmation that the
-    # production schema has been upgraded. Keep the normal hourly-table
-    # creation path below for brand-new databases.
-    pv_array_columns_missing = not raw_table_exists or any(
-        column not in raw_columns for column in PV_ARRAY_COLUMNS
-    )
     # Create/migrate the raw source first. The hourly table mirrors its
     # measurement columns, so it must only be created after this step.
     Base.metadata.create_all(
@@ -572,15 +510,11 @@ def open_database(path: str | Path) -> SolarDatabase:
     _drop_columns(engine, SigenStorModbusSample, ("raw_registers_json",))
     _drop_columns(engine, ForecastSolarSample, ("raw_json",))
     database = SolarDatabase(engine)
-    if pv_array_columns_missing:
-        database.backfill_pv_array_measurements()
     if hourly_table_missing:
         SigenStorHourlySample.__table__.create(engine)
         database.backfill_hourly_rollup()
     else:
         _add_missing_columns(engine, SigenStorHourlySample)
-        if pv_array_columns_missing:
-            database.backfill_hourly_pv_array_measurements()
     return database
 
 

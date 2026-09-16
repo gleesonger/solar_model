@@ -74,15 +74,15 @@ def predict_load_day(model: HistGradientBoostingRegressor, features: list[str], 
 def forecast_source(connection: sqlite3.Connection, timezone_name: str) -> pd.DataFrame:
     """Return raw solar forecasts in kW/kWh, retaining each snapshot time."""
     source = pd.read_sql_query(
-        """SELECT collected_at_utc, forecast_time, panel_1_watts, panel_2_watts,
-                  panel_1_watt_hours_day, panel_2_watt_hours_day
+        """SELECT collected_at_utc, forecast_time, panel_1_raw_watts, panel_2_raw_watts,
+                  panel_1_raw_watt_hours_day, panel_2_raw_watt_hours_day
            FROM forecast_solar""", connection)
     source["snapshot"] = pd.to_datetime(source.pop("collected_at_utc"), unit="s", utc=True).dt.tz_convert(timezone_name)
     source["target"] = pd.to_datetime(source.pop("forecast_time"), unit="s", utc=True).dt.tz_convert(timezone_name).dt.floor("h")
-    fields = ["panel_1_watts", "panel_2_watts", "panel_1_watt_hours_day", "panel_2_watt_hours_day"]
+    fields = ["panel_1_raw_watts", "panel_2_raw_watts", "panel_1_raw_watt_hours_day", "panel_2_raw_watt_hours_day"]
     source[fields] = source[fields].fillna(0) / 10_000
-    source["raw_solar_kw"] = (source.panel_1_watts + source.panel_2_watts) / 1_000
-    source["raw_solar_day_kwh"] = (source.panel_1_watt_hours_day + source.panel_2_watt_hours_day) / 1_000
+    source["raw_solar_kw"] = (source.panel_1_raw_watts + source.panel_2_raw_watts) / 1_000
+    source["raw_solar_day_kwh"] = (source.panel_1_raw_watt_hours_day + source.panel_2_raw_watt_hours_day) / 1_000
     return source.sort_values(["target", "snapshot"])
 
 
@@ -189,7 +189,7 @@ def main() -> None:
         }
         for name, days, frame, target, excluded, predictor, actual_column in (
             ("Load", load_days, load, "target_load_kw", {"target_load_kw", "baseline_load_kw"}, predict_load_day, "load_kw"),
-            ("Solar", solar_days, solar, "target_solar_factor", {"target_error_kw", "target_solar_factor", "pv_kw", "snapshot", "target_day", "panel_1_watts", "panel_2_watts", "panel_1_watt_hours_day", "panel_2_watt_hours_day"}, predict_solar_day, "pv_kw"),
+            ("Solar", solar_days, solar, "target_solar_factor", {"target_error_kw", "target_solar_factor", "pv_kw", "snapshot", "target_day", "panel_1_raw_watts", "panel_2_raw_watts", "panel_1_raw_watt_hours_day", "panel_2_raw_watt_hours_day"}, predict_solar_day, "pv_kw"),
         ):
             sheet = workbook.add_worksheet(name)
             writer.sheets[name] = sheet

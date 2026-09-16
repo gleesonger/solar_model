@@ -145,15 +145,15 @@ class AnalysisTab:
                 self.state.historical_unit = unit
                 self.state.historical_frequency = frequency
                 self.state.historical_aggregation = aggregation
-                bounds = data.analysis_range_bounds(as_of, count, unit, self.timezone)
-                self.state.historical_power_interval_minutes = (
-                    1 if bounds.start_date == bounds.end_date else 60
-                )
                 loading = True
                 progress.set_visibility(True)
                 if apply_button is not None:
                     apply_button.set_visibility(False)
                 try:
+                    bounds = data.analysis_range_bounds(as_of, count, unit, self.timezone)
+                    self.state.historical_power_interval_minutes = (
+                        1 if bounds.start_date == bounds.end_date else 60
+                    )
                     analysis_data = await run.io_bound(
                         data.load_analysis_range,
                         self.config.database.path,
@@ -270,6 +270,7 @@ class AnalysisTab:
             self.state.historical_power_interval_minutes,
             self.config.forecast.arrays,
             self.config.dashboard.actuals_to_forecast,
+            self.state.historical_aggregation.lower(),
         )
 
     def _refresh_historical_time_zoom(self, event) -> None:

@@ -10,6 +10,7 @@ from common import LOGGER
 from config import Config
 
 from .anlaysis import AnalysisTab
+from .control import ControlTab
 from . import data
 from .live import LivePowerCollector
 from .models import DashboardElements, DashboardState
@@ -37,6 +38,7 @@ class DashboardLayout:
         self.recent_tab = RecentTab(config, self.state, self.elements, live_collector)
         self.historical_tab = AnalysisTab(config, self.state, self.elements)
         self.system_info_tab = SystemInfoTab(config, self.elements)
+        self.control_tab = ControlTab(config)
 
     def render_dashboard_layout(self, container: Column, snapshot: DashboardSnapshot) -> None:
         LOGGER.info("Dashboard page UI loading")
@@ -59,6 +61,7 @@ class DashboardLayout:
                         recent = ui.tab("Recent")
                         historical = ui.tab("Analysis")
                         system_info = ui.tab("System Info")
+                        control = ui.tab("Control")
                     self.historical_tab.render_mobile_controls_trigger()
                 # This status is deliberately outside normal document flow.
                 # Its initial visibility update arrives over the WebSocket and
@@ -75,6 +78,7 @@ class DashboardLayout:
                 "Analysis": historical,
                 "Historical": historical,
                 "System Info": system_info,
+                "Control": control,
             }.get(self.state.active_tab, recent)
 
             with ui.tab_panels(tabs, value=selected).classes("w-full"):
@@ -85,6 +89,8 @@ class DashboardLayout:
                         self.historical_tab.render_historical_tab()
                 with ui.tab_panel(system_info).classes("p-0"):
                     self.system_info_tab.render_system_info_tab(snapshot.device_information)
+                with ui.tab_panel(control).classes("p-0"):
+                    self.control_tab.render_control_tab()
 
     def apply_snapshot(self, snapshot: DashboardSnapshot) -> None:
         """Apply shared data to this client's existing UI elements."""

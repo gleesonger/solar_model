@@ -118,6 +118,10 @@ def main(argv: list[str] | None = None) -> int:
                 """, params)
                 raw.execute("DROP TABLE tariff_intervals")
                 raw.commit()
+            # Dashboard summaries use sigenstor_hourly, so replacing the
+            # selected rollup range is required after recalculating its minute
+            # source rows.
+            database.rebuild_hourly_rollup(args.start, args.end or datetime.now(zone).date(), zone)
         finally:
             database.close()
     except (ValueError, OSError, SQLAlchemyError) as error:

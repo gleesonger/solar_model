@@ -46,11 +46,19 @@ PV_STRING_ENERGY_COLUMNS = {
     "pv4": "inverter_pv4_energy_kwh_period",
 }
 
-FORECAST_WATT_HOURS_READERS: dict[int, ForecastWattHoursReader] = {
-    1: lambda row: row.panel_1_watt_hours,
-    2: lambda row: row.panel_2_watt_hours,
-    3: lambda row: row.panel_3_watt_hours,
-    4: lambda row: row.panel_4_watt_hours,
+FORECAST_WATT_HOURS_READERS: dict[str, dict[int, ForecastWattHoursReader]] = {
+    "adjusted": {
+        1: lambda row: row.panel_1_adj_watt_hours,
+        2: lambda row: row.panel_2_adj_watt_hours,
+        3: lambda row: row.panel_3_adj_watt_hours,
+        4: lambda row: row.panel_4_adj_watt_hours,
+    },
+    "raw": {
+        1: lambda row: row.panel_1_raw_watt_hours,
+        2: lambda row: row.panel_2_raw_watt_hours,
+        3: lambda row: row.panel_3_raw_watt_hours,
+        4: lambda row: row.panel_4_raw_watt_hours,
+    },
 }
 IMPORT_COST_TARIFF_PREFIX = "import_cost_tariff__"
 ENERGY_SUMMARY_COLUMNS = (
@@ -99,8 +107,17 @@ def load_day(
     finally:
         engine.dispose()
 
-    forecast = aggregate_forecast(forecast_rows, day_start, forecast_arrays)
-    hourly = actual.merge(actual_by_array, on="hour", how="left").merge(forecast, on="hour", how="left")
+    adjusted_forecast = aggregate_forecast(
+        forecast_rows, day_start, forecast_arrays, source="adjusted",
+    )
+    raw_forecast = aggregate_forecast(
+        forecast_rows, day_start, forecast_arrays, source="raw",
+    ).rename(columns={"forecast_total": "forecast_raw_total"})[["hour", "forecast_raw_total"]]
+    hourly = (
+        actual.merge(actual_by_array, on="hour", how="left")
+        .merge(adjusted_forecast, on="hour", how="left")
+        .merge(raw_forecast, on="hour", how="left")
+    )
     hourly = allocate_solar_energy_to_arrays(hourly, actuals_to_forecast).fillna(0.0)
     return hourly
 
@@ -367,6 +384,7 @@ def load_daily_energy_totals(
             day_start,
             forecast_arrays,
             fill_missing=False,
+            source="adjusted",
         )
         if selected_date == current_time.date():
             forecast = scale_forecast_to_elapsed_time(forecast, current_time)
@@ -907,8 +925,20 @@ def load_rollup_daily_energy_frames(
             day_start,
             forecast_arrays,
             fill_missing=False,
+            source="adjusted",
         )
-        frame = actual.merge(actual_by_array, on="hour", how="left").merge(forecast, on="hour", how="left")
+        raw_forecast = aggregate_forecast(
+            forecasts_by_collection.get(first_collection_by_date.get(date_key, ""), []),
+            day_start,
+            forecast_arrays,
+            fill_missing=False,
+            source="raw",
+        ).rename(columns={"forecast_total": "forecast_raw_total"})[["hour", "forecast_raw_total"]]
+        frame = (
+            actual.merge(actual_by_array, on="hour", how="left")
+            .merge(forecast, on="hour", how="left")
+            .merge(raw_forecast, on="hour", how="left")
+        )
         frame = allocate_solar_energy_to_arrays(frame, actuals_to_forecast)
         frame["date"] = date_key
         frames.append(frame)
@@ -965,8 +995,20 @@ def analysis_daily_energy_frames(
             day_start,
             forecast_arrays,
             fill_missing=False,
+            source="adjusted",
         )
-        frame = actual.merge(actual_by_array, on="hour", how="left").merge(forecast, on="hour", how="left")
+        raw_forecast = aggregate_forecast(
+            forecasts_by_guid.get(first_guid_by_date.get(date_text, ""), []),
+            day_start,
+            forecast_arrays,
+            fill_missing=False,
+            source="raw",
+        ).rename(columns={"forecast_total": "forecast_raw_total"})[["hour", "forecast_raw_total"]]
+        frame = (
+            actual.merge(actual_by_array, on="hour", how="left")
+            .merge(forecast, on="hour", how="left")
+            .merge(raw_forecast, on="hour", how="left")
+        )
         frame = allocate_solar_energy_to_arrays(frame, actuals_to_forecast)
         frame["date"] = date_text
         frames.append(frame)
@@ -1103,6 +1145,7 @@ def load_historical_minute_energy(
     value_columns = [
         "solar",
         "forecast_total",
+        "forecast_raw_total",
         "load",
         "battery",
         "grid_import",
@@ -1124,6 +1167,7 @@ def load_historical_minute_energy(
             "period": timestamp.strftime("%Y-%m-%d %H:%M"),
             "solar": sample.plant_pv_total_kwh_period,
             "forecast_total": None,
+            "forecast_raw_total": None,
             "load": sample.plant_load_total_kwh_period,
             "battery": (
                 (sample.plant_battery_charge_total_kwh_period or 0.0)
@@ -1211,10 +1255,15 @@ def load_daily_energy_frames(
             else []
         )
         forecast = aggregate_forecast(
-            forecast_rows, day_start, forecast_arrays, fill_missing=False
+            forecast_rows, day_start, forecast_arrays, fill_missing=False, source="adjusted",
         )
-        day = actual.merge(actual_by_array, on="hour", how="left").merge(
-            forecast, on="hour", how="left"
+        raw_forecast = aggregate_forecast(
+            forecast_rows, day_start, forecast_arrays, fill_missing=False, source="raw",
+        ).rename(columns={"forecast_total": "forecast_raw_total"})[["hour", "forecast_raw_total"]]
+        day = (
+            actual.merge(actual_by_array, on="hour", how="left")
+            .merge(forecast, on="hour", how="left")
+            .merge(raw_forecast, on="hour", how="left")
         )
         day = allocate_solar_energy_to_arrays(day, actuals_to_forecast)
         day["date"] = selected_date.isoformat()
@@ -1887,10 +1936,16 @@ def aggregate_forecast(
     forecast_arrays: tuple[SolarArrayConfig, ...],
     *,
     fill_missing: bool = True,
+    source: str = "adjusted",
 ) -> pd.DataFrame:
+    """Aggregate either the deliberate raw or adjusted forecast series."""
     timezone = day_start.tzinfo
     if timezone is None:
         raise ValueError("day_start must be timezone-aware")
+    try:
+        readers = FORECAST_WATT_HOURS_READERS[source]
+    except KeyError as error:
+        raise ValueError(f"Unknown forecast source: {source!r}") from error
 
     points: list[dict[str, object]] = []
     for row in rows:
@@ -1899,7 +1954,7 @@ def aggregate_forecast(
         except (TypeError, ValueError):
             continue
         for array in forecast_arrays:
-            watt_hours = FORECAST_WATT_HOURS_READERS[array.panel_id](row)
+            watt_hours = readers[array.panel_id](row)
             if watt_hours is not None:
                 points.append(
                     {
@@ -2063,6 +2118,14 @@ def summary_rows(
         "grid_import": None,
         "grid_export": None,
     }
+    forecast_raw = {
+        "solar": float(dataframe_column(data, "forecast_raw_total").sum()),
+        "battery": None,
+        "inverter": None,
+        "load": None,
+        "grid_import": None,
+        "grid_export": None,
+    }
     rows = [
         {
             "metric": label,
@@ -2070,6 +2133,7 @@ def summary_rows(
             "latest": format_dashboard_number(latest[key]),
             "today": format_dashboard_number(today[key]),
             "forecast": format_dashboard_number(forecast[key]),
+            "forecast_raw": format_dashboard_number(forecast_raw[key]),
         }
         for label, key in SUMMARY_LATEST_KEYS.items()
     ]

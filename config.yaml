@@ -1,7 +1,7 @@
 timezone: Europe/Dublin
 
 logging:
-  level: DEBUG
+  level: INFO
 
 database:
   path: solar.db
@@ -38,7 +38,7 @@ tariffs:
           start_time: "00:00"
           end_time: "24:00"
           rate: 0.195
-    - effective_from: "2026-09-18"
+    - effective_from: "2026-09-12"
       name: "Yuno Energy - EV Variable Smart"
       import:
         - days: [Mon, Tue, Wed, Thu, Fri, Sat, Sun]

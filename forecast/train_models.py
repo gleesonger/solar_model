@@ -103,15 +103,15 @@ def load_features(actuals: pd.DataFrame) -> pd.DataFrame:
 def solar_features(connection: sqlite3.Connection, actuals: pd.DataFrame, timezone_name: str = "Europe/Dublin") -> pd.DataFrame:
     """Make one solar row per target hour using only a pre-midnight snapshot."""
     forecasts = pd.read_sql_query(
-        """SELECT collected_at_utc, forecast_time, panel_1_watts, panel_2_watts,
-                  panel_1_watt_hours_day, panel_2_watt_hours_day
+        """SELECT collected_at_utc, forecast_time, panel_1_raw_watts, panel_2_raw_watts,
+                  panel_1_raw_watt_hours_day, panel_2_raw_watt_hours_day
            FROM forecast_solar
-           WHERE panel_1_watts IS NOT NULL OR panel_2_watts IS NOT NULL""",
+           WHERE panel_1_raw_watts IS NOT NULL OR panel_2_raw_watts IS NOT NULL""",
         connection,
     )
     forecasts["snapshot"] = pd.to_datetime(forecasts.pop("collected_at_utc"), unit="s", utc=True).dt.tz_convert(timezone_name)
     forecasts["target"] = pd.to_datetime(forecasts.pop("forecast_time"), unit="s", utc=True).dt.tz_convert(timezone_name).dt.floor("h")
-    numeric = ["panel_1_watts", "panel_2_watts", "panel_1_watt_hours_day", "panel_2_watt_hours_day"]
+    numeric = ["panel_1_raw_watts", "panel_2_raw_watts", "panel_1_raw_watt_hours_day", "panel_2_raw_watt_hours_day"]
     forecasts[numeric] = forecasts[numeric].fillna(0) / SCALE
     forecasts["target_day"] = forecasts["target"].dt.normalize()
     # Snapshots must be available before the target day begins; choose latest.
@@ -120,8 +120,8 @@ def solar_features(connection: sqlite3.Connection, actuals: pd.DataFrame, timezo
     latest = eligible.groupby("target", as_index=False).tail(1).set_index("target")
     # forecast.solar reports these fields in W and Wh; actual inverter power
     # is in kW, so convert before constructing a common training target.
-    latest["raw_solar_kw"] = (latest.panel_1_watts + latest.panel_2_watts) / 1_000
-    latest["raw_solar_day_kwh"] = (latest.panel_1_watt_hours_day + latest.panel_2_watt_hours_day) / 1_000
+    latest["raw_solar_kw"] = (latest.panel_1_raw_watts + latest.panel_2_raw_watts) / 1_000
+    latest["raw_solar_day_kwh"] = (latest.panel_1_raw_watt_hours_day + latest.panel_2_raw_watt_hours_day) / 1_000
     latest["forecast_lead_hours"] = (latest.index.to_series() - latest.snapshot).dt.total_seconds() / 3600
     result = latest.join(actuals[["pv_kw"]], how="inner")
     result = result.join(calendar_features(result.index, include_weekday=False))
@@ -165,7 +165,7 @@ def score(actual: pd.Series, predicted: np.ndarray) -> Scores:
 def evaluate(name: str, frame: pd.DataFrame, target: str, baseline: str, save_dir: Path) -> dict:
     train, validation, test = split_days(frame)
     exclude = {target, "pv_kw", "target_error_kw", "target_solar_factor", "snapshot", "target_day",
-               "panel_1_watts", "panel_2_watts", "panel_1_watt_hours_day", "panel_2_watt_hours_day"}
+               "panel_1_raw_watts", "panel_2_raw_watts", "panel_1_raw_watt_hours_day", "panel_2_raw_watt_hours_day"}
     if name == "load":
         exclude.add(baseline)
     features = [column for column in frame.select_dtypes(include="number").columns if column not in exclude]

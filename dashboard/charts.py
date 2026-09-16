@@ -24,7 +24,7 @@ NET_COST_COLOR = "#6C757D"
 NO_SOLAR_COST_COLOR = "#7B2CBF"
 
 ENERGY_TABLE_COLUMNS = (
-    "period", "solar", "forecast_total", "load", "grid_import", "grid_export",
+    "period", "solar", "forecast_total", "forecast_raw_total", "load", "grid_import", "grid_export",
 )
 
 
@@ -36,6 +36,7 @@ def analysis_column_labels(
         "time": "Time",
         "solar": "Solar",
         "forecast_total": "Solar Forecast",
+        "forecast_raw_total": "Solar (Forecast Raw)",
         "load": "Load",
         "battery": "Battery",
         "inverter": "Inverter",
@@ -284,10 +285,12 @@ def energy_chart_options(data: pd.DataFrame, category_column: str) -> dict[str, 
             "data": [
                 "Solar (Actual)",
                 "Solar (Forecast)",
+                "Solar (Forecast Raw)",
                 "Load",
                 "Grid Imported",
                 "Grid Exported",
-            ]
+            ],
+            "selected": {"Solar (Forecast Raw)": False},
         },
         "xAxis": {"type": "category", "data": dataframe_column(data, category_column).tolist()},
         "yAxis": {"type": "value", "name": "kWh"},
@@ -303,6 +306,12 @@ def energy_chart_options(data: pd.DataFrame, category_column: str) -> dict[str, 
                 "type": "bar",
                 "data": chart_values(dataframe_column(data, "forecast_total")),
                 "itemStyle": forecast_item_style(SOLAR_COLOR),
+            },
+            {
+                "name": "Solar (Forecast Raw)",
+                "type": "bar",
+                "data": chart_values(dataframe_column(data, "forecast_raw_total")),
+                "itemStyle": forecast_item_style("#6C757D"),
             },
             {"name": "Load", "type": "bar", "data": chart_values(dataframe_column(data, "load")), "itemStyle": {"color": LOAD_COLOR}},
             {"name": "Grid Imported", "type": "bar", "data": chart_values(dataframe_column(data, "grid_import")), "itemStyle": {"color": GRID_IMPORT_COLOR}},

@@ -4,13 +4,13 @@ from functools import cache
 import logging
 import math
 import re
-from datetime import datetime
+from datetime import date, datetime, time
 from pathlib import Path
 from time import perf_counter
 from typing import Any, cast
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import Column, Index, Integer, String, Table, Text, case, cast as sql_cast, create_engine, event, func, inspect, literal, select
+from sqlalchemy import Column, Index, Integer, String, Table, Text, case, cast as sql_cast, create_engine, event, func, inspect, literal, or_, select
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.engine import Engine
 from sqlalchemy.ext.hybrid import hybrid_property
@@ -181,18 +181,33 @@ class ForecastSolarSample(Base):
     def collected_at_local(cls):
         return func.strftime("%Y-%m-%dT%H:%M:%S", cls.collected_at_utc, "unixepoch", "localtime")
 
-    panel_1_watts: Mapped[float | None] = mapped_column(Float)
-    panel_1_watt_hours: Mapped[float | None] = mapped_column(Float)
-    panel_1_watt_hours_day: Mapped[float | None] = mapped_column(Float)
-    panel_2_watts: Mapped[float | None] = mapped_column(Float)
-    panel_2_watt_hours: Mapped[float | None] = mapped_column(Float)
-    panel_2_watt_hours_day: Mapped[float | None] = mapped_column(Float)
-    panel_3_watts: Mapped[float | None] = mapped_column(Float)
-    panel_3_watt_hours: Mapped[float | None] = mapped_column(Float)
-    panel_3_watt_hours_day: Mapped[float | None] = mapped_column(Float)
-    panel_4_watts: Mapped[float | None] = mapped_column(Float)
-    panel_4_watt_hours: Mapped[float | None] = mapped_column(Float)
-    panel_4_watt_hours_day: Mapped[float | None] = mapped_column(Float)
+    # ``raw`` is the Forecast.Solar response, exactly as collected.  The
+    # adjustment model owns the corresponding ``adj`` values; keeping both on
+    # the same snapshot row makes comparisons reproducible.
+    panel_1_raw_watts: Mapped[float | None] = mapped_column(Float)
+    panel_1_raw_watt_hours: Mapped[float | None] = mapped_column(Float)
+    panel_1_raw_watt_hours_day: Mapped[float | None] = mapped_column(Float)
+    panel_1_adj_watts: Mapped[float | None] = mapped_column(Float)
+    panel_1_adj_watt_hours: Mapped[float | None] = mapped_column(Float)
+    panel_1_adj_watt_hours_day: Mapped[float | None] = mapped_column(Float)
+    panel_2_raw_watts: Mapped[float | None] = mapped_column(Float)
+    panel_2_raw_watt_hours: Mapped[float | None] = mapped_column(Float)
+    panel_2_raw_watt_hours_day: Mapped[float | None] = mapped_column(Float)
+    panel_2_adj_watts: Mapped[float | None] = mapped_column(Float)
+    panel_2_adj_watt_hours: Mapped[float | None] = mapped_column(Float)
+    panel_2_adj_watt_hours_day: Mapped[float | None] = mapped_column(Float)
+    panel_3_raw_watts: Mapped[float | None] = mapped_column(Float)
+    panel_3_raw_watt_hours: Mapped[float | None] = mapped_column(Float)
+    panel_3_raw_watt_hours_day: Mapped[float | None] = mapped_column(Float)
+    panel_3_adj_watts: Mapped[float | None] = mapped_column(Float)
+    panel_3_adj_watt_hours: Mapped[float | None] = mapped_column(Float)
+    panel_3_adj_watt_hours_day: Mapped[float | None] = mapped_column(Float)
+    panel_4_raw_watts: Mapped[float | None] = mapped_column(Float)
+    panel_4_raw_watt_hours: Mapped[float | None] = mapped_column(Float)
+    panel_4_raw_watt_hours_day: Mapped[float | None] = mapped_column(Float)
+    panel_4_adj_watts: Mapped[float | None] = mapped_column(Float)
+    panel_4_adj_watt_hours: Mapped[float | None] = mapped_column(Float)
+    panel_4_adj_watt_hours_day: Mapped[float | None] = mapped_column(Float)
 
 
 CUMULATIVE_COLUMNS = (
@@ -266,7 +281,7 @@ class SolarDatabase:
         watt_hours = result.get("watt_hours", {})
         daily = result.get("watt_hours_day", {})
         prefix = f"panel_{array.panel_id}"
-        fields = (f"{prefix}_watts", f"{prefix}_watt_hours", f"{prefix}_watt_hours_day")
+        fields = (f"{prefix}_raw_watts", f"{prefix}_raw_watt_hours", f"{prefix}_raw_watt_hours_day")
         if any(field not in ForecastSolarSample.__table__.c for field in fields):
             raise ValueError(
                 f"forecast panel ID {array.panel_id!r} is not declared in ForecastSolarSample"
@@ -293,6 +308,96 @@ class SolarDatabase:
                         setattr(row, name, value)
                 rows += 1
         return rows
+
+    @staticmethod
+    def _pending_adjusted_condition():
+        """Return rows with at least one raw panel still lacking adjustment."""
+        return or_(*(
+            getattr(ForecastSolarSample, f"panel_{panel_id}_raw_watts").is_not(None)
+            & getattr(ForecastSolarSample, f"panel_{panel_id}_adj_watts").is_(None)
+            for panel_id in PV_ARRAY_IDS
+        ))
+
+    def pending_adjusted_forecasts(
+        self,
+        limit: int | None = None,
+        collected_at: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Return raw forecast rows which have not yet been adjusted.
+
+        The returned dictionaries intentionally include all raw and adjusted
+        columns.  This is the persistence boundary used by the adjustment
+        model and its resumable backfill: a row stops being pending once every
+        panel with a raw power forecast has an adjusted power forecast.
+        """
+        statement = select(ForecastSolarSample).where(self._pending_adjusted_condition())
+        if collected_at is not None:
+            statement = statement.where(ForecastSolarSample.collected_at_utc == collected_at)
+        statement = statement.order_by(
+            ForecastSolarSample.collected_at_utc,
+            ForecastSolarSample.forecast_time,
+        )
+        if limit is not None:
+            statement = statement.limit(limit)
+        with self.sessions() as session:
+            rows = session.scalars(statement).all()
+        columns = tuple(ForecastSolarSample.__table__.columns.keys())
+        return [{column: getattr(row, column) for column in columns} for row in rows]
+
+    def pending_adjusted_forecast_snapshots(self, limit: int) -> list[str]:
+        """Return a bounded, oldest-first set of incomplete snapshots."""
+        if limit < 1:
+            raise ValueError("limit must be at least one snapshot")
+        statement = (
+            select(ForecastSolarSample.collected_at_utc)
+            .where(self._pending_adjusted_condition())
+            .distinct()
+            .order_by(ForecastSolarSample.collected_at_utc)
+            .limit(limit)
+        )
+        with self.sessions() as session:
+            return list(session.scalars(statement))
+
+    def save_adjusted_forecast(
+        self,
+        collected_at: str,
+        forecast_time: str,
+        values: dict[str, float | None],
+    ) -> None:
+        """Persist adjusted values for one existing forecast snapshot row.
+
+        ``values`` may contain only ``panel_n_adj_*`` fields.  The explicit
+        restriction prevents an adjustment/backfill job from ever changing the
+        immutable raw API response.
+        """
+        self.save_adjusted_forecasts(collected_at, {forecast_time: values})
+
+    def save_adjusted_forecasts(
+        self,
+        collected_at: str,
+        values_by_forecast_time: dict[str, dict[str, float | None]],
+    ) -> None:
+        """Atomically save all adjusted rows belonging to one snapshot."""
+        if not values_by_forecast_time:
+            return
+        allowed = {
+            column.name for column in ForecastSolarSample.__table__.columns
+            if "_adj_" in column.name
+        }
+        for values in values_by_forecast_time.values():
+            unexpected = set(values) - allowed
+            if unexpected:
+                raise ValueError(f"only adjusted forecast fields may be saved: {sorted(unexpected)!r}")
+        with self.sessions.begin() as session:
+            for forecast_time, values in values_by_forecast_time.items():
+                row = session.scalar(select(ForecastSolarSample).where(
+                    ForecastSolarSample.collected_at_utc == collected_at,
+                    ForecastSolarSample.forecast_time == forecast_time,
+                ))
+                if row is None:
+                    raise ValueError("cannot save adjusted forecast for a missing raw forecast row")
+                for name, value in values.items():
+                    setattr(row, name, value)
 
     def save_modbus_sample(
         self,
@@ -400,6 +505,36 @@ class SolarDatabase:
     @heavy_work("hourly rollup historical backfill")
     def backfill_hourly_rollup(self) -> None:
         """Populate a newly-created hourly table from all raw minute samples."""
+        with self.engine.begin() as connection:
+            result = self._insert_hourly_rollup(connection)
+        LOGGER.info("Hourly rollup historical backfill inserted %s rows", result.rowcount)
+
+    @heavy_work("hourly rollup range rebuild")
+    def rebuild_hourly_rollup(self, start: date, end: date, timezone: ZoneInfo) -> None:
+        """Replace hourly aggregates for an inclusive local-date range.
+
+        Tariff backdating changes minute-level costs and rates.  Rebuilding
+        only the affected UTC hours keeps the dashboard's rollup source in
+        sync without touching unrelated historical data.
+        """
+        if end < start:
+            raise ValueError("end date must not be before start date")
+        start_epoch = int(datetime.combine(start, time.min, timezone).timestamp())
+        end_epoch = int(datetime.combine(
+            date.fromordinal(end.toordinal() + 1), time.min, timezone,
+        ).timestamp())
+        target = SigenStorHourlySample.__table__
+        with self.engine.begin() as connection:
+            connection.execute(target.delete().where(
+                target.c.hour_start_utc >= start_epoch,
+                target.c.hour_start_utc < end_epoch,
+            ))
+            result = self._insert_hourly_rollup(connection, start_epoch, end_epoch)
+        LOGGER.info("Hourly rollup rebuild inserted %s rows from %s through %s", result.rowcount, start, end)
+
+    @staticmethod
+    def _insert_hourly_rollup(connection, start_epoch: int | None = None, end_epoch: int | None = None):
+        """Insert hourly aggregates from source rows in an optional UTC range."""
         source = SigenStorModbusSample.__table__
         target = SigenStorHourlySample.__table__
         hour_start = sql_cast(source.c.collected_at_utc / 3600, Integer) * 3600
@@ -417,14 +552,17 @@ class SolarDatabase:
             tariff_band.label("import_tariff_band"),
             func.count().label("sample_count"),
             *aggregate_values,
-        ).group_by(hour_start, tariff_band)
+        )
+        if start_epoch is not None:
+            source_query = source_query.where(source.c.collected_at_utc >= start_epoch)
+        if end_epoch is not None:
+            source_query = source_query.where(source.c.collected_at_utc < end_epoch)
+        source_query = source_query.group_by(hour_start, tariff_band)
         statement = sqlite_insert(target).from_select(
             ("hour_start_utc", "import_tariff_band", "sample_count", *HOURLY_MEASUREMENT_COLUMNS),
             source_query,
         ).prefix_with("OR IGNORE")
-        with self.engine.begin() as connection:
-            result = connection.execute(statement)
-        LOGGER.info("Hourly rollup historical backfill inserted %s rows", result.rowcount)
+        return connection.execute(statement)
 
     def save_device_info(
         self,
@@ -493,6 +631,7 @@ def create_engine_for_database(path: str | Path) -> Engine:
 def open_database(path: str | Path) -> SolarDatabase:
     engine = create_engine_for_database(path)
     inspector = inspect(engine)
+    _rename_forecast_solar_raw_columns(engine)
     hourly_table_missing = not inspector.has_table(SigenStorHourlySample.__table__.name)
     # Create/migrate the raw source first. The hourly table mirrors its
     # measurement columns, so it must only be created after this step.
@@ -552,6 +691,60 @@ def _add_missing_columns(engine: Engine, model: type[Base]) -> None:
             column_name = preparer.quote(column.name)
             column_type = column.type.compile(dialect=engine.dialect)
             connection.exec_driver_sql(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_type}")
+
+
+def _rename_forecast_solar_raw_columns(engine: Engine) -> None:
+    """Migrate the pre-adjustment forecast names without losing API values.
+
+    SQLite's native rename retains both the values and the scaled-integer
+    storage type.  This must run before ``create_all``/``_add_missing_columns``
+    add the new adjusted columns.  A partially completed old deployment that
+    already has both names is repaired by filling only absent raw values.
+    """
+    table = ForecastSolarSample.__table__
+    if not inspect(engine).has_table(table.name):
+        return
+    preparer = engine.dialect.identifier_preparer
+    quoted_table = preparer.quote(table.name)
+    legacy_to_raw = {
+        f"panel_{panel_id}_{measure}": f"panel_{panel_id}_raw_{measure}"
+        for panel_id in PV_ARRAY_IDS
+        for measure in ("watts", "watt_hours", "watt_hours_day")
+    }
+    with engine.begin() as connection:
+        existing = {
+            column["name"] for column in inspect(connection).get_columns(table.name)
+        }
+        for legacy, raw in legacy_to_raw.items():
+            if legacy not in existing:
+                continue
+            quoted_legacy = preparer.quote(legacy)
+            quoted_raw = preparer.quote(raw)
+            if raw not in existing:
+                connection.exec_driver_sql(
+                    f"ALTER TABLE {quoted_table} RENAME COLUMN {quoted_legacy} TO {quoted_raw}"
+                )
+                existing.remove(legacy)
+                existing.add(raw)
+                continue
+
+            # This state can only result from a previous non-atomic/manual
+            # migration.  Preserve the raw column's explicit values and fill
+            # only gaps from the legacy column before removing the duplicate.
+            connection.exec_driver_sql(
+                f"UPDATE {quoted_table} SET {quoted_raw} = {quoted_legacy} "
+                f"WHERE {quoted_raw} IS NULL"
+            )
+            conflict = connection.exec_driver_sql(
+                f"SELECT 1 FROM {quoted_table} WHERE {quoted_raw} IS NOT NULL "
+                f"AND {quoted_legacy} IS NOT NULL AND {quoted_raw} != {quoted_legacy} LIMIT 1"
+            ).first()
+            if conflict is not None:
+                raise RuntimeError(
+                    f"refusing to drop conflicting forecast columns {legacy!r} and {raw!r}"
+                )
+            connection.exec_driver_sql(f"ALTER TABLE {quoted_table} DROP COLUMN {quoted_legacy}")
+            existing.remove(legacy)
 
 
 def _drop_columns(engine: Engine, model: type[Base], column_names: tuple[str, ...]) -> None:

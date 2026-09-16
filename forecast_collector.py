@@ -4,6 +4,7 @@ import requests
 
 from common import LOGGER, heavy_work, timestamps
 from config import SolarArrayConfig
+from forecast.solar_adjustment import adjust_pending_forecasts
 
 
 def fetch_array(session: requests.Session, array: SolarArrayConfig, endpoint: str, timeout_seconds: float) -> dict:
@@ -28,3 +29,12 @@ def collect_once(session: requests.Session, database, arrays: tuple[SolarArrayCo
             LOGGER.info("saved %s forecast rows for %s", count, array.name)
         except Exception:
             LOGGER.exception("forecast request failed for %s; interval skipped", array.name)
+    # Adjust only after every array has contributed to the same wide snapshot;
+    # the model learns and corrects the combined site PV output.
+    try:
+        adjusted = adjust_pending_forecasts(database, collected[0], timezone_name)
+        LOGGER.info("saved %s adjusted solar forecast rows", adjusted)
+    except Exception:
+        # Raw API data is the important first-class record. A failed model fit
+        # leaves these rows pending for the safe, resumable backfill command.
+        LOGGER.exception("solar forecast adjustment failed; raw rows remain pending")

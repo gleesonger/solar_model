@@ -250,6 +250,7 @@ def render_live_today_table(
         {"name": "latest", "label": "Latest (kW)", "field": "latest", "align": "right"},
         {"name": "today", "label": "Today (kWh)", "field": "today", "align": "right"},
         {"name": "forecast", "label": "Forecast (kWh)", "field": "forecast", "align": "right"},
+        {"name": "forecast_raw", "label": "Forecast Raw (kWh)", "field": "forecast_raw", "align": "right"},
     ]
     return ui.table(
         columns=columns,

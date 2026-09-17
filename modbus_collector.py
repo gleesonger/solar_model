@@ -26,6 +26,7 @@ class Register:
     cumulative: bool = False
     words: int = 1
     device_id: int | None = None
+    variable_name: str | None = None
 
 
 @dataclass(frozen=True)
@@ -175,6 +176,12 @@ def collect_once(
                 changed = database.save_device_info(
                     read_registers(client, device_registers),
                     collected,
+                    variable_names={
+                        register.metric: register.variable_name
+                        for block in device_registers
+                        for register in block.registers
+                        if register.variable_name
+                    },
                 )
                 if changed:
                     LOGGER.info("device information updated: %s values", changed)

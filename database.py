@@ -160,6 +160,7 @@ class SigenStorDevice(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     collected_at_utc: Mapped[str] = mapped_column(String, nullable=False)
     collected_at_local: Mapped[str] = mapped_column(String, nullable=False)
+    variable_name: Mapped[str | None] = mapped_column(String, nullable=True)
     variable: Mapped[str] = mapped_column(String, nullable=False)
     value: Mapped[str] = mapped_column(String, nullable=False)
     unit: Mapped[str] = mapped_column(String, nullable=False)
@@ -568,6 +569,7 @@ class SolarDatabase:
         self,
         values: dict[str, tuple[float | str, str, bool]],
         collected: tuple[str, str],
+        variable_names: dict[str, str] | None = None,
     ) -> int:
         values_to_save = values.copy()
         model_reading = values.get("Inverter model")
@@ -603,6 +605,7 @@ class SolarDatabase:
                 session.add(SigenStorDevice(
                     collected_at_utc=collected[0],
                     collected_at_local=collected[1],
+                    variable_name=(variable_names or {}).get(variable, _device_variable_name(variable)),
                     variable=variable,
                     value=value,
                     unit=unit,
@@ -664,6 +667,11 @@ def device_value_text(value: float | str) -> str | None:
     if not math.isfinite(value) or value == 0:
         return None
     return format(value, ".15g")
+
+
+def _device_variable_name(variable: str) -> str:
+    """Create a stable lower-case name for legacy/derived device values."""
+    return re.sub(r"[^a-z0-9]+", "_", variable.casefold()).strip("_")
 
 
 def maximum_pv_power_for_model(model: str) -> float | None:

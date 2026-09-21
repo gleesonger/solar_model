@@ -23,7 +23,7 @@ LIVE_POWER_METRICS = {
     "inverter_power_kw",
 }
 LIVE_BATTERY_METRICS = {
-    "inverter_battery_available_discharge",
+    "plant_battery_available_discharge",
     "plant_battery_soc",
 }
 LIVE_TODAY_METRICS = {
@@ -31,7 +31,6 @@ LIVE_TODAY_METRICS = {
     "plant_load_daily_kwh",
     "inverter_battery_charge_daily_kwh",
     "inverter_battery_discharge_daily_kwh",
-    "inverter_pv_daily_kwh",
     "plant_grid_import_total_kwh",
     "plant_grid_export_total_kwh",
 }
@@ -118,7 +117,6 @@ class LivePowerCollector:
             "today_load": None,
             "today_battery_charge": None,
             "today_battery_discharge": None,
-            "today_inverter": None,
             "today_grid_import": None,
             "today_grid_export": None,
         })
@@ -188,7 +186,7 @@ class LivePowerCollector:
         values["grid_import"] = max(grid_power, 0.0) if grid_power is not None else None
         values["grid_export"] = max(-grid_power, 0.0) if grid_power is not None else None
 
-        available_energy, _, _ = readings["inverter_battery_available_discharge"]
+        available_energy, _, _ = readings["plant_battery_available_discharge"]
         soc_percent, _, _ = readings["plant_battery_soc"]
         if isinstance(available_energy, str) or isinstance(soc_percent, str):
             raise ValueError("live battery readings returned text")
@@ -200,7 +198,6 @@ class LivePowerCollector:
             "today_load": "plant_load_daily_kwh",
             "today_battery_charge": "inverter_battery_charge_daily_kwh",
             "today_battery_discharge": "inverter_battery_discharge_daily_kwh",
-            "today_inverter": "inverter_pv_daily_kwh",
         }
         for key, metric in today_metrics.items():
             value, _, _ = readings[metric]
@@ -208,7 +205,10 @@ class LivePowerCollector:
                 raise ValueError(f"live daily metric {metric!r} returned text")
             values[key] = value
 
-        grid_totals = {"today_grid_import": "plant_grid_import_total_kwh", "today_grid_export": "plant_grid_export_total_kwh"}
+        grid_totals = {
+            "today_grid_import": "plant_grid_import_total_kwh",
+            "today_grid_export": "plant_grid_export_total_kwh",
+        }
         day = collected_at_local[:10]
         if self._grid_energy_day != day:
             self._grid_energy_day = day

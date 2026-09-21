@@ -1416,7 +1416,7 @@ def load_telemetry(
                 power_counts[key] = power_counts.get(key, 0) + 1
 
         battery_values = {
-            "available_energy_kwh": sample.inverter_battery_available_discharge_kwh,
+            "available_energy_kwh": sample.plant_battery_available_discharge_kwh,
             "soc_percent": sample.plant_battery_soc_percent,
         }
         for name, value in battery_values.items():
@@ -1448,23 +1448,16 @@ def load_telemetry(
         "solar": latest_sample.plant_pv_power_kw if latest_sample is not None else None,
         "battery": latest_sample.plant_battery_power_kw if latest_sample is not None else None,
         "inverter": latest_sample.inverter_power_kw if latest_sample is not None else None,
-        "inverter_today": latest_sample.inverter_pv_daily_kwh if latest_sample is not None else None,
         "load": latest_sample.plant_load_power_kw if latest_sample is not None else None,
         "grid_import": max(latest_grid, 0.0) if latest_grid is not None else None,
         "grid_export": max(-latest_grid, 0.0) if latest_grid is not None else None,
         "battery_available_energy_kwh": (
-            latest_sample.inverter_battery_available_discharge_kwh
+            latest_sample.plant_battery_available_discharge_kwh
             if latest_sample is not None
             else None
         ),
         "battery_soc_percent": (
-            (
-                latest_sample.plant_battery_soc_percent
-                if latest_sample.plant_battery_soc_percent is not None
-                else latest_sample.inverter_battery_soc_percent
-            )
-            if latest_sample is not None
-            else None
+            latest_sample.plant_battery_soc_percent if latest_sample is not None else None
         ),
     }
     return TelemetryData(
@@ -1544,7 +1537,7 @@ def average_telemetry_by_interval(
             "inverter": sample.inverter_power_kw,
             "grid_import": max(grid_power, 0.0) if grid_power is not None else None,
             "grid_export": max(-grid_power, 0.0) if grid_power is not None else None,
-            "available_energy_kwh": sample.inverter_battery_available_discharge_kwh,
+            "available_energy_kwh": sample.plant_battery_available_discharge_kwh,
             "soc_percent": sample.plant_battery_soc_percent,
         }
         for pv_string, panel_id in actuals_to_forecast.items():
@@ -1613,7 +1606,7 @@ def average_hourly_rollup_telemetry(
             "inverter": sample.inverter_power_kw,
             "grid_import": max(grid_sum, 0.0) if grid_sum is not None else None,
             "grid_export": max(-grid_sum, 0.0) if grid_sum is not None else None,
-            "available_energy_kwh": sample.inverter_battery_available_discharge_kwh,
+            "available_energy_kwh": sample.plant_battery_available_discharge_kwh,
             "soc_percent": sample.plant_battery_soc_percent,
         }
         for pv_string, panel_id in actuals_to_forecast.items():
@@ -2105,7 +2098,6 @@ def summary_rows(
     today = {
         "solar": float(dataframe_column(data, "solar").sum()),
         "battery": float(dataframe_column(data, "battery").sum()),
-        "inverter": latest.get("today_inverter", latest.get("inverter_today")),
         "load": float(dataframe_column(data, "load").sum()),
         "grid_import": float(dataframe_column(data, "grid_import").sum()),
         "grid_export": float(dataframe_column(data, "grid_export").sum()),

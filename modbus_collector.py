@@ -181,7 +181,7 @@ def collect_once(
                         for block in device_registers
                         for register in block.registers
                         if register.variable_name
-                    },
+                    } | {"Maximum PV input power": "maximum_pv_input_power_kw"},
                 )
                 if changed:
                     LOGGER.info("device information updated: %s values", changed)

@@ -71,7 +71,7 @@ Each forecast array requires a unique integer `panel_id` from `1` through `4`; i
 
 ## Modbus register map
 
-Sigenergy register addresses and scaling are firmware/device dependent. The collector reads contiguous groups. The supplied `sigen_register_map.json` contains electrical metrics, while `sigen_device_register_map.json` contains the device and system metadata recorded when values change. Their filenames are fixed in `modbus_collector.py`; they are not dashboard configuration settings.
+Sigenergy register addresses and scaling are firmware/device dependent. The supplied maps are aligned to *Sigenergy Modbus Protocol EN V2.9* (released 2026-05-13). The collector reads contiguous groups. The supplied `sigen_register_map.json` contains electrical metrics, while `sigen_device_register_map.json` contains the device and system metadata recorded when values change. Their filenames are fixed in `modbus_collector.py`; they are not dashboard configuration settings.
 
 Each entry has this shape:
 

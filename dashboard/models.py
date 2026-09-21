@@ -13,7 +13,6 @@ PANEL_COLORS = ("#009E73", "#56B4E9", "#F9C74F", "#CC79A7")
 SUMMARY_LATEST_KEYS = {
     "Solar": "solar",
     "Battery": "battery",
-    "Inverter": "inverter",
     "Load": "load",
     "Grid-Imported": "grid_import",
     "Grid-Exported": "grid_export",

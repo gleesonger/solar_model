@@ -150,7 +150,6 @@ class RecentTab:
         self._today_values = {
             "Solar": None,
             "Battery": None,
-            "Inverter": None,
             "Load": None,
             "Grid-Imported": None,
             "Grid-Exported": None,
@@ -177,7 +176,6 @@ class RecentTab:
     def _apply_live_today_meters(self, live_power: LivePowerData) -> None:
         direct_values = {
             "Solar": live_power.values.get("today_solar"),
-            "Inverter": live_power.values.get("today_inverter"),
             "Load": live_power.values.get("today_load"),
             "Grid-Imported": live_power.values.get("today_grid_import"),
             "Grid-Exported": live_power.values.get("today_grid_export"),

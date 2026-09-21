@@ -48,6 +48,14 @@ class ForecastConfig:
 
 
 @dataclass(frozen=True)
+class EnergyPlanConfig:
+    battery_target_soc_percent: float
+    battery_minimum_soc_percent: float
+    charge_efficiency: float
+    discharge_efficiency: float
+
+
+@dataclass(frozen=True)
 class DashboardConfig:
     port: int
     host: str
@@ -103,6 +111,7 @@ class Config:
     logging: LoggingConfig
     database: DatabaseConfig
     forecast: ForecastConfig
+    energy_plan: EnergyPlanConfig
     dashboard: DashboardConfig
     tariffs: TariffsConfig
     actuals: ActualsConfig
@@ -143,6 +152,12 @@ def validate_config(config: Config) -> None:
 
     if config.forecast.timeout_seconds <= 0:
         raise ValueError("forecast timeout must be greater than zero")
+
+    energy_plan = config.energy_plan
+    if not 0 <= energy_plan.battery_minimum_soc_percent <= energy_plan.battery_target_soc_percent <= 100:
+        raise ValueError("energy_plan battery SoC bounds must satisfy 0 <= minimum <= target <= 100")
+    if not 0 < energy_plan.charge_efficiency <= 1 or not 0 < energy_plan.discharge_efficiency <= 1:
+        raise ValueError("energy_plan battery efficiencies must be greater than zero and at most one")
 
     try:
         ZoneInfo(config.timezone)

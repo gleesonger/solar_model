@@ -89,6 +89,7 @@ class SigenStorModbusSample(Base):
     plant_pv_power_kw: Mapped[float | None] = mapped_column(Float)
     plant_battery_power_kw: Mapped[float | None] = mapped_column(Float)
     plant_battery_soc_percent: Mapped[float | None] = mapped_column(Float)
+    plant_battery_available_discharge_kwh: Mapped[float | None] = mapped_column(Float)
     plant_pv_daily_kwh: Mapped[float | None] = mapped_column(Float)
     plant_pv_daily_kwh_period: Mapped[float | None] = mapped_column(Float)
     plant_pv_total_kwh: Mapped[float | None] = mapped_column(Float)
@@ -115,19 +116,11 @@ class SigenStorModbusSample(Base):
     plant_battery_discharge_total_kwh_period: Mapped[float | None] = mapped_column(Float)
 
     inverter_power_kw: Mapped[float | None] = mapped_column(Float)
-    inverter_battery_power_kw: Mapped[float | None] = mapped_column(Float)
-    inverter_battery_soc_percent: Mapped[float | None] = mapped_column(Float)
-    inverter_battery_rated_capacity_kwh: Mapped[float | None] = mapped_column(Float)
-    inverter_battery_available_discharge_kwh: Mapped[float | None] = mapped_column(Float)
     inverter_battery_avg_cell_voltage_volts: Mapped[float | None] = mapped_column(Float)
     inverter_battery_charge_daily_kwh: Mapped[float | None] = mapped_column(Float)
     inverter_battery_charge_daily_kwh_period: Mapped[float | None] = mapped_column(Float)
     inverter_battery_discharge_daily_kwh: Mapped[float | None] = mapped_column(Float)
     inverter_battery_discharge_daily_kwh_period: Mapped[float | None] = mapped_column(Float)
-    inverter_pv_daily_kwh: Mapped[float | None] = mapped_column(Float)
-    inverter_pv_daily_kwh_period: Mapped[float | None] = mapped_column(Float)
-    inverter_pv_total_kwh: Mapped[float | None] = mapped_column(Float)
-    inverter_pv_total_kwh_period: Mapped[float | None] = mapped_column(Float)
     inverter_pv1_voltage_volts: Mapped[float | None] = mapped_column(Float)
     inverter_pv1_current_amps: Mapped[float | None] = mapped_column(Float)
     inverter_pv2_voltage_volts: Mapped[float | None] = mapped_column(Float)
@@ -164,6 +157,13 @@ class SigenStorDevice(Base):
     variable: Mapped[str] = mapped_column(String, nullable=False)
     value: Mapped[str] = mapped_column(String, nullable=False)
     unit: Mapped[str] = mapped_column(String, nullable=False)
+
+
+class DatabaseMetadata(Base):
+    __tablename__ = "database_metadata"
+
+    key: Mapped[str] = mapped_column(String, primary_key=True)
+    value: Mapped[str] = mapped_column(String, nullable=False)
 
 
 class ForecastSolarSample(Base):
@@ -215,7 +215,7 @@ CUMULATIVE_COLUMNS = (
     "plant_pv_daily_kwh", "plant_pv_total_kwh", "plant_load_daily_kwh", "plant_load_total_kwh",
     "plant_grid_import_total_kwh", "plant_grid_export_total_kwh", "plant_battery_charge_total_kwh",
     "plant_battery_discharge_total_kwh", "inverter_battery_charge_daily_kwh",
-    "inverter_battery_discharge_daily_kwh", "inverter_pv_daily_kwh", "inverter_pv_total_kwh",
+    "inverter_battery_discharge_daily_kwh",
 )
 PV_ARRAY_IDS = (1, 2, 3, 4)
 PV_ARRAY_POWER_COLUMNS = tuple(f"inverter_pv{panel_id}_power_kw" for panel_id in PV_ARRAY_IDS)
@@ -633,8 +633,9 @@ def create_engine_for_database(path: str | Path) -> Engine:
 
 def open_database(path: str | Path) -> SolarDatabase:
     engine = create_engine_for_database(path)
-    inspector = inspect(engine)
     _rename_forecast_solar_raw_columns(engine)
+    _rename_sigenstor_battery_available_discharge_column(engine)
+    inspector = inspect(engine)
     hourly_table_missing = not inspector.has_table(SigenStorHourlySample.__table__.name)
     # Create/migrate the raw source first. The hourly table mirrors its
     # measurement columns, so it must only be created after this step.
@@ -643,6 +644,7 @@ def open_database(path: str | Path) -> SolarDatabase:
         tables=(
             SigenStorModbusSample.__table__,
             SigenStorDevice.__table__,
+            DatabaseMetadata.__table__,
             ForecastSolarSample.__table__,
         ),
     )
@@ -699,6 +701,28 @@ def _add_missing_columns(engine: Engine, model: type[Base]) -> None:
             column_name = preparer.quote(column.name)
             column_type = column.type.compile(dialect=engine.dialect)
             connection.exec_driver_sql(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_type}")
+
+
+def _rename_sigenstor_battery_available_discharge_column(engine: Engine) -> None:
+    """Preserve inverter availability history under the plant-level name."""
+    old_name = "inverter_battery_available_discharge_kwh"
+    new_name = "plant_battery_available_discharge_kwh"
+    preparer = engine.dialect.identifier_preparer
+    for table_name in (SigenStorModbusSample.__table__.name, SigenStorHourlySample.__table__.name):
+        if not inspect(engine).has_table(table_name):
+            continue
+        existing_columns = {
+            column["name"] for column in inspect(engine).get_columns(table_name)
+        }
+        if old_name not in existing_columns or new_name in existing_columns:
+            continue
+        quoted_table = preparer.quote(table_name)
+        quoted_old = preparer.quote(old_name)
+        quoted_new = preparer.quote(new_name)
+        with engine.begin() as connection:
+            connection.exec_driver_sql(
+                f"ALTER TABLE {quoted_table} RENAME COLUMN {quoted_old} TO {quoted_new}"
+            )
 
 
 def _rename_forecast_solar_raw_columns(engine: Engine) -> None:

@@ -8,3 +8,4 @@ pandas>=2.2,<3
 dacite>=1.9,<2
 XlsxWriter>=3.2,<4
 scikit-learn>=1.5,<2
+scipy>=1.11,<2

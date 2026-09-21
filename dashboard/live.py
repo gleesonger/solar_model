@@ -212,7 +212,11 @@ class LivePowerCollector:
         day = collected_at_local[:10]
         if self._grid_energy_day != day:
             self._grid_energy_day = day
-            self._grid_energy_start = data.load_grid_energy_day_start(self._database_path, day)
+            self._grid_energy_start = data.load_grid_energy_day_start(
+                self._database_path,
+                day,
+                self._timezone_name,
+            )
         for key, metric in grid_totals.items():
             value, _, _ = readings[metric]
             if isinstance(value, str):

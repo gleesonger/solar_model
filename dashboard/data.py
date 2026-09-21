@@ -125,8 +125,12 @@ def load_day(
 def load_grid_energy_day_start(
     database_path: str,
     local_date: str,
+    timezone_name: str,
 ) -> dict[str, float]:
     """Return the day's opening lifetime grid meters for live daily totals."""
+    timezone = ZoneInfo(timezone_name)
+    day_start = datetime.combine(date.fromisoformat(local_date), time.min, tzinfo=timezone)
+    day_end = day_start + timedelta(days=1)
     engine = create_engine_for_database(database_path)
     try:
         with Session(engine) as session:
@@ -135,7 +139,8 @@ def load_grid_energy_day_start(
                     SigenStorModbusSample.plant_grid_import_total_kwh,
                     SigenStorModbusSample.plant_grid_export_total_kwh,
                 )
-                .where(func.substr(SigenStorModbusSample.collected_at_local, 1, 10) == local_date)
+                .where(SigenStorModbusSample.collected_at_utc >= day_start.astimezone(ZoneInfo("UTC")).isoformat())
+                .where(SigenStorModbusSample.collected_at_utc < day_end.astimezone(ZoneInfo("UTC")).isoformat())
                 .order_by(SigenStorModbusSample.collected_at_utc)
                 .limit(1)
             ).first()

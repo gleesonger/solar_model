@@ -13,6 +13,8 @@ dashboard:
     pv1: 1
     pv2: 2
 
+
+
 tariffs:
   periods:
     - effective_from: "2000-01-01"
@@ -107,6 +109,28 @@ energy_plan:
   battery_minimum_soc_percent: 20
   charge_efficiency: 0.95
   discharge_efficiency: 0.95
+  
+  minimim_battery_kwh:
+    - days: [Mon, Tue, Wed, Thu, Fri, Sat, Sun]
+      name: Night
+      start_time: "00:00"
+      end_time: "05:00"
+      rate: 0
+      comment: Zero rate allows full export
+    - days: [Mon, Tue, Wed, Thu, Fri, Sat, Sun]
+      name: Day
+      start_time: "05:00"
+      end_time: "22:00"
+      rate: 4
+      comment: Based on a 0.5kw load 4kwh is circa 8hrs, but likley to be closer to 6 in reality
+    - days: [Mon, Tue, Wed, Thu, Fri, Sat, Sun]
+      name: Evening
+      start_time: "22:00"
+      end_time: "24:00"
+      rate: 2
+      comment: Based on a 0.5kw load 2kwh is circa 4hrs
+        
+    
 
 actuals:
   data_retrival_schedule:

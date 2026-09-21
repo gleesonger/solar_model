@@ -53,6 +53,7 @@ class EnergyPlanConfig:
     battery_minimum_soc_percent: float
     charge_efficiency: float
     discharge_efficiency: float
+    minimum_battery_kwh: tuple[TariffRule, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -123,6 +124,15 @@ def load_config(path: str | Path = "config.yaml") -> Config:
         raw_config = yaml.safe_load(file)
 
     try:
+        energy_plan_data = raw_config.get("energy_plan") if isinstance(raw_config, dict) else None
+        if isinstance(energy_plan_data, dict):
+            backup_data = energy_plan_data.get("minimum_battery_kwh")
+            if isinstance(backup_data, dict):
+                # This is documentation for people editing config.yaml, not configuration.
+                backup_data.pop("comment", None)
+                if "rules" in backup_data:
+                    energy_plan_data["minimum_battery_kwh"] = backup_data["rules"]
+
         tariff_data = raw_config.get("tariffs") if isinstance(raw_config, dict) else None
         if isinstance(tariff_data, dict) and isinstance(tariff_data.get("periods"), list):
             for period in tariff_data["periods"]:
@@ -158,6 +168,11 @@ def validate_config(config: Config) -> None:
         raise ValueError("energy_plan battery SoC bounds must satisfy 0 <= minimum <= target <= 100")
     if not 0 < energy_plan.charge_efficiency <= 1 or not 0 < energy_plan.discharge_efficiency <= 1:
         raise ValueError("energy_plan battery efficiencies must be greater than zero and at most one")
+    if energy_plan.minimum_battery_kwh:
+        validate_tariff_rules(
+            "energy_plan.minimum_battery_kwh",
+            energy_plan.minimum_battery_kwh,
+        )
 
     try:
         ZoneInfo(config.timezone)

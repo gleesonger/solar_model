@@ -116,23 +116,13 @@ class RecentTab:
         if label is None:
             return
 
-        if full_updated_last_local is None:
-            label.set_visibility(False)
-            return
-
-        timestamp = datetime.fromisoformat(full_updated_last_local)
-        age_seconds = (datetime.now(timestamp.tzinfo) - timestamp).total_seconds()
         stale_after_seconds = (
             self.config.actuals.data_retrival_schedule.full_updated_interval_seconds * 3
         )
-        if age_seconds <= stale_after_seconds:
-            label.set_visibility(False)
-            return
-        label.set_text(f"Last full update: {timestamp:%Y-%m-%d %H:%M:%S}")
-        label.classes(replace=(
-            "text-sm font-semibold text-white bg-red-600 border-4 border-red-900 rounded px-2 py-1"
+        label.props(add=(
+            f'data-last-full-update="{full_updated_last_local or ""}" '
+            f'data-stale-after-seconds="{stale_after_seconds}"'
         ))
-        label.set_visibility(True)
 
     def _load_data(self) -> RecentData:
         LOGGER.info("Dashboard loading data from database")

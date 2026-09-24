@@ -51,9 +51,13 @@ class ForecastConfig:
 class EnergyPlanConfig:
     battery_target_soc_percent: float
     battery_minimum_soc_percent: float
+    minimum_battery_kwh: tuple[TariffRule, ...] = ()
+
+
+@dataclass(frozen=True)
+class AdditionalDeviceInfoConfig:
     charge_efficiency: float
     discharge_efficiency: float
-    minimum_battery_kwh: tuple[TariffRule, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -113,6 +117,7 @@ class Config:
     database: DatabaseConfig
     forecast: ForecastConfig
     energy_plan: EnergyPlanConfig
+    additional_device_info: AdditionalDeviceInfoConfig
     dashboard: DashboardConfig
     tariffs: TariffsConfig
     actuals: ActualsConfig
@@ -166,8 +171,9 @@ def validate_config(config: Config) -> None:
     energy_plan = config.energy_plan
     if not 0 <= energy_plan.battery_minimum_soc_percent <= energy_plan.battery_target_soc_percent <= 100:
         raise ValueError("energy_plan battery SoC bounds must satisfy 0 <= minimum <= target <= 100")
-    if not 0 < energy_plan.charge_efficiency <= 1 or not 0 < energy_plan.discharge_efficiency <= 1:
-        raise ValueError("energy_plan battery efficiencies must be greater than zero and at most one")
+    additional_device_info = config.additional_device_info
+    if not 0 < additional_device_info.charge_efficiency <= 1 or not 0 < additional_device_info.discharge_efficiency <= 1:
+        raise ValueError("additional_device_info battery efficiencies must be greater than zero and at most one")
     if energy_plan.minimum_battery_kwh:
         validate_tariff_rules(
             "energy_plan.minimum_battery_kwh",

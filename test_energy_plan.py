@@ -17,7 +17,7 @@ from zoneinfo import ZoneInfo
 from sqlalchemy import inspect, select
 
 from common import configure_logging
-from config import Config, load_config
+from config import AdditionalDeviceInfoConfig, Config, load_config
 from database import ForecastSolarSample, SigenStorDevice, SigenStorModbusSample, SolarDatabase, create_engine_for_database
 from energy_plan_simulation import (
     DeviceInfo,
@@ -110,7 +110,7 @@ def build_energy_plan_inputs(config: Config, now: datetime | None = None) -> dic
             "solar_forecast": {"snapshot_collected_at": snapshot_at, "source": selected_source, "raw_available": raw is not None, "adjusted_available": adjusted is not None},
             "load_model": {"lookback_weeks": LOOKBACK_WEEKS, "half_life_weeks": HALF_LIFE_WEEKS, "description": "weighted average of complete historical local-day hourly load totals"},
             "battery_state": load_battery_state(database),
-            "devices": asdict(load_device_metadata(database)),
+            "devices": asdict(load_device_metadata(database, config.additional_device_info)),
             "intervals": intervals,
         }
     finally:
@@ -206,8 +206,11 @@ def load_battery_state(database: SolarDatabase) -> dict[str, float | str | None]
     }
 
 
-def load_device_metadata(database: SolarDatabase) -> DeviceInfo:
-    """Load latest ``sigenstor_devices`` row for every metadata variable."""
+def load_device_metadata(
+    database: SolarDatabase,
+    additional_device_info: AdditionalDeviceInfoConfig,
+) -> DeviceInfo:
+    """Combine device metadata with configured planning-only device information."""
     has_variable_name = any(
         column["name"] == "variable_name"
         for column in inspect(database.engine).get_columns(SigenStorDevice.__tablename__)
@@ -218,12 +221,15 @@ def load_device_metadata(database: SolarDatabase) -> DeviceInfo:
         SigenStorDevice.value,
         SigenStorDevice.unit,
     ]
+
     if has_variable_name:
         columns.append(SigenStorDevice.variable_name)
+
     with database.sessions() as session:
         rows = session.execute(
             select(*columns).order_by(SigenStorDevice.id.desc())
         ).mappings().all()
+
     latest: dict[str, float | str] = {}
     for row in rows:
         variable_name = row.get("variable_name") or re.sub(
@@ -237,6 +243,9 @@ def load_device_metadata(database: SolarDatabase) -> DeviceInfo:
         except ValueError:
             value = row["value"]
         latest.setdefault(variable_name, value)
+
+    latest.update(asdict(additional_device_info))
+
     missing = [name for name in DeviceInfo.__dataclass_fields__ if name not in latest]
     if missing:
         raise ValueError(f"collected device information is missing: {', '.join(missing)}")

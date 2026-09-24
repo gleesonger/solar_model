@@ -107,10 +107,8 @@ forecast:
 energy_plan:
   battery_target_soc_percent: 95
   battery_minimum_soc_percent: 20
-  charge_efficiency: 0.95
-  discharge_efficiency: 0.95
   
-  minimim_battery_kwh:
+  minimum_battery_kwh:
     - days: [Mon, Tue, Wed, Thu, Fri, Sat, Sun]
       name: Night
       start_time: "00:00"
@@ -129,6 +127,10 @@ energy_plan:
       end_time: "24:00"
       rate: 2
       comment: Based on a 0.5kw load 2kwh is circa 4hrs
+
+additional_device_info:
+  charge_efficiency: 0.95
+  discharge_efficiency: 0.95
         
     
 

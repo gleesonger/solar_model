@@ -187,3 +187,26 @@ def render_dashboard_styles() -> None:
             font-weight: 700;
         }
     """)
+    ui.add_head_html("""
+        <script>
+            function updateDashboardFreshness() {
+                document.querySelectorAll('.dashboard-updated-label').forEach((label) => {
+                    const lastUpdated = label.dataset.lastFullUpdate;
+                    const staleAfterSeconds = Number(label.dataset.staleAfterSeconds);
+                    const lastUpdatedMillis = Date.parse(lastUpdated || '');
+                    const hasTimestamp = Number.isFinite(lastUpdatedMillis);
+                    const isStale = hasTimestamp
+                        && Number.isFinite(staleAfterSeconds)
+                        && (Date.now() - lastUpdatedMillis) / 1000 > staleAfterSeconds;
+
+                    label.classList.toggle('hidden', !isStale);
+                    if (isStale) {
+                        label.textContent = `Last full update: ${lastUpdated.replace('T', ' ').slice(0, 19)}`;
+                    }
+                });
+            }
+
+            updateDashboardFreshness();
+            setInterval(updateDashboardFreshness, 1000);
+        </script>
+    """)

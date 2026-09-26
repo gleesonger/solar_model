@@ -15,6 +15,14 @@ P = ParamSpec("P")
 T = TypeVar("T")
 
 
+def try_get(operation: Callable[[], T], default: T, exception_type: type[Exception]) -> T:
+    """Return an operation's result, or default when exception_type is raised."""
+    try:
+        return operation()
+    except exception_type:
+        return default
+
+
 def heavy_work(name: str) -> Callable[[Callable[P, T]], Callable[P, T]]:
     """Log the start, completion time, and failure of a costly synchronous task."""
     def decorate(function: Callable[P, T]) -> Callable[P, T]:

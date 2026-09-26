@@ -48,10 +48,21 @@ class ForecastConfig:
 
 
 @dataclass(frozen=True)
+class OptimisationWeightsConfig:
+    maximise_profit: float
+    maximise_battery: float
+
+
+@dataclass(frozen=True)
 class EnergyPlanConfig:
-    battery_target_soc_percent: float
-    battery_minimum_soc_percent: float
+    num_projection_hours: int
+    projection_resolution_mins: int
+    load_forecast_historical_lookback_window_days: int
+    load_forecast_historical_lookback_halflife_days: int
+    optimisation_weights: OptimisationWeightsConfig
     minimum_battery_kwh: tuple[TariffRule, ...] = ()
+    maximum_battery_kwh: tuple[TariffRule, ...] = ()
+    limit_battery_export_rate_to_grid_kw: tuple[TariffRule, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -169,8 +180,15 @@ def validate_config(config: Config) -> None:
         raise ValueError("forecast timeout must be greater than zero")
 
     energy_plan = config.energy_plan
-    if not 0 <= energy_plan.battery_minimum_soc_percent <= energy_plan.battery_target_soc_percent <= 100:
-        raise ValueError("energy_plan battery SoC bounds must satisfy 0 <= minimum <= target <= 100")
+    if energy_plan.num_projection_hours <= 0 or energy_plan.projection_resolution_mins <= 0:
+        raise ValueError("energy_plan projection duration and resolution must be greater than zero")
+    if energy_plan.load_forecast_historical_lookback_window_days <= 0 or energy_plan.load_forecast_historical_lookback_halflife_days <= 0:
+        raise ValueError("energy_plan load forecast history settings must be greater than zero")
+    weights = energy_plan.optimisation_weights
+    if not math.isfinite(weights.maximise_profit) or not math.isfinite(weights.maximise_battery) or weights.maximise_profit < 0 or weights.maximise_battery < 0 or weights.maximise_profit + weights.maximise_battery == 0:
+        raise ValueError("energy_plan optimisation weights must be finite, non-negative, and not both zero")
+    if (energy_plan.num_projection_hours * 60) % energy_plan.projection_resolution_mins:
+        raise ValueError("energy_plan projection duration must be divisible by its resolution")
     additional_device_info = config.additional_device_info
     if not 0 < additional_device_info.charge_efficiency <= 1 or not 0 < additional_device_info.discharge_efficiency <= 1:
         raise ValueError("additional_device_info battery efficiencies must be greater than zero and at most one")
@@ -178,6 +196,13 @@ def validate_config(config: Config) -> None:
         validate_tariff_rules(
             "energy_plan.minimum_battery_kwh",
             energy_plan.minimum_battery_kwh,
+        )
+    if energy_plan.maximum_battery_kwh:
+        validate_tariff_rules("energy_plan.maximum_battery_kwh", energy_plan.maximum_battery_kwh)
+    if energy_plan.limit_battery_export_rate_to_grid_kw:
+        validate_tariff_rules(
+            "energy_plan.limit_battery_export_rate_to_grid_kw",
+            energy_plan.limit_battery_export_rate_to_grid_kw,
         )
 
     try:

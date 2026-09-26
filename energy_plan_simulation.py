@@ -4,14 +4,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass, fields, replace
 from datetime import datetime, timedelta
+from collections.abc import Iterable
 from typing import cast
 
-import numpy as np
-from scipy.optimize import linprog
+import cvxpy as cp
+import pandas as pd
 from config import Config
-from economics import tariff_rule, tariff_rules_for_timestamp
-
-type Variable = tuple[str, int]
+from economics import tariff_rule, tariff_rule_rate, tariff_rules_for_timestamp
 
 @dataclass
 class DeviceInfo:
@@ -43,371 +42,223 @@ class DeviceState:
 
 
 @dataclass(frozen=True)
-class InputParameters:
-    num_projection_hours: int
-    projection_resolution_mins: int
-
-
-@dataclass(init=False)
-class ForecastFigures:
-    starts_at: datetime
-    ends_at: datetime
+class ForecastPoint:
     solar_kwh: float
     load_kwh: float
 
-    @property
-    def duration_hours(self) -> float:
-        return (self.ends_at - self.starts_at).total_seconds() / 3600
 
-
-@dataclass(init=False)
-class TimePeriodState:
+@dataclass(frozen=True)
+class ForecastInterval:
     starts_at: datetime
     ends_at: datetime
-    solar_kwh: float
-    load_kwh: float
-    minimum_battery_kwh: float
-
-    battery_start_kwh: float
-
-    solar_to_battery_kwh: float
-    solar_to_grid_kwh: float
-    solar_to_load_kwh: float
-    solar_to_inverter_kwh: float
-    solar_clipped_kwh: float
-
-    battery_to_load_kwh: float
-    battery_to_grid_kwh: float
-    battery_to_inverter_kwh: float
-    solar_to_battery_loss_kwh: float
-    grid_to_battery_loss_kwh: float
-    battery_to_ac_loss_kwh: float
-
-    inverter_dc_to_ac_kwh: float
-    inverter_ac_to_dc_kwh: float
-
-    grid_import_kwh: float
-    grid_export_kwh: float
-
-    battery_end_kwh: float
-
-    tariff_name: str
-    import_rate: float
-    export_rate: float
-    import_cost: float
-    export_revenue: float
-    net_cost: float
+    kwh: float
 
 
-def simulate_energy_plan(
-    device_info: DeviceInfo,
-    device_state: DeviceState,
-    input_parameters: InputParameters,
-    forecast_figures: ForecastFigures,
-    config: Config,
-) -> list[TimePeriodState]:
+class ForecastData:
+    def __init__(self, solar: Iterable[ForecastInterval], load: Iterable[ForecastInterval]) -> None:
+        self.solar = self._validate_intervals(solar, "solar")
+        self.load = self._validate_intervals(load, "load")
 
-    num_time_periods: int = int(input_parameters.num_projection_hours * 60) // input_parameters.projection_resolution_mins
+    def sum(self, start_time: datetime, end_time: datetime) -> ForecastPoint:
+        start = start_time
+        end = end_time
+        if end <= start:
+            raise ValueError("forecast end_time must be after start_time")
+
+        return ForecastPoint(solar_kwh=self._sum_intervals(self.solar, start, end), load_kwh=self._sum_intervals(self.load, start, end))
+
+    @staticmethod
+    def _validate_intervals(intervals: Iterable[ForecastInterval], name: str) -> tuple[ForecastInterval, ...]:
+        ordered = tuple(sorted(intervals, key=lambda interval: interval.starts_at))
+        if not ordered:
+            raise ValueError(f"{name} forecast must contain at least one interval")
+        for previous, current in zip(ordered, ordered[1:]):
+            if current.starts_at < previous.ends_at:
+                raise ValueError(f"{name} forecast intervals must not overlap")
+            if current.starts_at > previous.ends_at:
+                raise ValueError(f"{name} forecast intervals contain a gap")
+        if any(interval.ends_at <= interval.starts_at for interval in ordered):
+            raise ValueError(f"{name} forecast intervals must end after they start")
+        return ordered
+
+    @staticmethod
+    def _sum_intervals(intervals: tuple[ForecastInterval, ...], start: datetime, end: datetime) -> float:
+        cursor = start
+        total_kwh = 0.0
+        for interval in intervals:
+            if interval.ends_at <= cursor:
+                continue
+            if interval.starts_at > cursor:
+                break
+            overlap_start = max(cursor, interval.starts_at)
+            overlap_end = min(end, interval.ends_at)
+            if overlap_end > overlap_start:
+                interval_seconds = (interval.ends_at - interval.starts_at).total_seconds()
+                overlap_seconds = (overlap_end - overlap_start).total_seconds()
+                total_kwh += interval.kwh * overlap_seconds / interval_seconds
+                cursor = overlap_end
+            if cursor >= end:
+                return total_kwh
+        raise ValueError("forecast range is outside the known data or contains a gap; extrapolation is not supported")
+
+
+def simulate_energy_plan(device_info: DeviceInfo, device_state: DeviceState, forecast: ForecastData, config: Config, projection_starts_at: datetime) -> pd.DataFrame:
+
+    num_time_periods: int = int(config.energy_plan.num_projection_hours * 60) // config.energy_plan.projection_resolution_mins
+    theta_hrs = config.energy_plan.projection_resolution_mins / 60
 
     if num_time_periods <= 0:
         raise ValueError("num_projection_hours must be greater than zero")
+    df = pd.DataFrame(index=range(num_time_periods), columns=["starts_at", "ends_at", "minimum_battery_kwh", "maximum_battery_kwh", "tariff_name", "import_rate", "export_rate", "limit_battery_export_rate_to_grid_kw", "load_kwh", "solar_kwh"])
 
-    state = [ TimePeriodState() for t in range(num_time_periods) ]
-    theta_hrs = input_parameters.projection_resolution_mins / 60
-
-    # Assign load & forecast figures to each time period
-    for t,tp in enumerate(state):
-        tp.starts_at = forecast_figures.starts_at + timedelta(minutes=t * input_parameters.projection_resolution_mins)
-        tp.ends_at = tp.starts_at + timedelta(minutes=input_parameters.projection_resolution_mins)
-        tp.solar_kwh = forecast_figures.solar_kwh * theta_hrs
-        tp.load_kwh = forecast_figures.load_kwh * theta_hrs
-
-    # Assign tariff rates to each time period
-    for t,tp in enumerate(state):
-        import_rules, export_rules = tariff_rules_for_timestamp(config.tariffs, tp.starts_at)
-        import_rule = tariff_rule(import_rules, tp.starts_at)
-        tp.import_rate = import_rule.rate
-        tp.tariff_name = cast(str, import_rule.name)
-        tp.export_rate = tariff_rule(export_rules, tp.starts_at).rate
-
-        tp.minimum_battery_kwh = tariff_rule(config.energy_plan.minimum_battery_kwh, tp.starts_at).rate
-
-
-
-    # convert the problem into a linear programming problem, where we minimize the cost of energy over the time periods, subject to constraints on battery capacity, charge/discharge rates, load requirements, required minimum battery charge to meet load
-    if device_info.charge_efficiency <= 0 or device_info.discharge_efficiency <= 0:
-        raise ValueError("battery efficiencies must be greater than zero")
-
-    # Build the model using named variables and constraints.  ``linprog`` uses
-    # a single vector internally, but the conversion is intentionally deferred
-    # until every energy equation has been declared below.
-    variables: list[Variable] = []
-    variable_index: dict[Variable, int] = {}
-    variable_bounds: dict[Variable, tuple[float | None, float | None]] = {}
-    objective: dict[Variable, float] = {}
-    equalities: list[tuple[dict[Variable, float], float]] = []
-    inequalities: list[tuple[dict[Variable, float], float]] = []
-
-    def add_variable(name: str,period: int,lower: float | None = None,upper: float | None = None) -> Variable:
-        variable = (name, period)
-        variable_index[variable] = len(variables)
-        variables.append(variable)
-        variable_bounds[variable] = (lower, upper)
-        return variable
-
-    # The objective is to minimise the net cost (inflow_cost-outflow_revenue) of energy over the time periods.
-    # Each variable is multiplied by its coefficient and summed to form the objective function.
-    # The coefficient is import / export rate (eg 0.3c/kWh)
-    # The lin program will find the values of each variable that minimise the objective function, subject to the constraints defined below.
-    def add_objective(variable: Variable, coefficient: float):
-        objective[variable] = objective.get(variable, 0) + coefficient
-
-    # Add an equality constraint of the form sum(coefficient × variable) = value.
-    def add_equality(value: float, *terms: tuple[Variable, float]):
-        equalities.append((dict(terms), value))
-
-    # Add an inequality constraint of the form sum(coefficient × variable) ≤ value.
-    def add_inequality(value: float, *terms: tuple[Variable, float]):
-        inequalities.append((dict(terms), value))
-
-    # Convert named constraints into the matrix form A x = b or A x ≤ b expected by linprog.
-    def compile_rows(rows: list[tuple[dict[Variable, float], float]]) -> tuple[np.ndarray, np.ndarray]:
-        coefficients = np.zeros((len(rows), len(variables)))
-        values = np.zeros(len(rows))
-        for row, (terms, value) in enumerate(rows):
-            values[row] = value
-            for variable, coefficient in terms.items():
-                coefficients[row, variable_index[variable]] = coefficient
-        return coefficients, values
+    if not (0 < device_info.charge_efficiency <= 1) or not (0 < device_info.discharge_efficiency <= 1):
+        raise ValueError("battery efficiencies must be between 0 and 1 (inclusive)")
 
     capacity_kwh = device_info.system_battery_capacity_kwh * device_info.battery_state_of_health_percent / 100
-    max_charge_kwh = device_info.inverter_battery_charge_power_kw * theta_hrs   # the maximum amount of energy that can be charged into the battery in this time period
-    max_discharge_kwh = device_info.inverter_battery_discharge_power_kw * theta_hrs
+    max_charge_kwh = min(device_info.inverter_battery_charge_power_kw, device_info.inverter_max_absorption_power_kw) * theta_hrs
+    max_discharge_kwh = min(device_info.inverter_battery_discharge_power_kw, device_info.inverter_max_active_power_kw) * theta_hrs
 
     if capacity_kwh <= 0 or max_charge_kwh < 0 or max_discharge_kwh < 0:
         raise ValueError("battery capacity and charge/discharge limits must be non-negative")
 
-    flows: dict[str, list[Variable]] = {
-        name: []
-        for name in (
-            "solar_to_load",
-            "solar_to_battery",
-            "solar_to_grid",
-            "solar_to_battery_loss",
-            "solar_clipped",
-            "battery_to_load",
-            "battery_to_grid",
-            "battery_to_ac_loss",
-            "grid_to_load",
-            "grid_to_battery",
-            "grid_to_battery_loss",
-        )
-    }
-    battery_level_terms: list[tuple[Variable, float]] = []
+    solar_to_load = cp.Variable(num_time_periods, nonneg=True, name="solar_to_load")
+    solar_to_battery = cp.Variable(num_time_periods, nonneg=True, name="solar_to_battery")
+    solar_to_grid = cp.Variable(num_time_periods, nonneg=True, name="solar_to_grid")
+    solar_clipped = cp.Variable(num_time_periods, nonneg=True, name="solar_clipped")
+    battery_to_load = cp.Variable(num_time_periods, nonneg=True, name="battery_to_load")
+    battery_to_grid = cp.Variable(num_time_periods, nonneg=True, name="battery_to_grid")
+    grid_to_load = cp.Variable(num_time_periods, nonneg=True, name="grid_to_load")
+    grid_to_battery = cp.Variable(num_time_periods, nonneg=True, name="grid_to_battery")
+    battery_charging = cp.Variable(num_time_periods, boolean=True, name="battery_charging")
 
-    # Add each flow for each period; each flow-period pair is a separate LP variable.
-    for period, tp in enumerate(state):
-        for name in flows:
-            flows[name].append(add_variable(name, period, lower=0))
+    charge_loss_factor = 1 / device_info.charge_efficiency - 1
+    discharge_loss_factor = 1 / device_info.discharge_efficiency - 1
 
-    # For each period t, choose energy flows that satisfy:
-    #
-    #   solar_kwh[t] = solar_to_load[t] + solar_to_battery[t]
-    #       + solar_to_battery_loss[t] + solar_to_grid[t] + solar_clipped[t]
-    #
-    #   load_kwh[t] = solar_to_load[t] + battery_to_load[t] + grid_to_load[t]
-    #
-    # Charging flows represent energy stored in the battery; charging losses
-    # are separate energy portions supplied alongside those flows:
-    #
-    #   solar_to_battery_loss[t] = (1 / charge_efficiency - 1) * solar_to_battery[t]
-    #   grid_to_battery_loss[t]  = (1 / charge_efficiency - 1) * grid_to_battery[t]
-    #
-    # Discharge loss is fixed by the discharge efficiency:
-    #
-    #   battery_to_ac_loss[t] = (1 / discharge_efficiency - 1) * (battery_to_load[t] + battery_to_grid[t])
-    #
-    # The battery level is derived from its initial value plus cumulative net
-    # battery flows, and must remain within its reserve and usable capacity:
-    #
-    #   minimum_battery_kwh[t] <= battery_end_kwh[t] <= capacity_kwh
-    #   battery_end_kwh[t] = battery_start_kwh
-    #         + solar_to_battery[t] + grid_to_battery[t]
-    #         - ( battery_to_load[t] + battery_to_grid[t] + battery_to_ac_loss[t] )
-    #
-    # Finally, charging, discharging, and inverter output are capped. The
-    # objective then minimises total import cost minus export revenue across
-    # every period; solar_clipped[t] explicitly accounts for curtailed solar.
-    for period, tp in enumerate(state):
-        solar_to_load = flows["solar_to_load"][period]
-        solar_to_battery = flows["solar_to_battery"][period]
-        solar_to_grid = flows["solar_to_grid"][period]
-        solar_clipped = flows["solar_clipped"][period]
-        battery_to_load = flows["battery_to_load"][period]
-        battery_to_grid = flows["battery_to_grid"][period]
-        grid_to_load = flows["grid_to_load"][period]
-        grid_to_battery = flows["grid_to_battery"][period]
-        solar_to_battery_loss = flows["solar_to_battery_loss"][period]
-        grid_to_battery_loss = flows["grid_to_battery_loss"][period]
-        battery_to_ac_loss = flows["battery_to_ac_loss"][period]
+    solar_to_battery_loss = charge_loss_factor * solar_to_battery
+    grid_to_battery_loss = charge_loss_factor * grid_to_battery
 
-        # Every unit of solar generation has an explicit destination.
-        add_equality(
-            tp.solar_kwh,
-            (solar_to_load, 1),
-            (solar_to_battery, 1),
-            (solar_to_battery_loss, 1),
-            (solar_to_grid, 1),
-            (solar_clipped, 1),
-        )
-        add_equality(
-            tp.load_kwh,
-            (solar_to_load, 1),
-            (battery_to_load, 1),
-            (grid_to_load, 1),
+    battery_to_ac_loss = discharge_loss_factor * (battery_to_load + battery_to_grid)
+
+    constraints = []
+    net_cost_flows = []
+    battery_levels = []
+    battery_level_worth = []
+    battery_level_eop = device_state.battery_kwh
+
+    # Set up the LP problem for each time period
+    for t in range(num_time_periods):
+        starts_at = projection_starts_at + timedelta(minutes=t * config.energy_plan.projection_resolution_mins)
+        ends_at = starts_at + timedelta(minutes=config.energy_plan.projection_resolution_mins)
+        forecast_point = forecast.sum(starts_at, ends_at)
+
+        import_rules, export_rules = tariff_rules_for_timestamp(config.tariffs, starts_at)
+        import_rule = tariff_rule(import_rules, starts_at)
+        limit_battery_export_rate_to_grid_kw = tariff_rule_rate(config.energy_plan.limit_battery_export_rate_to_grid_kw, starts_at,9999)
+
+        solar_kwh = forecast_point.solar_kwh
+        load_kwh = forecast_point.load_kwh
+
+        minimum_battery_kwh = tariff_rule(config.energy_plan.minimum_battery_kwh, starts_at).rate
+        maximum_battery_kwh = min(capacity_kwh, tariff_rule(config.energy_plan.maximum_battery_kwh, starts_at).rate)
+
+        import_rate = import_rule.rate
+        export_rate = tariff_rule(export_rules, starts_at).rate
+
+        battery_level_bop = battery_level_eop
+
+        inverter_flows_dc_to_ac = solar_to_load[t] + solar_to_grid[t] + battery_to_load[t] + battery_to_grid[t]
+        inverter_flows_ac_to_dc = grid_to_battery[t] + grid_to_battery_loss[t]
+
+        constraints += [
+            solar_to_load[t] + solar_to_battery[t] + solar_to_battery_loss[t] + solar_to_grid[t] + solar_clipped[t] == solar_kwh,
+
+            solar_to_load[t] + battery_to_load[t] + grid_to_load[t] == load_kwh,
+
+            solar_to_battery[t] + solar_to_battery_loss[t] + grid_to_battery[t] + grid_to_battery_loss[t] <= max_charge_kwh * battery_charging[t],
+
+            battery_to_load[t] + battery_to_grid[t] <= max_discharge_kwh * (1 - battery_charging[t]),
+
+            # inverter clipping
+            (inverter_flows_dc_to_ac+inverter_flows_ac_to_dc) <= device_info.inverter_max_active_power_kw * theta_hrs,
+
+            grid_to_battery[t] + grid_to_battery_loss[t] <= device_info.inverter_max_absorption_power_kw * theta_hrs,
+            battery_to_grid[t] <= limit_battery_export_rate_to_grid_kw * theta_hrs,
+        ]
+
+        battery_level_eop = battery_level_bop + (
+            (solar_to_battery[t] + grid_to_battery[t])
+            - (battery_to_load[t] + battery_to_grid[t] + battery_to_ac_loss[t])
         )
 
-        # Explicitly account for energy lost during battery charging and discharging.
-        add_equality(
-            0,
-            (solar_to_battery_loss, 1),
-            (solar_to_battery, -(1 / device_info.charge_efficiency - 1)),
-        )
-        add_equality(
-            0,
-            (grid_to_battery_loss, 1),
-            (grid_to_battery, -(1 / device_info.charge_efficiency - 1)),
-        )
-        add_equality(
-            0,
-            (battery_to_ac_loss, 1),
-            (battery_to_load, -(1 / device_info.discharge_efficiency - 1)),
-            (battery_to_grid, -(1 / device_info.discharge_efficiency - 1)),
+        battery_levels.append(battery_level_eop)
+        battery_level_worth.append(battery_level_eop*import_rate*theta_hrs) # We need to scale battery to a euro figure for the optimiser to work, import_rate isnt perfect, as our goal is backup duration rather than profit, but it is likely a decent simplified approach for most tariffs/load patterns
+
+        constraints += [minimum_battery_kwh <= battery_level_eop, battery_level_eop <= maximum_battery_kwh]
+
+        net_cost_flows.append(
+            import_rate * (grid_to_load[t] + grid_to_battery[t] + grid_to_battery_loss[t])
+            - export_rate * (solar_to_grid[t] + battery_to_grid[t])
         )
 
-        # Battery energy is derived from cumulative flows; constrain the derived
-        # level to remain between the configured reserve and usable capacity.
-        battery_level_terms.extend(
-            (variable,coefficient)
-            for variable, coefficient in (
-                (solar_to_battery, 1),
-                (grid_to_battery, 1),
-                (battery_to_load, -1),
-                (battery_to_grid, -1),
-                (battery_to_ac_loss, -1),
-            )
-        )
-        add_inequality(
-            capacity_kwh - device_state.battery_kwh,
-            *[(variable, -coefficient) for variable, coefficient in battery_level_terms],
-        )
-        add_inequality(
-            device_state.battery_kwh - tp.minimum_battery_kwh,
-            *battery_level_terms,
-        )
+        df.loc[t] = {
+            "starts_at": starts_at,
+            "ends_at": ends_at,
+            "tariff_name": cast(str, import_rule.name),
+            "import_rate": import_rate,
+            "export_rate": export_rate,
+            "limit_battery_export_rate_to_grid_kw": limit_battery_export_rate_to_grid_kw,
+            "minimum_battery_kwh": minimum_battery_kwh,
+            "maximum_battery_kwh": maximum_battery_kwh,
+            "load_kwh": load_kwh,
+            "solar_kwh": solar_kwh,
+        }
 
-        add_inequality(
-            max_charge_kwh,
-            (solar_to_battery, 1),
-            (solar_to_battery_loss, 1),
-            (grid_to_battery, 1),
-            (grid_to_battery_loss, 1),
-        )
-        add_inequality(
-            max_discharge_kwh,
-            (battery_to_load, 1),
-            (battery_to_grid, 1),
-        )
+    weights = config.energy_plan.optimisation_weights
 
-        # inverter limit (solar_clipping)
-        add_inequality(
-            device_info.inverter_max_active_power_kw * theta_hrs,
-            (solar_to_load, 1),
-            (solar_to_grid, 1),
-            (battery_to_load, 1),
-            (battery_to_grid, 1),
-        )
+    problem = cp.Problem(cp.Maximize(
+        - cp.sum(net_cost_flows) * weights.maximise_profit
+        + cp.sum(battery_level_worth) * weights.maximise_battery)
+    , constraints)
 
-        add_objective(grid_to_load, tp.import_rate)
-        add_objective(grid_to_battery, tp.import_rate)
-        add_objective(grid_to_battery_loss, tp.import_rate)
-        add_objective(solar_to_grid, -tp.export_rate)
-        add_objective(battery_to_grid, -tp.export_rate)
+    problem.solve(solver=cp.HIGHS)
 
-    objective_vector = np.zeros(len(variables))
-    for variable, coefficient in objective.items():
-        objective_vector[variable_index[variable]] = coefficient
+    if problem.status not in (cp.OPTIMAL, cp.OPTIMAL_INACCURATE):
+        raise ValueError(f"unable to find a feasible energy plan: {problem.status}")
 
-    equality_matrix, equality_values = compile_rows(equalities)
-    inequality_matrix, inequality_values = compile_rows(inequalities)
+    battery_end_values = [level.value for level in battery_levels]
+    df["battery_start_kwh"] = [device_state.battery_kwh,*battery_end_values[:-1]]
+    df["solar_to_load_kwh"] = solar_to_load.value
+    df["solar_to_battery_kwh"] = solar_to_battery.value
+    df["solar_to_battery_loss_kwh"] = solar_to_battery_loss.value
+    df["grid_to_battery_loss_kwh"] = grid_to_battery_loss.value
+    df["solar_to_grid_kwh"] = solar_to_grid.value
+    df["solar_to_inverter_kwh"] = df["solar_to_load_kwh"] + df["solar_to_battery_kwh"] + df["solar_to_battery_loss_kwh"] + df["solar_to_grid_kwh"]
+    df["solar_clipped_kwh"] = solar_clipped.value
+    df["battery_to_load_kwh"] = battery_to_load.value
+    df["battery_to_grid_kwh"] = battery_to_grid.value
+    df["battery_to_inverter_kwh"] = df["battery_to_load_kwh"] + df["battery_to_grid_kwh"]
+    df["battery_to_ac_loss_kwh"] = battery_to_ac_loss.value
+    df["grid_to_load_kwh"] = grid_to_load.value
+    df["grid_to_battery_kwh"] = grid_to_battery.value
+    df["inverter_dc_to_ac_kwh"] = df["solar_to_load_kwh"] + df["solar_to_grid_kwh"] + df["battery_to_load_kwh"] + df["battery_to_grid_kwh"]
+    df["inverter_ac_to_dc_kwh"] = grid_to_battery.value + grid_to_battery_loss.value # type: ignore
+    df["grid_import_kwh"] = grid_to_load.value + grid_to_battery.value + grid_to_battery_loss.value # type: ignore
+    df["grid_export_kwh"] = df["solar_to_grid_kwh"] + df["battery_to_grid_kwh"]
+    df["battery_end_kwh"] = battery_end_values
+    df["battery_charging"] = battery_charging.value
 
-    result = linprog(
-        objective_vector,
-        A_ub=inequality_matrix,
-        b_ub=inequality_values,
-        A_eq=equality_matrix,
-        b_eq=equality_values,
-        bounds=[variable_bounds[variable] for variable in variables],
-        method="highs",
-    )
+    df["import_cost"] = df["grid_import_kwh"] * df["import_rate"]
+    df["export_revenue"] = df["grid_export_kwh"] * df["export_rate"]
+    df["net_cost"] = df["import_cost"] - df["export_revenue"]
 
-    if not result.success:
-        raise ValueError(f"unable to find a feasible energy plan: {result.message}")
+    solar_accounted_kwh = df["solar_to_load_kwh"] + df["solar_to_battery_kwh"] + df["solar_to_battery_loss_kwh"] + df["solar_to_grid_kwh"] + df["solar_clipped_kwh"]
+    load_accounted_kwh = df["solar_to_load_kwh"] + df["battery_to_load_kwh"] + df["grid_to_load_kwh"]
 
-    def value(name: str, period: int) -> float:
-        return result.x[variable_index[flows[name][period]]]
+    solar_balance_error = (df["solar_kwh"] - solar_accounted_kwh).abs()
+    load_balance_error = (df["load_kwh"] - load_accounted_kwh).abs()
+    tolerance_kwh = 0.001
+    if (solar_balance_error > tolerance_kwh).any() or (load_balance_error > tolerance_kwh).any():
+        invalid_periods = df.index[(solar_balance_error > tolerance_kwh) | (load_balance_error > tolerance_kwh)].tolist()
+        raise ValueError(f"energy balance check failed for periods: {invalid_periods}")
 
-    for period, tp in enumerate(state):
-        tp.battery_start_kwh = (
-            device_state.battery_kwh
-            if period == 0
-            else state[period - 1].battery_end_kwh
-        )
-        tp.solar_to_load_kwh = value("solar_to_load", period)
-        tp.solar_to_battery_kwh = value("solar_to_battery", period)
-        tp.solar_to_battery_loss_kwh = value("solar_to_battery_loss", period)
-        tp.grid_to_battery_loss_kwh = value("grid_to_battery_loss", period)
-        tp.solar_to_grid_kwh = value("solar_to_grid", period)
-        tp.solar_to_inverter_kwh = (
-            tp.solar_to_load_kwh
-            + tp.solar_to_battery_kwh
-            + tp.solar_to_battery_loss_kwh
-            + tp.solar_to_grid_kwh
-        )
-        tp.solar_clipped_kwh = value("solar_clipped", period)
-        tp.battery_to_load_kwh = value("battery_to_load", period)
-        tp.battery_to_grid_kwh = value("battery_to_grid", period)
-        tp.battery_to_inverter_kwh = (
-            tp.battery_to_load_kwh + tp.battery_to_grid_kwh
-        )
-        tp.battery_to_ac_loss_kwh = value("battery_to_ac_loss", period)
-        tp.inverter_dc_to_ac_kwh = (
-            tp.solar_to_load_kwh
-            + tp.solar_to_grid_kwh
-            + tp.battery_to_load_kwh
-            + tp.battery_to_grid_kwh
-        )
-        tp.inverter_ac_to_dc_kwh = (
-            value("grid_to_battery", period) + tp.grid_to_battery_loss_kwh
-        )
-        tp.grid_import_kwh = (
-            value("grid_to_load", period)
-            + value("grid_to_battery", period)
-            + tp.grid_to_battery_loss_kwh
-        )
-        tp.grid_export_kwh = (
-            tp.solar_to_grid_kwh + tp.battery_to_grid_kwh
-        )
-        tp.battery_end_kwh = (
-            tp.battery_start_kwh
-            + tp.solar_to_battery_kwh
-            + value("grid_to_battery", period)
-            - tp.battery_to_load_kwh
-            - tp.battery_to_grid_kwh
-            - tp.battery_to_ac_loss_kwh
-        )
-        tp.import_cost = tp.grid_import_kwh * tp.import_rate
-        tp.export_revenue = tp.grid_export_kwh * tp.export_rate
-        tp.net_cost = tp.import_cost - tp.export_revenue
-
-    return state
+    return df

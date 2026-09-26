@@ -105,9 +105,23 @@ forecast:
       peak_kw: 5.225
 
 energy_plan:
-  battery_target_soc_percent: 95
-  battery_minimum_soc_percent: 20
+  num_projection_hours: 24
+  projection_resolution_mins: 15
+
+
+  load_forecast_historical_lookback_window_days: 42
+  load_forecast_historical_lookback_halflife_days: 21
   
+  optimisation_weights:
+    maximise_profit: 0.95
+    maximise_battery: 0.05
+
+  limit_battery_export_rate_to_grid_kw:
+    - days: [Mon, Tue, Wed, Thu, Fri, Sat, Sun]
+      start_time: "00:00"
+      end_time: "24:00"
+      rate: 999
+
   minimum_battery_kwh:
     - days: [Mon, Tue, Wed, Thu, Fri, Sat, Sun]
       name: Night
@@ -128,11 +142,17 @@ energy_plan:
       rate: 2
       comment: Based on a 0.5kw load 2kwh is circa 4hrs
 
+  maximum_battery_kwh:
+    - days: [Mon, Tue, Wed, Thu, Fri, Sat, Sun]
+      start_time: "00:00"
+      end_time: "24:00"
+      rate: 18
+
 additional_device_info:
   charge_efficiency: 0.95
   discharge_efficiency: 0.95
-        
-    
+
+
 
 actuals:
   data_retrival_schedule:

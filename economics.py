@@ -41,6 +41,15 @@ def tariff_rules_for_timestamp(tariffs: TariffsConfig, timestamp: datetime) -> t
             return period.import_, period.export
     raise ValueError(f"no tariff period covers {local_date}")
 
+def tariff_rule_rate(rules: tuple[TariffRule, ...], timestamp: datetime, default_rate: float|None=None) -> float:
+    try:
+        return tariff_rule(rules, timestamp).rate
+    except ValueError:
+        if default_rate is not None:
+            return default_rate
+        else:
+            raise
+
 
 def tariff_rule(rules: tuple[TariffRule, ...], timestamp: datetime) -> TariffRule:
     """Return the matching tariff rule for a local timestamp.

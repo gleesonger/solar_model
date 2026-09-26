@@ -22,8 +22,18 @@ forecast:
 dashboard: {host: 127.0.0.1, port: 8090, actuals_to_forecast: {pv1: 1}}
 additional_device_info: {charge_efficiency: 0.95, discharge_efficiency: 0.95}
 energy_plan:
-  battery_target_soc_percent: 95
-  battery_minimum_soc_percent: 20
+  num_projection_hours: 24
+  projection_resolution_mins: 15
+  load_forecast_historical_lookback_window_days: 42
+  load_forecast_historical_lookback_halflife_days: 21
+  optimisation_weights:
+    maximise_profit: 0.9
+    maximise_battery: 0.1
+  limit_battery_export_rate_to_grid_kw:
+    - days: [Mon, Tue, Wed, Thu, Fri, Sat, Sun]
+      start_time: "00:00"
+      end_time: "24:00"
+      rate: 5.5
   minimum_battery_kwh:
     comment: Retain this much energy for an outage.
     rules:
@@ -31,6 +41,11 @@ energy_plan:
         start_time: "00:00"
         end_time: "24:00"
         rate: 4.5
+  maximum_battery_kwh:
+    - days: [Mon, Tue, Wed, Thu, Fri, Sat, Sun]
+      start_time: "00:00"
+      end_time: "24:00"
+      rate: 18
 tariffs:
   periods:
     - effective_from: "2000-01-01"

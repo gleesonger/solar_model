@@ -4,7 +4,7 @@ import requests
 
 from common import LOGGER, heavy_work, timestamps
 from config import SolarArrayConfig
-from forecast.solar_adjustment import adjust_pending_forecasts
+from forecast.operational_model import refresh_adjusted_forecast
 
 
 def fetch_array(session: requests.Session, array: SolarArrayConfig, endpoint: str, timeout_seconds: float) -> dict:
@@ -32,7 +32,7 @@ def collect_once(session: requests.Session, database, arrays: tuple[SolarArrayCo
     # Adjust only after every array has contributed to the same wide snapshot;
     # the model learns and corrects the combined site PV output.
     try:
-        adjusted = adjust_pending_forecasts(database, collected[0], timezone_name)
+        adjusted = refresh_adjusted_forecast(database, collected[0], timezone_name)
         LOGGER.info("saved %s adjusted solar forecast rows", adjusted)
     except Exception:
         # Raw API data is the important first-class record. A failed model fit

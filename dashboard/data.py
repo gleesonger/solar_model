@@ -101,22 +101,49 @@ def load_day(
     engine = create_engine_for_database(database_path)
     try:
         with Session(engine) as session:
-            forecast_rows = load_forecast_for_day(session, day_start)
-            actual = load_actual_hourly(session, day_start)
-            actual_by_array = load_actual_arrays_hourly(session, day_start, actuals_to_forecast)
+            # This is the immutable, official snapshot selected at the start
+            # of the day.  It supplies both the raw and BoD-adjusted views.
+            bod_forecast_rows = load_forecast_for_day(session, day_start)
+            bod_adjusted_forecast_rows = load_bod_adjusted_forecast_for_day(session, day_start)
+            # This may be a later provider collection, with the intraday
+            # adjustment recalculated at collection time.
+            latest_adjusted_forecast_rows = load_latest_adjusted_forecast_for_day(session, day_start)
+            # Preserve unknown future hours as NaN until the live forecast is
+            # assembled below.  Filling them with zero here would make them
+            # look like observed zero-PV hours.
+            actual = load_actual_hourly(session, day_start, fill_missing=False)
+            actual_by_array = load_actual_arrays_hourly(
+                session, day_start, actuals_to_forecast, fill_missing=False,
+            )
     finally:
         engine.dispose()
 
-    adjusted_forecast = aggregate_forecast(
-        forecast_rows, day_start, forecast_arrays, source="adjusted",
+    latest_adjusted_forecast = aggregate_forecast(
+        latest_adjusted_forecast_rows, day_start, forecast_arrays, source="adjusted",
     )
+    bod_adjusted_forecast = aggregate_forecast(
+        bod_adjusted_forecast_rows, day_start, forecast_arrays, source="adjusted",
+    ).rename(columns={"forecast_total": "forecast_bod_total"})[["hour", "forecast_bod_total"]]
     raw_forecast = aggregate_forecast(
-        forecast_rows, day_start, forecast_arrays, source="raw",
+        bod_forecast_rows, day_start, forecast_arrays, source="raw",
     ).rename(columns={"forecast_total": "forecast_raw_total"})[["hour", "forecast_raw_total"]]
     hourly = (
         actual.merge(actual_by_array, on="hour", how="left")
-        .merge(adjusted_forecast, on="hour", how="left")
+        .merge(latest_adjusted_forecast, on="hour", how="left")
+        .merge(bod_adjusted_forecast, on="hour", how="left")
         .merge(raw_forecast, on="hour", how="left")
+    )
+    # The live forecast is a daily energy estimate.  Completed local hours
+    # always use actuals (including a zero substituted later for an absent
+    # reading); otherwise a missing old actual would incorrectly retain an
+    # old forecast into the evening.  For the still-open hour we use its
+    # partial actual if present, and use forecast only when it is absent.
+    hour_number = pd.to_numeric(hourly["hour"].str.slice(0, 2), errors="coerce")
+    completed = hour_number.lt(now.hour)
+    current_with_actual = hour_number.eq(now.hour) & hourly["solar"].notna()
+    actual_mask = completed | current_with_actual
+    hourly["latest_forecast_total"] = hourly["forecast_total"].where(
+        ~actual_mask, hourly["solar"],
     )
     hourly = allocate_solar_energy_to_arrays(hourly, actuals_to_forecast).fillna(0.0)
     return hourly
@@ -1664,18 +1691,56 @@ def load_device_information(database_path: str) -> list[dict[str, str]]:
 
 
 def load_forecast_for_day(session: Session, day_start: datetime) -> list[ForecastSolarSample]:
-    next_day = day_start + timedelta(days=1)
+    # The operational model deliberately uses one provider snapshot for the
+    # entire local day: the last one available before midnight.
     first_forecast = session.scalar(
         select(ForecastSolarSample.collected_at_utc)
-        .where(ForecastSolarSample.collected_at_utc >= day_start.isoformat())
-        .where(ForecastSolarSample.collected_at_utc < next_day.isoformat())
-        .order_by(ForecastSolarSample.collected_at_utc.asc())
+        .where(ForecastSolarSample.collected_at_utc <= day_start.isoformat())
+        .order_by(ForecastSolarSample.collected_at_utc.desc())
         .limit(1)
     )
     if not first_forecast:
         return []
     return list(session.scalars(
         select(ForecastSolarSample).where(ForecastSolarSample.collected_at_utc == first_forecast)
+    ).all())
+
+
+def load_latest_adjusted_forecast_for_day(session: Session, day_start: datetime) -> list[ForecastSolarSample]:
+    """Return the newest collection snapshot holding adjusted day values."""
+    next_day = day_start + timedelta(days=1)
+    snapshot = session.scalar(
+        select(ForecastSolarSample.collected_at_utc)
+        .where(ForecastSolarSample.collected_at_utc >= day_start.isoformat())
+        .where(ForecastSolarSample.collected_at_utc < next_day.isoformat())
+        .where(ForecastSolarSample.panel_1_adj_watts.is_not(None))
+        .order_by(ForecastSolarSample.collected_at_utc.desc())
+        .limit(1)
+    )
+    if snapshot is None:
+        # Before the first same-day refresh, the official start-of-day row may
+        # already contain the initial adjusted forecast.
+        return load_forecast_for_day(session, day_start)
+    return list(session.scalars(
+        select(ForecastSolarSample).where(ForecastSolarSample.collected_at_utc == snapshot)
+    ).all())
+
+
+def load_bod_adjusted_forecast_for_day(session: Session, day_start: datetime) -> list[ForecastSolarSample]:
+    """Return the first adjusted forecast collected during the local day."""
+    next_day = day_start + timedelta(days=1)
+    snapshot = session.scalar(
+        select(ForecastSolarSample.collected_at_utc)
+        .where(ForecastSolarSample.collected_at_utc >= day_start.isoformat())
+        .where(ForecastSolarSample.collected_at_utc < next_day.isoformat())
+        .where(ForecastSolarSample.panel_1_adj_watt_hours.is_not(None))
+        .order_by(ForecastSolarSample.collected_at_utc.asc())
+        .limit(1)
+    )
+    if snapshot is None:
+        return load_forecast_for_day(session, day_start)
+    return list(session.scalars(
+        select(ForecastSolarSample).where(ForecastSolarSample.collected_at_utc == snapshot)
     ).all())
 
 
@@ -2107,8 +2172,22 @@ def summary_rows(
         "grid_import": float(dataframe_column(data, "grid_import").sum()),
         "grid_export": float(dataframe_column(data, "grid_export").sum()),
     }
+    latest_forecast = {
+        "solar": float(dataframe_column(
+            data, "latest_forecast_total" if "latest_forecast_total" in data else "forecast_total",
+        ).sum()),
+        "battery": None,
+        "inverter": None,
+        "load": None,
+        "grid_import": None,
+        "grid_export": None,
+    }
+    # Retain the existing `forecast` field name for the table/API, but its
+    # definition is explicitly the beginning-of-day adjusted forecast.
     forecast = {
-        "solar": float(dataframe_column(data, "forecast_total").sum()),
+        "solar": float(dataframe_column(
+            data, "forecast_bod_total" if "forecast_bod_total" in data else "forecast_total",
+        ).sum()),
         "battery": None,
         "inverter": None,
         "load": None,
@@ -2129,6 +2208,7 @@ def summary_rows(
             "latest_key": key,
             "latest": format_dashboard_number(latest[key]),
             "today": format_dashboard_number(today[key]),
+            "latest_forecast": format_dashboard_number(latest_forecast[key]),
             "forecast": format_dashboard_number(forecast[key]),
             "forecast_raw": format_dashboard_number(forecast_raw[key]),
         }

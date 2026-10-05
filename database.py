@@ -400,6 +400,38 @@ class SolarDatabase:
                 for name, value in values.items():
                     setattr(row, name, value)
 
+    def save_adjusted_forecasts_bulk(
+        self,
+        values_by_snapshot: dict[str, dict[str, dict[str, float | None]]],
+    ) -> None:
+        """Save several provider snapshots in one transaction.
+
+        This is used only by the historical rebuild.  It deliberately keeps
+        the same field validation as the normal single-snapshot writer.
+        """
+        allowed = {
+            column.name for column in ForecastSolarSample.__table__.columns
+            if "_adj_" in column.name
+        }
+        with self.sessions.begin() as session:
+            for collected_at, values_by_forecast_time in values_by_snapshot.items():
+                if not values_by_forecast_time:
+                    continue
+                for values in values_by_forecast_time.values():
+                    unexpected = set(values) - allowed
+                    if unexpected:
+                        raise ValueError(f"only adjusted forecast fields may be saved: {sorted(unexpected)!r}")
+                rows = session.scalars(select(ForecastSolarSample).where(
+                    ForecastSolarSample.collected_at_utc == collected_at,
+                )).all()
+                rows_by_time = {row.forecast_time: row for row in rows}
+                for forecast_time, values in values_by_forecast_time.items():
+                    row = rows_by_time.get(forecast_time)
+                    if row is None:
+                        raise ValueError("cannot save adjusted forecast for a missing raw forecast row")
+                    for name, value in values.items():
+                        setattr(row, name, value)
+
     def save_modbus_sample(
         self,
         values: dict[str, tuple[float, str, bool]],

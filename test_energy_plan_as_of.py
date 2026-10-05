@@ -50,12 +50,14 @@ def main() -> None:
         device_state = load_battery_state_as_of(database, as_of, device_info)
         LOGGER.info("Loaded battery state")
 
-        forecast = load_forecast_as_of(database, as_of, config)
+        forecast_baseline = load_forecast_as_of(database, as_of, config)
         LOGGER.info("Loaded forecast data")
 
-        LOGGER.info("Solving energy plan")
+        forecasts = create_scenarios(forecast_baseline)
+        LOGGER.info("Created %d forecast scenarios", len(forecasts))
 
-        plan = simulate_energy_plan(device_info, device_state, forecast, config, projection_starts_at=as_of)
+        LOGGER.info("Solving energy plan")
+        plans = simulate_energy_plan(device_info, device_state, list(forecasts.values()), config, projection_starts_at=as_of)
 
         output_timestep_mins = args.output_timestep_min or config.energy_plan.projection_resolution_mins
 
@@ -64,10 +66,9 @@ def main() -> None:
         if output_timestep_mins % config.energy_plan.projection_resolution_mins:
             raise ValueError("--output-timestep-min must be a multiple of the projection resolution")
 
-        plan = group_plan(plan, output_timestep_mins)
-
-        LOGGER.info("Grouped plan into %d-minute periods (%d rows)", output_timestep_mins, len(plan))
-        write_workbook(plan, args.output, as_of)
+        plans = {name: group_plan(plan, output_timestep_mins) for name, plan in plans.items()}
+        LOGGER.info("Grouped %d plans into %d-minute periods", len(plans), output_timestep_mins)
+        write_workbook(plans, args.output, as_of)
     finally:
         database.engine.dispose()
     LOGGER.info("Wrote %s", args.output)
@@ -97,6 +98,51 @@ def group_plan(plan: pd.DataFrame, output_timestep_mins: int) -> pd.DataFrame:
             row[rate_column] = (group[rate_column] * group[volume_column]).sum() / volume if volume else group[rate_column].iloc[0]
         rows.append(row)
     return pd.DataFrame(rows, columns=plan.columns)
+
+
+def create_scenarios(forecast_baseline: ForecastData) -> dict[str, ForecastData]:
+    """Create load_solar scenarios with ±50% totals and high-case timing stress."""
+    solar_half_hours = _half_hour_intervals(forecast_baseline.solar)
+    load_half_hours = _half_hour_intervals(forecast_baseline.load)
+    scenarios = {}
+    for load_name, load_multiplier in (("low", 0.5), ("base", 1.0), ("high", 1.5)):
+        for solar_name, solar_multiplier in (("low", 0.5), ("base", 1.0), ("high", 1.5)):
+            name = "base" if load_name == solar_name == "base" else f"{load_name}_{solar_name}"
+
+            stressed_solar = _scenario_intervals(solar_half_hours, solar_multiplier, (0.25, 0.75) if solar_name == "high" else None)
+            stressed_load =  _scenario_intervals(load_half_hours, load_multiplier, (0.8, 0.2) if load_name == "high" else None)
+            
+            scenarios[name] = ForecastData(name,stressed_solar,stressed_load)
+    return scenarios
+
+
+def _half_hour_intervals(intervals: tuple[ForecastInterval, ...]) -> list[tuple[datetime, float]]:
+    """Sample one forecast series into contiguous half-hour energy intervals without extrapolation."""
+    starts_at = intervals[0].starts_at
+    ends_at = intervals[-1].ends_at
+    if starts_at.minute % 30 or starts_at.second or starts_at.microsecond or (ends_at - starts_at).total_seconds() % (30 * 60):
+        raise ValueError("forecast coverage must start and end on a 30-minute boundary")
+    half_hours = []
+    while starts_at < ends_at:
+        ends_at_half_hour = starts_at + timedelta(minutes=30)
+        half_hours.append((starts_at, ForecastData._sum_intervals(intervals, starts_at, ends_at_half_hour)))
+        starts_at = ends_at_half_hour
+    return half_hours
+
+
+def _scenario_intervals(half_hours: list[tuple[datetime, float]], multiplier: float, stress_split: tuple[float, float] | None) -> list[ForecastInterval]:
+    """Scale each half-hour, or redistribute each pair when a high-case stress split applies."""
+    if len(half_hours) % 2:
+        raise ValueError("forecast coverage must contain whole hours")
+    intervals = []
+    for (first_starts_at, first), (second_starts_at, second) in zip(half_hours[::2], half_hours[1::2]):
+        first_kwh = first * multiplier
+        second_kwh = second * multiplier
+        if stress_split:
+            total_kwh = first_kwh + second_kwh
+            first_kwh, second_kwh = total_kwh * stress_split[0], total_kwh * stress_split[1]
+        intervals.extend((ForecastInterval(first_starts_at, first_starts_at + timedelta(minutes=30), first_kwh), ForecastInterval(second_starts_at, second_starts_at + timedelta(minutes=30), second_kwh)))
+    return intervals
 
 
 def interval_energies(rows: list[ForecastSolarSample], panel_ids: tuple[int, ...], timezone: ZoneInfo, source: str) -> dict[datetime, float] | None:
@@ -193,7 +239,7 @@ def load_forecast_as_of(database: SolarDatabase, as_of: datetime, config: Config
         load.append(ForecastInterval(starts_at, starts_at + timedelta(hours=1), float(expected_load_kwh)))
         starts_at += timedelta(hours=1)
 
-    return ForecastData(solar=solar, load=load)
+    return ForecastData(name="base", solar=solar, load=load)
 
 
 def load_battery_state_as_of(database: SolarDatabase, as_of: datetime, device_info: DeviceInfo) -> DeviceState:
@@ -245,36 +291,39 @@ def load_device_info_as_of(database: SolarDatabase, config: Config, as_of: datet
     return DeviceInfo(**{name: latest[name] for name in DeviceInfo.__dataclass_fields__})
 
 
-def write_workbook(plan: pd.DataFrame, output: Path, as_of: datetime) -> None:
-    """Write the plan with useful Excel formatting and a summary sheet."""
-    plan = plan.copy()
-    for column in ("starts_at", "ends_at"):
-        plan[column] = pd.to_datetime(plan[column]).dt.tz_localize(None)
-    summary = pd.DataFrame({"item": ["As of", "Periods", "Total import cost", "Total export revenue", "Total net cost"], "value": [as_of.isoformat(), len(plan), plan["import_cost"].sum(), plan["export_revenue"].sum(), plan["net_cost"].sum()]})
+def write_workbook(plans: dict[str, pd.DataFrame], output: Path, as_of: datetime) -> None:
+    """Write one plan worksheet per scenario and a side-by-side summary."""
+    summary = pd.DataFrame({name: {"As of": as_of.isoformat(), "Periods": len(plan), "Total import cost": plan["import_cost"].sum(), "Total export revenue": plan["export_revenue"].sum(), "Total net cost": plan["net_cost"].sum()} for name, plan in plans.items()}).rename_axis("item").reset_index()
     with pd.ExcelWriter(output, engine="xlsxwriter", datetime_format="yyyy-mm-dd hh:mm") as writer:
         summary.to_excel(writer, sheet_name="Summary", index=False)
-        plan.to_excel(writer, sheet_name="Plan", index=False)
         workbook = writer.book
         summary_sheet = writer.sheets["Summary"]
-        plan_sheet = writer.sheets["Plan"]
         summary_sheet.set_zoom(80)
-        plan_sheet.set_zoom(80)
         money_format = workbook.add_format({"num_format": '€#,##0.00'})
         energy_format = workbook.add_format({"num_format": "0.000"})
         summary_sheet.set_column("A:A", 24)
-        summary_sheet.set_column("B:B", 24, money_format)
+        summary_sheet.set_column(1, len(plans), 24)
         summary_sheet.set_row(0, None, workbook.add_format({"bold": True, "bg_color": "#D9EAF7"}))
-        plan_sheet.freeze_panes(1, 0)
-        plan_sheet.add_table(0, 0, len(plan), len(plan.columns) - 1, {"columns": [{"header": column} for column in plan.columns], "style": "Table Style Medium 2"})
-        for column_number, column in enumerate(plan.columns):
-            width = max(len(column), min(24, int(plan[column].astype(str).str.len().max()) + 2))
-            plan_sheet.set_column(column_number, column_number, width)
-        for column in plan.columns:
-            if column.endswith("_kwh"):
-                plan_sheet.set_column(plan.columns.get_loc(column), plan.columns.get_loc(column), 14, energy_format)
-            elif column in {"import_rate", "export_rate", "import_cost", "export_revenue", "net_cost"}:
-                plan_sheet.set_column(plan.columns.get_loc(column), plan.columns.get_loc(column), 14, money_format)
-        plan_sheet.conditional_format(1, plan.columns.get_loc("net_cost"), len(plan), plan.columns.get_loc("net_cost"), {"type": "3_color_scale", "min_color": "#C6EFCE", "mid_color": "#FFEB9C", "max_color": "#FFC7CE"})
+        for row in range(3, 6):
+            summary_sheet.set_row(row, None, money_format)
+        for name, plan in plans.items():
+            plan = plan.copy()
+            for column in ("starts_at", "ends_at"):
+                plan[column] = pd.to_datetime(plan[column]).dt.tz_localize(None)
+            plan.to_excel(writer, sheet_name=name, index=False)
+            plan_sheet = writer.sheets[name]
+            plan_sheet.set_zoom(80)
+            plan_sheet.freeze_panes(1, 0)
+            plan_sheet.add_table(0, 0, len(plan), len(plan.columns) - 1, {"columns": [{"header": column} for column in plan.columns], "style": "Table Style Medium 2"})
+            for column_number, column in enumerate(plan.columns):
+                width = max(len(column), min(24, int(plan[column].astype(str).str.len().max()) + 2))
+                plan_sheet.set_column(column_number, column_number, width)
+            for column in plan.columns:
+                if column.endswith("_kwh"):
+                    plan_sheet.set_column(plan.columns.get_loc(column), plan.columns.get_loc(column), 14, energy_format)
+                elif column in {"import_rate", "export_rate", "import_cost", "export_revenue", "net_cost"}:
+                    plan_sheet.set_column(plan.columns.get_loc(column), plan.columns.get_loc(column), 14, money_format)
+            plan_sheet.conditional_format(1, plan.columns.get_loc("net_cost"), len(plan), plan.columns.get_loc("net_cost"), {"type": "3_color_scale", "min_color": "#C6EFCE", "mid_color": "#FFEB9C", "max_color": "#FFC7CE"})
 
 if __name__ == "__main__":
     main()

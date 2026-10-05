@@ -72,3 +72,24 @@ def test_summary_rows_exposes_adjusted_forecast_and_raw_forecast_separately() ->
 
     assert solar_row["forecast"] == "2.0"
     assert solar_row["forecast_raw"] == "1.0"
+
+
+def test_summary_rows_exposes_live_forecast_blended_from_actuals_and_latest_forecast() -> None:
+    frame = pd.DataFrame({
+        "solar": [1.0, float("nan")],
+        "battery": [0.0, 0.0],
+        "load": [0.0, 0.0],
+        "grid_import": [0.0, 0.0],
+        "grid_export": [0.0, 0.0],
+        "forecast_total": [3.0, 2.0],
+        "forecast_bod_total": [4.0, 3.0],
+        "forecast_raw_total": [5.0, 4.0],
+        "latest_forecast_total": [1.0, 2.0],
+    })
+    latest = {key: 0.0 for key in data.SUMMARY_LATEST_KEYS.values()}
+
+    solar_row = next(row for row in data.summary_rows(frame, latest) if row["metric"] == "Solar")
+
+    assert solar_row["latest_forecast"] == "3.0"
+    assert solar_row["forecast"] == "7.0"
+    assert solar_row["forecast_raw"] == "9.0"

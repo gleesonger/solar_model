@@ -53,13 +53,15 @@ The arrays are parameterized in `config.yaml`:
 
 The API returns cumulative `watt_hours` values for forecast timestamps and daily totals. Forecast.Solar public access may return hourly data; 15-minute data depends on the account plan.
 
-Forecast rows retain the provider response as `panel_n_raw_*` and store the calibrated result as `panel_n_adj_*`. Opening a database upgrades the older unqualified forecast columns to the raw names and adds the adjusted columns without changing raw values. To populate adjusted values for existing forecasts, run the resumable one-off backfill; subsequent runs process only rows that remain unadjusted:
+Forecast rows retain the provider response as `panel_n_raw_*` and store the operational forecast as `panel_n_adj_*`. Raw values are never changed. The operational forecast uses the final provider snapshot available before local midnight for the entire day, applies a system scalar per UTC hour calibrated from the preceding eight weeks with a three-week (21-day) half-life, then applies an intraday normal-score residual from completed PV observations (one-hour half-life). Each hourly provider collection stores its own adjusted snapshot; the dashboard shows start-of-day raw values and the newest adjusted values. The residual only changes future target hours.
+
+To replace legacy adjusted values historically without changing the schema or raw data, run the chronological rebuild. It clears previous adjusted values and writes the revised series to each replayed collection snapshot; `--apply` is required because this changes the database:
 
 ```powershell
-python -m forecast.solar_adjustment --database solar.db
+python -m forecast.rebuild_operational_adjusted_forecasts --database solar.db --start 2026-08-22 --end 2026-10-04 --apply
 ```
 
-Each live forecast collection fits the adjustment model from the prior two months of completed snapshots, with a three-week exponential recency half-life. It excludes the current local day's outcomes from fitting, but uses the last one and three hours of available inverter PV interval energy when adjusting the newly collected forecast.
+`--start` and `--end` are optional. With neither supplied, the script rebuilds from the earliest available forecast target through the latest available actual; supplying only one bound infers the other.
 
 Compare raw and adjusted forecast power against actual plant PV output with the read-only performance report. It reports MAE, RMSE, bias, and MAE improvement overall and by forecast lead time. Use `--date` to test one local target day:
 

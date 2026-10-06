@@ -160,12 +160,13 @@ def calculate_adjusted_forecast(
     actuals: pd.DataFrame,
     as_of: datetime | str | pd.Timestamp,
     timezone_name: str = "Europe/Dublin",
+    target_day: date | None = None,
 ) -> tuple[pd.Timestamp, dict[str, dict[str, float]]] | None:
     """Calculate one provider snapshot's adjusted values without writing them."""
     as_of = pd.Timestamp(as_of)
     as_of = as_of.tz_localize("UTC") if as_of.tzinfo is None else as_of.tz_convert("UTC")
     timezone = ZoneInfo(timezone_name)
-    day = as_of.tz_convert(timezone).date()
+    day = target_day or as_of.tz_convert(timezone).date()
     official = _official_day_frame(forecasts, actuals, day, timezone)
     if official is None:
         return None
@@ -181,8 +182,14 @@ def calculate_adjusted_forecast(
     cutoff = as_of.floor("h")
     past = frame[(frame.target_hour >= day_start) & (frame.target_hour < cutoff)].copy()
     past["baseline_kw"] = _interpolate(scalars, past.target) * past.raw_total_kw
-    residual, strength, _ = _today_residual(past, distributions, as_of)
-    source_future = frame[frame.target_hour >= cutoff]
+    if as_of < day_start:
+        # No observations exist for a future target day.  Do not let an
+        # intraday residual alter its calibrated raw forecast.
+        residual, strength = 0.0, 0.0
+    else:
+        residual, strength, _ = _today_residual(past, distributions, as_of)
+    first_target = max(cutoff, day_start)
+    source_future = frame[frame.target_hour >= first_target]
     source_values = _prediction_fields(source_future, scalars, distributions, residual, strength)
     fields_by_hour = {
         row.target_hour: source_values[int(row.target.timestamp())]
@@ -190,7 +197,7 @@ def calculate_adjusted_forecast(
     }
     current_rows = forecasts[
         (forecasts.snapshot == current_snapshot)
-        & (forecasts.target_hour >= cutoff)
+        & (forecasts.target_hour >= first_target)
         & (forecasts.target_hour < day_end)
     ]
     values = {
@@ -277,12 +284,24 @@ def refresh_adjusted_forecast(database, as_of: datetime | str | pd.Timestamp, ti
     but every collection retains its own adjusted output for auditability.
     """
     forecasts, actuals = load_operational_inputs(database)
-    calculated = calculate_adjusted_forecast(
-        forecasts, actuals, as_of, timezone_name,
-    )
-    if calculated is None:
+    timestamp = pd.Timestamp(as_of)
+    timestamp = timestamp.tz_localize("UTC") if timestamp.tzinfo is None else timestamp.tz_convert("UTC")
+    available = forecasts[forecasts.snapshot <= timestamp]
+    if available.empty:
         return 0
-    current_snapshot, values = calculated
+    current_snapshot = available.snapshot.max()
+    timezone = ZoneInfo(timezone_name)
+    rows = forecasts[forecasts.snapshot == current_snapshot]
+    values: dict[str, dict[str, float]] = {}
+    for target_day in sorted(rows.target_hour.dt.tz_convert(timezone).dt.date.unique()):
+        calculated = calculate_adjusted_forecast(
+            forecasts, actuals, timestamp, timezone_name, target_day=target_day,
+        )
+        if calculated is not None:
+            _, target_values = calculated
+            values.update(target_values)
+    if not values:
+        return 0
     database.save_adjusted_forecasts(current_snapshot.isoformat(), values)
-    _recalculate_energy(database, current_snapshot, ZoneInfo(timezone_name))
+    _recalculate_energy(database, current_snapshot, timezone)
     return len(values)

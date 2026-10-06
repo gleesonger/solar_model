@@ -35,8 +35,8 @@ def test_aggregate_forecast_selects_requested_raw_or_adjusted_series() -> None:
     adjusted = data.aggregate_forecast([row], day_start, (ARRAY,), source="adjusted")
     raw = data.aggregate_forecast([row], day_start, (ARRAY,), source="raw")
 
-    assert adjusted.loc[adjusted["hour"] == "00:00", "forecast_total"].item() == 2.0
-    assert raw.loc[raw["hour"] == "00:00", "forecast_total"].item() == 1.0
+    assert adjusted.loc[adjusted["hour"] == "01:00", "forecast_total"].item() == 2.0
+    assert raw.loc[raw["hour"] == "01:00", "forecast_total"].item() == 1.0
 
 
 def test_aggregate_forecast_rejects_an_implicit_unknown_source() -> None:

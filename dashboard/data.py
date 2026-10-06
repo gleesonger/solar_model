@@ -1281,16 +1281,21 @@ def load_daily_energy_frames(
             actual_by_array = hours.assign(
                 **{column: float("nan") for column in actual_columns}
             )
-        forecast_rows = (
+        raw_forecast_rows = (
             load_forecast_for_day(session, day_start)
             if selected_date_text in forecast_dates
             else []
         )
+        adjusted_forecast_rows = (
+            load_bod_adjusted_forecast_for_day(session, day_start)
+            if selected_date_text in forecast_dates
+            else []
+        )
         forecast = aggregate_forecast(
-            forecast_rows, day_start, forecast_arrays, fill_missing=False, source="adjusted",
+            adjusted_forecast_rows, day_start, forecast_arrays, fill_missing=False, source="adjusted",
         )
         raw_forecast = aggregate_forecast(
-            forecast_rows, day_start, forecast_arrays, fill_missing=False, source="raw",
+            raw_forecast_rows, day_start, forecast_arrays, fill_missing=False, source="raw",
         ).rename(columns={"forecast_total": "forecast_raw_total"})[["hour", "forecast_raw_total"]]
         day = (
             actual.merge(actual_by_array, on="hour", how="left")
@@ -2045,9 +2050,11 @@ def aggregate_forecast(
         .clip(lower=0)
         .div(1000)
     )
-    frame["hour"] = frame["timestamp"].map(
-        lambda value: format_hour(value - timedelta(microseconds=1), day_start)
-    )
+    # Forecast.Solar timestamps label the start of the predicted hour, the
+    # same convention used by the hourly actual rollup.  Do not shift the
+    # forecast into the preceding local hour (which is especially visible
+    # around sunset and during DST).
+    frame["hour"] = frame["timestamp"].map(lambda value: format_hour(value, day_start))
     frame = frame.dropna(subset=["hour"])
     grouped = frame.pivot_table(index="hour", columns="panel_id", values="energy_kwh", aggfunc="sum", fill_value=0).reset_index()
     grouped = grouped.rename(columns={

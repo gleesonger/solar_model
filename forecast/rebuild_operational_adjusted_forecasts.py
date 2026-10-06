@@ -54,7 +54,7 @@ def _print_progress(completed: int, total: int, local_day: date, updates: int) -
     filled = round(width * fraction)
     bar = "#" * filled + "-" * (width - filled)
     print(
-        f"\rReplaying [{bar}] {completed}/{total} hours ({fraction:.0%}) "
+        f"\rReplaying [{bar}] {completed}/{total} snapshots ({fraction:.0%}) "
         f"day {local_day} | {updates} target updates",
         end="",
         file=sys.stderr,
@@ -105,14 +105,19 @@ def main() -> None:
             )
         count = 0
         local_days = list(pd.date_range(start, end, freq="D").date)
-        total_hours = len(local_days) * 24
-        completed_hours = 0
+        forecasts["snapshot_local_date"] = forecasts.snapshot.dt.tz_convert(timezone).dt.date
+        snapshots_by_day = {
+            local_day: sorted(forecasts.loc[
+                forecasts.snapshot_local_date == local_day, "snapshot"
+            ].unique())
+            for local_day in local_days
+        }
+        total_snapshots = sum(len(snapshots) for snapshots in snapshots_by_day.values())
+        completed_snapshots = 0
         for local_day in local_days:
-            day_start = pd.Timestamp(local_day, tz=timezone)
-            day_end = day_start + pd.DateOffset(days=1)
             updates_by_snapshot: dict[str, dict[str, dict[str, float]]] = {}
             snapshots: dict[str, pd.Timestamp] = {}
-            for as_of in pd.date_range(day_start, day_end, freq="h", inclusive="left"):
+            for as_of in snapshots_by_day[local_day]:
                 calculated = calculate_adjusted_forecast(
                     forecasts, actuals, as_of, args.timezone,
                 )
@@ -124,8 +129,8 @@ def main() -> None:
                     # values for the same forecast target within a snapshot.
                     updates_by_snapshot.setdefault(snapshot_key, {}).update(values)
                     count += len(values)
-                completed_hours += 1
-                _print_progress(completed_hours, total_hours, local_day, count)
+                completed_snapshots += 1
+                _print_progress(completed_snapshots, total_snapshots, local_day, count)
             for snapshot_key, watt_updates in updates_by_snapshot.items():
                 updates_by_snapshot[snapshot_key] = add_adjusted_energy_values(
                     forecasts, snapshots[snapshot_key], local_day, timezone, watt_updates,

@@ -217,7 +217,7 @@ class RecentTab:
         label = self.elements.live_status_label
         if label is None:
             return
-        label.classes(replace="text-sm mt-1")
+        label.classes(replace="live-data-freshness text-sm mt-1")
         label.props(add=(
             f'data-last-live-update="{collected_at_utc or ""}" '
             'data-stale-after-seconds="900"'

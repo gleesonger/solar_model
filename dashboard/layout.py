@@ -224,5 +224,31 @@ def render_dashboard_styles() -> None:
 
             updateDashboardFreshness();
             setInterval(updateDashboardFreshness, 1000);
+
+            function wireLiveUpdateIndicators() {
+                document.querySelectorAll('.live-update-indicator').forEach((indicator) => {
+                    if (indicator.dataset.liveUpdateWired === 'true') return;
+                    indicator.dataset.liveUpdateWired = 'true';
+                    const message = indicator.parentElement.querySelector('.live-update-message');
+                    let timeoutId;
+                    const activate = () => {
+                        indicator.classList.remove('hidden');
+                        message?.classList.add('hidden');
+                        window.clearTimeout(timeoutId);
+                        timeoutId = window.setTimeout(() => {
+                            indicator.classList.add('hidden');
+                            message?.classList.remove('hidden');
+                        }, 3000);
+                    };
+                    new MutationObserver((mutations) => {
+                        if (mutations.some((mutation) => mutation.attributeName === 'data-live-update-sequence')) {
+                            activate();
+                        }
+                    }).observe(indicator, {attributes: true, attributeFilter: ['data-live-update-sequence']});
+                });
+            }
+
+            wireLiveUpdateIndicators();
+            setInterval(wireLiveUpdateIndicators, 500);
         </script>
     """)

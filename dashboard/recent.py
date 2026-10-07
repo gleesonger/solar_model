@@ -50,11 +50,10 @@ class RecentTab:
         with ui.row().classes("items-center gap-1"):
             ui.label("Live / Today").classes("text-base font-semibold")
             self.elements.live_update_indicator = ui.spinner("dots", size="0.8rem").classes(
-                "text-slate-400"
+                "live-update-indicator hidden text-slate-400"
             ).tooltip("Live table updated")
-            self.elements.live_update_indicator.set_visibility(False)
             self.elements.live_update_message = ui.label("Waiting for live update…").classes(
-                "text-xs text-slate-400"
+                "live-update-message text-xs text-slate-400"
             )
 
         self.elements.battery_status_label = ui.label(
@@ -178,20 +177,10 @@ class RecentTab:
         indicator = self.elements.live_update_indicator
         if indicator is None:
             return
-        message = self.elements.live_update_message
         self._live_update_flash_id += 1
-        flash_id = self._live_update_flash_id
-        indicator.set_visibility(True)
-        if message is not None:
-            message.set_visibility(False)
-
-        def hide_if_current() -> None:
-            if flash_id == self._live_update_flash_id:
-                indicator.set_visibility(False)
-                if message is not None:
-                    message.set_visibility(True)
-
-        ui.timer(3.0, hide_if_current, once=True)
+        # The browser observes this attribute and owns the three-second
+        # timeout.  No server timer can remain queued after a newer sample.
+        indicator.props(add=f'data-live-update-sequence="{self._live_update_flash_id}"')
 
     def _apply_live_today_meters(self, live_power: LivePowerData) -> None:
         direct_values = {

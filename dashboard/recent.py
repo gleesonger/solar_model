@@ -50,8 +50,8 @@ class RecentTab:
         with ui.row().classes("items-center gap-1"):
             ui.label("Live / Today").classes("text-base font-semibold")
             self.elements.live_update_indicator = ui.spinner("dots", size="0.8rem").classes(
-                "live-update-indicator hidden text-slate-400"
-            ).tooltip("Live table updated")
+                "live-update-indicator text-slate-400"
+            ).style("display: none").tooltip("Live table updated")
             self.elements.live_update_message = ui.label("Waiting for live update…").classes(
                 "live-update-message text-xs text-slate-400"
             )

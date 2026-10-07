@@ -232,12 +232,12 @@ def render_dashboard_styles() -> None:
                     const message = indicator.parentElement.querySelector('.live-update-message');
                     let timeoutId;
                     const activate = () => {
-                        indicator.classList.remove('hidden');
-                        message?.classList.add('hidden');
+                        indicator.style.display = 'inline-flex';
+                        if (message) message.style.display = 'none';
                         window.clearTimeout(timeoutId);
                         timeoutId = window.setTimeout(() => {
-                            indicator.classList.add('hidden');
-                            message?.classList.remove('hidden');
+                            indicator.style.display = 'none';
+                            if (message) message.style.display = '';
                         }, 3000);
                     };
                     new MutationObserver((mutations) => {

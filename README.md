@@ -8,6 +8,16 @@ python docker_start.py
 
 Use this launcher when using the dashboard Control tab: it is what allows tariff recalculation to restart the entire application and reload `config.yaml` for both processes. `main_data_collection.py` and `main_dashboard.py` may still be launched independently for development, but the Control tab cannot restart an independently launched collector.
 
+When building the Docker image, pass the checked-out Git commit metadata so the System Info tab identifies the running build:
+
+```powershell
+docker build `
+  --build-arg GIT_COMMIT_ID="$(git rev-parse --short=12 HEAD)" `
+  --build-arg GIT_COMMIT_DATE="$(git log -1 --format=%cI)" `
+  --build-arg GIT_COMMIT_MESSAGE="$(git log -1 --format=%s)" `
+  -t solar-model .
+```
+
 `main_data_collection.py` synchronizes to the next wall-clock minute, runs Modbus first every minute, and runs Forecast.Solar at its configured interval when due. A failed interval is logged and skipped. The collector modules expose one-pass functions and are not standalone schedulers.
 
 The dashboard runs a lightweight background collector for the `Latest (kW)` column. It reads the configured plant power values and mapped PV-string power values at the live interval, retaining only the newest successful result in memory.

@@ -248,7 +248,7 @@ def render_dashboard_styles() -> None:
                         }, 3000);
                     };
                     window.setInterval(() => {
-                        const timestamp = document.querySelector('.live-data-freshness')?.dataset.lastLiveUpdate || '';
+                        const timestamp = document.querySelector('.live-update-signal')?.textContent || '';
                         if (previousTimestamp === undefined) {
                             previousTimestamp = timestamp;
                             return;

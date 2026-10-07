@@ -54,6 +54,9 @@ class RecentTab:
             self.elements.live_update_message = ui.label("Waiting for live update…").classes(
                 "live-update-message text-xs text-slate-400"
             )
+            self.elements.live_update_signal = ui.label(live_power.collected_at_utc or "").classes("live-update-signal").style(
+                "display: none"
+            )
 
         self.elements.battery_status_label = ui.label(
             self._battery_status_text(live_power)
@@ -222,6 +225,8 @@ class RecentTab:
             f'data-last-live-update="{collected_at_utc or ""}" '
             'data-stale-after-seconds="900"'
         ))
+        if self.elements.live_update_signal is not None:
+            self.elements.live_update_signal.set_text(collected_at_utc or "")
         if collected_at_utc is None:
             label.set_text("")
             label.set_visibility(False)

@@ -85,6 +85,7 @@ class DashboardElements:
     live_status_label: Label | None = None
     live_update_indicator: Spinner | None = None
     live_update_message: Label | None = None
+    live_update_signal: Label | None = None
     updated_at_label: Label | None = None
     full_updated_last_local: str | None = None
     live_timestamp: str | None = None

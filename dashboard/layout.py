@@ -225,43 +225,19 @@ def render_dashboard_styles() -> None:
             updateDashboardFreshness();
             setInterval(updateDashboardFreshness, 1000);
 
-            function wireLiveUpdateIndicators() {
-                document.querySelectorAll('.live-update-indicator').forEach((indicator) => {
-                    if (indicator.dataset.liveUpdateWired === 'true') return;
-                    indicator.dataset.liveUpdateWired = 'true';
-                    const message = indicator.parentElement.querySelector('.live-update-message');
-                    let previousTimestamp;
-                    const state = {active: false, idleTimer: null};
-                    const recordUpdate = () => {
-                        state.lastUpdated = Date.now();
-                        if (!state.active) {
-                            state.active = true;
-                            indicator.style.display = 'inline-flex';
-                            if (message) message.style.display = 'none';
-                        }
-                        window.clearTimeout(state.idleTimer);
-                        state.idleTimer = window.setTimeout(() => {
-                            state.active = false;
-                            state.idleTimer = null;
-                            indicator.style.display = 'none';
-                            if (message) message.style.display = '';
-                        }, 3000);
-                    };
-                    window.setInterval(() => {
-                        const timestamp = document.querySelector('.live-update-signal')?.textContent || '';
-                        if (previousTimestamp === undefined) {
-                            previousTimestamp = timestamp;
-                            return;
-                        }
-                        if (timestamp && timestamp !== previousTimestamp) {
-                            previousTimestamp = timestamp;
-                            recordUpdate();
-                        }
-                    }, 250);
-                });
-            }
+            window.flashLiveUpdateIndicator = () => {
+                const indicator = document.querySelector('.live-update-indicator');
+                const message = document.querySelector('.live-update-message');
+                if (!indicator) return;
 
-            wireLiveUpdateIndicators();
-            setInterval(wireLiveUpdateIndicators, 500);
+                indicator.style.display = 'inline-flex';
+                if (message) message.style.display = 'none';
+                window.clearTimeout(window.liveUpdateIdleTimer);
+                window.liveUpdateIdleTimer = window.setTimeout(() => {
+                    indicator.style.display = 'none';
+                    if (message) message.style.display = '';
+                    window.liveUpdateIdleTimer = null;
+                }, 3000);
+            };
         </script>
     """)

@@ -54,9 +54,6 @@ class RecentTab:
             self.elements.live_update_message = ui.label("Waiting for live update…").classes(
                 "live-update-message text-xs text-slate-400"
             )
-            self.elements.live_update_signal = ui.label(live_power.collected_at_utc or "").classes("live-update-signal").style(
-                "display: none"
-            )
 
         self.elements.battery_status_label = ui.label(
             self._battery_status_text(live_power)
@@ -117,6 +114,7 @@ class RecentTab:
             self.elements.live_timestamp = live_power.collected_at_utc
             if self.elements.battery_status_label is not None:
                 self.elements.battery_status_label.set_text(self._battery_status_text(live_power))
+            self._show_live_update_indicator()
         self._update_live_status(live_power.collected_at_utc)
         self._set_full_updated_timestamp(self.elements.full_updated_last_local)
 
@@ -225,8 +223,6 @@ class RecentTab:
             f'data-last-live-update="{collected_at_utc or ""}" '
             'data-stale-after-seconds="900"'
         ))
-        if self.elements.live_update_signal is not None:
-            self.elements.live_update_signal.set_text(collected_at_utc or "")
         if collected_at_utc is None:
             label.set_text("")
             label.set_visibility(False)
@@ -243,6 +239,12 @@ class RecentTab:
             return
         label.set_text("")
         label.set_visibility(False)
+
+    def _show_live_update_indicator(self) -> None:
+        """Tell this browser that a new live reading was applied."""
+        indicator = self.elements.live_update_indicator
+        if indicator is not None:
+            indicator.client.run_javascript("window.flashLiveUpdateIndicator?.()")
 
 
 def render_live_today_table(

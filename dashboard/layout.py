@@ -231,6 +231,7 @@ def render_dashboard_styles() -> None:
                     indicator.dataset.liveUpdateWired = 'true';
                     const message = indicator.parentElement.querySelector('.live-update-message');
                     let timeoutId;
+                    let previousTimestamp;
                     const activate = () => {
                         indicator.style.display = 'inline-flex';
                         if (message) message.style.display = 'none';
@@ -240,11 +241,17 @@ def render_dashboard_styles() -> None:
                             if (message) message.style.display = '';
                         }, 3000);
                     };
-                    new MutationObserver((mutations) => {
-                        if (mutations.some((mutation) => mutation.attributeName === 'data-live-update-sequence')) {
+                    window.setInterval(() => {
+                        const timestamp = document.querySelector('.live-data-freshness')?.dataset.lastLiveUpdate || '';
+                        if (previousTimestamp === undefined) {
+                            previousTimestamp = timestamp;
+                            return;
+                        }
+                        if (timestamp && timestamp !== previousTimestamp) {
+                            previousTimestamp = timestamp;
                             activate();
                         }
-                    }).observe(indicator, {attributes: true, attributeFilter: ['data-live-update-sequence']});
+                    }, 250);
                 });
             }
 

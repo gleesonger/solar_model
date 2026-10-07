@@ -33,7 +33,6 @@ class RecentTab:
         self.timezone = ZoneInfo(config.timezone)
         self._today_values: dict[str, float | None] = {}
         self._previous_live_for_today: LivePowerData | None = None
-        self._live_update_flash_id = 0
 
     def render_recent_tab(self, loaded_data: RecentData) -> None:
         try:
@@ -113,7 +112,6 @@ class RecentTab:
             self._advance_today_values(live_power)
             self._update_live_table_rows(live_power)
             self.elements.live_timestamp = live_power.collected_at_utc
-            self._flash_live_update_indicator()
             if self.elements.battery_status_label is not None:
                 self.elements.battery_status_label.set_text(self._battery_status_text(live_power))
         self._update_live_status(live_power.collected_at_utc)
@@ -171,16 +169,6 @@ class RecentTab:
                 row["today"] = data.format_dashboard_number(self._today_values[metric])
             rows.append(row)
         table.rows = rows
-
-    def _flash_live_update_indicator(self) -> None:
-        """Briefly show the live-update indicator for a received telemetry sample."""
-        indicator = self.elements.live_update_indicator
-        if indicator is None:
-            return
-        self._live_update_flash_id += 1
-        # The browser observes this attribute and owns the three-second
-        # timeout.  No server timer can remain queued after a newer sample.
-        indicator.props(add=f'data-live-update-sequence="{self._live_update_flash_id}"')
 
     def _apply_live_today_meters(self, live_power: LivePowerData) -> None:
         direct_values = {

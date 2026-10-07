@@ -5,6 +5,7 @@ from datetime import date
 import pandas as pd
 from nicegui.elements.echart import EChart
 from nicegui.elements.label import Label
+from nicegui.elements.spinner import Spinner
 from nicegui.elements.table import Table
 
 from .chart_display import ChartDataDisplay
@@ -82,6 +83,8 @@ class DashboardElements:
     recent_daily_table: Table | None = None
     recent_monthly_table: Table | None = None
     live_status_label: Label | None = None
+    live_update_indicator: Spinner | None = None
+    live_update_message: Label | None = None
     updated_at_label: Label | None = None
     full_updated_last_local: str | None = None
     live_timestamp: str | None = None

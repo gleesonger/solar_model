@@ -33,6 +33,7 @@ class RecentTab:
         self.timezone = ZoneInfo(config.timezone)
         self._today_values: dict[str, float | None] = {}
         self._previous_live_for_today: LivePowerData | None = None
+        self._live_update_flash_id = 0
 
     def render_recent_tab(self, loaded_data: RecentData) -> None:
         try:
@@ -43,10 +44,18 @@ class RecentTab:
             return
 
 
-        self.elements.live_status_label = ui.label().classes("text-sm mt-1")
+        self.elements.live_status_label = ui.label().classes("live-data-freshness text-sm mt-1")
         self._update_live_status(live_power.collected_at_utc)
 
-        ui.label("Live / Today").classes("text-base font-semibold")
+        with ui.row().classes("items-center gap-1"):
+            ui.label("Live / Today").classes("text-base font-semibold")
+            self.elements.live_update_indicator = ui.spinner("dots", size="0.8rem").classes(
+                "text-slate-400"
+            ).tooltip("Live table updated")
+            self.elements.live_update_indicator.set_visibility(False)
+            self.elements.live_update_message = ui.label("Waiting for live update…").classes(
+                "text-xs text-slate-400"
+            )
 
         self.elements.battery_status_label = ui.label(
             self._battery_status_text(live_power)
@@ -105,6 +114,7 @@ class RecentTab:
             self._advance_today_values(live_power)
             self._update_live_table_rows(live_power)
             self.elements.live_timestamp = live_power.collected_at_utc
+            self._flash_live_update_indicator()
             if self.elements.battery_status_label is not None:
                 self.elements.battery_status_label.set_text(self._battery_status_text(live_power))
         self._update_live_status(live_power.collected_at_utc)
@@ -163,6 +173,26 @@ class RecentTab:
             rows.append(row)
         table.rows = rows
 
+    def _flash_live_update_indicator(self) -> None:
+        """Briefly show the live-update indicator for a received telemetry sample."""
+        indicator = self.elements.live_update_indicator
+        if indicator is None:
+            return
+        message = self.elements.live_update_message
+        self._live_update_flash_id += 1
+        flash_id = self._live_update_flash_id
+        indicator.set_visibility(True)
+        if message is not None:
+            message.set_visibility(False)
+
+        def hide_if_current() -> None:
+            if flash_id == self._live_update_flash_id:
+                indicator.set_visibility(False)
+                if message is not None:
+                    message.set_visibility(True)
+
+        ui.timer(3.0, hide_if_current, once=True)
+
     def _apply_live_today_meters(self, live_power: LivePowerData) -> None:
         direct_values = {
             "Solar": live_power.values.get("today_solar"),
@@ -211,6 +241,10 @@ class RecentTab:
         if label is None:
             return
         label.classes(replace="text-sm mt-1")
+        label.props(add=(
+            f'data-last-live-update="{collected_at_utc or ""}" '
+            'data-stale-after-seconds="900"'
+        ))
         if collected_at_utc is None:
             label.set_text("")
             label.set_visibility(False)
@@ -219,9 +253,9 @@ class RecentTab:
             0.0,
             (datetime.now(ZoneInfo("UTC")) - data.parse_time(collected_at_utc, ZoneInfo("UTC"))).total_seconds(),
         )
-        if age_seconds > 60*10:
+        if age_seconds > 60 * 15:
             LOGGER.warning("Dashboard live data is stale")
-            label.set_text(f"Warning: Live data is stale — last updated {data.human_readable_age(age_seconds)}.")
+            label.set_text(f"Data is out of date — last updated {data.human_readable_age(age_seconds)}. Refreshing…")
             label.set_visibility(True)
             label.classes(add="text-orange-700 font-semibold")
             return

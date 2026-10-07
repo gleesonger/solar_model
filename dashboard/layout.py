@@ -204,6 +204,22 @@ def render_dashboard_styles() -> None:
                         label.textContent = `Last full update: ${lastUpdated.replace('T', ' ').slice(0, 19)}`;
                     }
                 });
+
+                document.querySelectorAll('.live-data-freshness').forEach((label) => {
+                    const lastUpdated = label.dataset.lastLiveUpdate;
+                    const staleAfterSeconds = Number(label.dataset.staleAfterSeconds);
+                    const lastUpdatedMillis = Date.parse(lastUpdated || '');
+                    const isStale = Number.isFinite(lastUpdatedMillis)
+                        && Number.isFinite(staleAfterSeconds)
+                        && (Date.now() - lastUpdatedMillis) / 1000 > staleAfterSeconds;
+                    if (!isStale || label.dataset.reloading === 'true') return;
+
+                    label.dataset.reloading = 'true';
+                    label.textContent = 'Data is out of date — refreshing…';
+                    label.style.display = 'block';
+                    label.classList.add('text-orange-700', 'font-semibold');
+                    window.setTimeout(() => window.location.reload(), 1500);
+                });
             }
 
             updateDashboardFreshness();

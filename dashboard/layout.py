@@ -230,13 +230,19 @@ def render_dashboard_styles() -> None:
                     if (indicator.dataset.liveUpdateWired === 'true') return;
                     indicator.dataset.liveUpdateWired = 'true';
                     const message = indicator.parentElement.querySelector('.live-update-message');
-                    let timeoutId;
                     let previousTimestamp;
-                    const activate = () => {
-                        indicator.style.display = 'inline-flex';
-                        if (message) message.style.display = 'none';
-                        window.clearTimeout(timeoutId);
-                        timeoutId = window.setTimeout(() => {
+                    const state = {active: false, idleTimer: null};
+                    const recordUpdate = () => {
+                        state.lastUpdated = Date.now();
+                        if (!state.active) {
+                            state.active = true;
+                            indicator.style.display = 'inline-flex';
+                            if (message) message.style.display = 'none';
+                        }
+                        window.clearTimeout(state.idleTimer);
+                        state.idleTimer = window.setTimeout(() => {
+                            state.active = false;
+                            state.idleTimer = null;
                             indicator.style.display = 'none';
                             if (message) message.style.display = '';
                         }, 3000);
@@ -249,7 +255,7 @@ def render_dashboard_styles() -> None:
                         }
                         if (timestamp && timestamp !== previousTimestamp) {
                             previousTimestamp = timestamp;
-                            activate();
+                            recordUpdate();
                         }
                     }, 250);
                 });

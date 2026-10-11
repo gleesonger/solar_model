@@ -155,10 +155,15 @@ def render_dashboard_styles() -> None:
             }
             .live-today-table th,
             .live-today-table td {
-                font-size: 0.75rem;
-                padding: 3px 4px;
+                font-size: 0.7rem;
+                padding: 2px 3px;
+            }
+            .live-today-table th {
                 white-space: normal;
                 overflow-wrap: anywhere;
+            }
+            .live-today-table td {
+                white-space: nowrap;
             }
             .live-today-table,
             .live-today-table .q-table__container,
@@ -167,15 +172,16 @@ def render_dashboard_styles() -> None:
                 width: 100% !important;
             }
             .live-today-table table {
-                table-layout: fixed;
+                table-layout: auto;
             }
             .live-today-table th:first-child,
             .live-today-table td:first-child {
-                width: 34%;
+                width: 1%;
+                padding-left: 2px;
+                padding-right: 3px;
             }
-            .live-today-table th:not(:first-child),
-            .live-today-table td:not(:first-child) {
-                width: 22%;
+            .live-today-table tr.solar-orientation td {
+                color: #64748b;
             }
         }
         .q-table thead th {

@@ -14,7 +14,7 @@ from config import Config
 
 from . import data
 from .live import LivePowerCollector
-from .models import DashboardElements, DashboardState, LivePowerData
+from .models import DashboardElements, DashboardState, LivePowerData, SUMMARY_LATEST_KEYS
 from .snapshot import RecentData, load_recent_data
 from .tables import mark_final_total_row
 
@@ -31,6 +31,15 @@ class RecentTab:
         self.elements = elements
         self.live_collector = live_collector
         self.timezone = ZoneInfo(config.timezone)
+        array_names = {array.panel_id: array.name for array in config.forecast.arrays}
+        self._summary_latest_keys = {
+            "Solar": "solar",
+            **{
+                f" - {array_names[panel_id]}": pv_string
+                for pv_string, panel_id in config.dashboard.actuals_to_forecast.items()
+            },
+            **{label: key for label, key in SUMMARY_LATEST_KEYS.items() if label != "Solar"},
+        }
         self._today_values: dict[str, float | None] = {}
         self._previous_live_for_today: LivePowerData | None = None
 
@@ -66,6 +75,7 @@ class RecentTab:
         self.elements.live_table = render_live_today_table(
             day,
             latest,
+            self._summary_latest_keys,
         )
         self._update_live_table_rows(live_power)
 
@@ -89,6 +99,7 @@ class RecentTab:
             self.elements.live_table.rows = data.summary_rows(
                 day,
                 latest,
+                self._summary_latest_keys,
             )
             self._update_live_table_rows(live_power)
         if self.elements.battery_status_label is not None:
@@ -146,11 +157,7 @@ class RecentTab:
         live_power: LivePowerData,
     ) -> None:
         self._today_values = {
-            "Solar": None,
-            "Battery": None,
-            "Load": None,
-            "Grid-Imported": None,
-            "Grid-Exported": None,
+            label: None for label in self._summary_latest_keys
         }
         self._apply_live_today_meters(live_power)
         self._previous_live_for_today = live_power
@@ -175,9 +182,14 @@ class RecentTab:
         direct_values = {
             "Solar": live_power.values.get("today_solar"),
             "Load": live_power.values.get("today_load"),
-            "Grid-Imported": live_power.values.get("today_grid_import"),
-            "Grid-Exported": live_power.values.get("today_grid_export"),
+            "Import": live_power.values.get("today_grid_import"),
+            "Export": live_power.values.get("today_grid_export"),
         }
+        direct_values.update({
+            label: live_power.values.get(f"today_{pv_string}")
+            for label, pv_string in self._summary_latest_keys.items()
+            if pv_string.startswith("pv")
+        })
         charge = live_power.values.get("today_battery_charge")
         discharge = live_power.values.get("today_battery_discharge")
         if charge is not None and discharge is not None:
@@ -250,6 +262,7 @@ class RecentTab:
 def render_live_today_table(
     dataframe: pd.DataFrame,
     latest: dict[str, float | None],
+    latest_keys: dict[str, str] = SUMMARY_LATEST_KEYS,
 ) -> Table:
     columns = [
         {"name": "metric", "label": "", "field": "metric", "align": "left"},
@@ -259,11 +272,21 @@ def render_live_today_table(
         {"name": "forecast", "label": "BoD Forecast (kWh)", "field": "forecast", "align": "right"},
         {"name": "forecast_raw", "label": "Raw Forecast (kWh)", "field": "forecast_raw", "align": "right"},
     ]
-    return ui.table(
+    table = ui.table(
         columns=columns,
-        rows=data.summary_rows(dataframe, latest),
+        rows=data.summary_rows(dataframe, latest, latest_keys),
         row_key="metric",
-    ).props("dense flat bordered").classes("live-today-table max-w-full").style("width: fit-content")
+    ).props("dense flat bordered").classes(
+        "live-today-table max-w-full"
+    ).style("width: fit-content")
+    table.add_slot("body", r"""
+        <q-tr :props="props" :class="{ 'solar-orientation': props.row.is_solar_orientation }">
+            <q-td v-for="col in props.cols" :key="col.name" :props="props" :col-name="col.name">
+                {{ col.value }}
+            </q-td>
+        </q-tr>
+    """)
+    return table
 
 
 def render_energy_summary_table(dataframe: pd.DataFrame, title: str, period_label: str) -> Table:

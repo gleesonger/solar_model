@@ -182,6 +182,32 @@ def load_grid_energy_day_start(
     }
 
 
+def load_pv_array_energy_day_totals(
+    database_path: str,
+    local_date: str,
+    timezone_name: str,
+) -> dict[int, float]:
+    """Return measured per-string PV energy for one local day."""
+    timezone = ZoneInfo(timezone_name)
+    day_start = datetime.combine(date.fromisoformat(local_date), time.min, tzinfo=timezone)
+    day_end = day_start + timedelta(days=1)
+    energy_columns = [
+        getattr(SigenStorModbusSample, f"inverter_pv{panel_id}_energy_kwh_period")
+        for panel_id in range(1, 5)
+    ]
+    engine = create_engine_for_database(database_path)
+    try:
+        with Session(engine) as session:
+            totals = session.execute(
+                select(*(func.coalesce(func.sum(column), 0.0) for column in energy_columns))
+                .where(SigenStorModbusSample.collected_at_utc >= day_start.astimezone(ZoneInfo("UTC")).isoformat())
+                .where(SigenStorModbusSample.collected_at_utc < day_end.astimezone(ZoneInfo("UTC")).isoformat())
+            ).one()
+    finally:
+        engine.dispose()
+    return {panel_id: float(total) for panel_id, total in enumerate(totals, start=1)}
+
+
 @heavy_work("dashboard recent daily energy summary")
 def load_recent_daily_energy(
     database_path: str,
@@ -2171,6 +2197,7 @@ def energy_summary_rows(data: pd.DataFrame) -> list[dict[str, str]]:
 def summary_rows(
     data: pd.DataFrame,
     latest: dict[str, float | None],
+    latest_keys: dict[str, str] = SUMMARY_LATEST_KEYS,
 ) -> list[dict[str, str]]:
     today = {
         "solar": float(dataframe_column(data, "solar").sum()),
@@ -2213,13 +2240,14 @@ def summary_rows(
         {
             "metric": label,
             "latest_key": key,
-            "latest": format_dashboard_number(latest[key]),
-            "today": format_dashboard_number(today[key]),
-            "latest_forecast": format_dashboard_number(latest_forecast[key]),
-            "forecast": format_dashboard_number(forecast[key]),
-            "forecast_raw": format_dashboard_number(forecast_raw[key]),
+            "is_solar_orientation": key.startswith("pv"),
+            "latest": format_dashboard_number(latest.get(key)),
+            "today": format_dashboard_number(today.get(key)),
+            "latest_forecast": format_dashboard_number(latest_forecast.get(key)),
+            "forecast": format_dashboard_number(forecast.get(key)),
+            "forecast_raw": format_dashboard_number(forecast_raw.get(key)),
         }
-        for label, key in SUMMARY_LATEST_KEYS.items()
+        for label, key in latest_keys.items()
     ]
     return rows
 

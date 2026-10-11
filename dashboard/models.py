@@ -15,8 +15,8 @@ SUMMARY_LATEST_KEYS = {
     "Solar": "solar",
     "Battery": "battery",
     "Load": "load",
-    "Grid-Imported": "grid_import",
-    "Grid-Exported": "grid_export",
+    "Import": "grid_import",
+    "Export": "grid_export",
 }
 HOURLY_PERIODS = ("Today", "7 Days", "30 Days", "365 Days", "Lifetime")
 HOURLY_PERIOD_DAYS = {

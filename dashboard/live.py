@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from threading import Event, Lock, Thread
 
 from nicegui.client import Client
@@ -50,11 +51,13 @@ class LivePowerCollector:
         timezone_name: str,
         database_path: str,
         collection_interval_seconds: float,
+        pv_strings: tuple[str, ...],
     ) -> None:
         self._modbus = modbus
         self._timezone_name = timezone_name
         self._database_path = database_path
         self._collection_interval_seconds = collection_interval_seconds
+        self._pv_strings = pv_strings
         self._registers = load_registers(REGISTER_MAP_PATH, modbus.default_device_id, metrics=self._metrics())
         self._lock = Lock()
         self._stop_event = Event()
@@ -64,6 +67,12 @@ class LivePowerCollector:
         self._has_received_data = False
         self._grid_energy_day: str | None = None
         self._grid_energy_start: dict[str, float] = {}
+        self._pv_energy_day: str | None = None
+        self._pv_energy_base: dict[int, float] = {}
+        self._pv_energy_live: dict[int, float] = {}
+        self._previous_pv_power: dict[int, float | None] = {}
+        self._previous_pv_timestamp: datetime | None = None
+        self._last_pv_shares: dict[str, float] = {}
 
     def start(self) -> None:
         if self._thread is not None and self._thread.is_alive():
@@ -106,7 +115,12 @@ class LivePowerCollector:
             )
 
     def _metrics(self) -> set[str]:
-        return LIVE_POWER_METRICS | LIVE_BATTERY_METRICS | LIVE_TODAY_METRICS
+        pv_metrics = {
+            f"inverter_{pv_string}_{measurement}"
+            for pv_string in self._pv_strings
+            for measurement in ("voltage", "current")
+        }
+        return LIVE_POWER_METRICS | LIVE_BATTERY_METRICS | LIVE_TODAY_METRICS | pv_metrics
 
     def _empty_values(self) -> dict[str, float | None]:
         values: dict[str, float | None] = {key: None for key in SUMMARY_LATEST_KEYS.values()}
@@ -120,6 +134,8 @@ class LivePowerCollector:
             "today_grid_import": None,
             "today_grid_export": None,
         })
+        values.update({pv_string: None for pv_string in self._pv_strings})
+        values.update({f"today_{pv_string}": None for pv_string in self._pv_strings})
         return values
 
     def _run(self) -> None:
@@ -224,4 +240,76 @@ class LivePowerCollector:
             baseline = self._grid_energy_start.setdefault(key, value)
             values[key] = max(value - baseline, 0.0)
 
+        self._add_live_pv_array_values(values, readings, collected_at_local)
+
         return values
+
+    def _add_live_pv_array_values(
+        self,
+        values: dict[str, float | None],
+        readings: dict[str, tuple[float | str, str, bool]],
+        collected_at_local: str,
+    ) -> None:
+        collected_at = datetime.fromisoformat(collected_at_local)
+        day = collected_at.date().isoformat()
+        if self._pv_energy_day != day:
+            self._pv_energy_day = day
+            self._pv_energy_base = data.load_pv_array_energy_day_totals(
+                self._database_path, day, self._timezone_name,
+            )
+            self._pv_energy_live = {self._pv_panel_id(pv_string): 0.0 for pv_string in self._pv_strings}
+            self._previous_pv_power = {}
+            self._previous_pv_timestamp = None
+            self._last_pv_shares = {}
+
+        elapsed_hours = (
+            (collected_at - self._previous_pv_timestamp).total_seconds() / 3_600
+            if self._previous_pv_timestamp is not None
+            else None
+        )
+        raw_powers: dict[str, float] = {}
+        for pv_string in self._pv_strings:
+            panel_id = self._pv_panel_id(pv_string)
+            voltage, _, _ = readings[f"inverter_{pv_string}_voltage"]
+            current, _, _ = readings[f"inverter_{pv_string}_current"]
+            if isinstance(voltage, str) or isinstance(current, str):
+                raise ValueError(f"live {pv_string} reading returned text")
+            power = max(voltage * current, 0.0) / 1_000
+            previous_power = self._previous_pv_power.get(panel_id)
+            if previous_power is not None and elapsed_hours is not None and elapsed_hours > 0:
+                self._pv_energy_live[panel_id] += (previous_power + power) / 2 * elapsed_hours
+            raw_powers[pv_string] = power
+            self._previous_pv_power[panel_id] = power
+        self._previous_pv_timestamp = collected_at
+
+        raw_power_total = sum(raw_powers.values())
+        if raw_power_total > 0:
+            self._last_pv_shares = {
+                pv_string: power / raw_power_total
+                for pv_string, power in raw_powers.items()
+            }
+        total_pv_power = values["solar"]
+        for pv_string in self._pv_strings:
+            values[pv_string] = (
+                total_pv_power * self._last_pv_shares[pv_string]
+                if total_pv_power is not None and pv_string in self._last_pv_shares
+                else (0.0 if total_pv_power == 0 else None)
+            )
+
+        raw_energy = {
+            pv_string: self._pv_energy_base.get(self._pv_panel_id(pv_string), 0.0)
+            + self._pv_energy_live[self._pv_panel_id(pv_string)]
+            for pv_string in self._pv_strings
+        }
+        raw_energy_total = sum(raw_energy.values())
+        total_pv_energy = values["today_solar"]
+        for pv_string in self._pv_strings:
+            values[f"today_{pv_string}"] = (
+                total_pv_energy * raw_energy[pv_string] / raw_energy_total
+                if total_pv_energy is not None and raw_energy_total > 0
+                else (0.0 if total_pv_energy == 0 else None)
+            )
+
+    @staticmethod
+    def _pv_panel_id(pv_string: str) -> int:
+        return int(pv_string.removeprefix("pv"))

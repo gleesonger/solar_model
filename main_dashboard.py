@@ -23,6 +23,7 @@ def main() -> None:
         config.timezone,
         config.database.path,
         config.actuals.data_retrival_schedule.live_update_interval_seconds,
+        tuple(config.dashboard.actuals_to_forecast),
     )
     snapshots = DashboardSnapshotStore(
         config,
@@ -57,7 +58,7 @@ def main() -> None:
         )
         snapshot = snapshots.current()
         layout.historical_tab.render_mobile_historical_controls()
-        with ui.column().classes("w-full max-w-7xl mx-auto p-4") as container:
+        with ui.column().classes("w-full max-w-7xl mx-auto p-2 md:p-4") as container:
             if snapshot is None:
                 ui.spinner("dots", size="lg")
                 ui.label("Dashboard data is loading…")

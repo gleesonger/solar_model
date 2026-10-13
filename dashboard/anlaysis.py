@@ -80,12 +80,12 @@ class AnalysisTab:
                 ["hours", "days", "weeks", "months", "years"],
                 value=self.state.historical_unit,
                 label="Period",
-            ).props("outlined dense").classes("w-full" if compact else "w-36").style("" if compact else "width: 6.75rem")
+            ).props("outlined dense").classes("w-full" if compact else "w-32").style("" if compact else "width: 6rem")
             frequency_input = ui.select(
                 ["hour", "day", "week", "month", "season", "year"],
                 value=self.state.historical_frequency,
                 label="Group by",
-            ).props("outlined dense").classes("w-full" if compact else "w-48").style("" if compact else "width: 9rem")
+            ).props("outlined dense").classes("w-full" if compact else "w-36").style("" if compact else "width: 7rem")
             aggregation_input = ui.select(
                 ["Sum", "Average"],
                 value=self.state.historical_aggregation,
@@ -218,9 +218,227 @@ class AnalysisTab:
             apply_button = ui.button("Apply", on_click=apply_range, icon="date_range").classes("w-full" if compact else "")
             if not compact:
                 ui.space()
-            ui.button("Download Data", on_click=download_data, icon="download").classes("w-full" if compact else "")
+            with ui.row().classes("w-full gap-2" if compact else "items-center gap-2"):
+                ui.button("Custom chart", on_click=self._show_custom_chart_builder, icon="add_chart").classes(
+                    "flex-grow" if compact else ""
+                )
+                ui.button("Download Data", on_click=download_data, icon="download").classes(
+                    "flex-grow" if compact else ""
+                )
 
         return controls
+
+    def _show_custom_chart_builder(self) -> None:
+        """Open a live custom-chart preview without changing the main Analysis view."""
+        metric_labels = charts.analysis_column_labels(self.config.forecast.arrays)
+        orientation_metrics = {
+            data.actual_column_name(array.panel_id): f"Solar - {array.name}"
+            for array in self.config.forecast.arrays
+            if array.panel_id in self.config.dashboard.actuals_to_forecast.values()
+        }
+        metric_labels.update(orientation_metrics)
+        metric_labels["battery"] = "Battery Level"
+        metric_options = {
+            "solar": metric_labels["solar"],
+            **orientation_metrics,
+            **{
+                metric: metric_labels[metric]
+                for metric in data.CUSTOM_CHART_ENERGY_METRICS
+                if metric != "solar" and metric in metric_labels
+            },
+        }
+        selections_input = None
+        as_of_input = None
+        count_input = None
+        period_input = None
+        group_by_input = None
+        split_by_input = None
+        aggregation_input = None
+        preview_chart = None
+        legend_container = None
+        preview_spinner = None
+        refresh_button = None
+        loading = False
+        preview_data: dict | None = None
+        visible_metrics: set[str] = set()
+        visible_splits: set[str] = set()
+
+        with ui.dialog() as dialog, ui.card().classes("w-full").style("max-width: 90rem"):
+            with ui.row().classes("w-full items-center justify-between"):
+                ui.label("Custom chart builder").classes("text-lg font-semibold")
+                ui.button(icon="close", on_click=dialog.close).props("flat round dense")
+            with ui.row().classes("w-full gap-3"):
+                as_of_input = ui.input(
+                    "As of", value=self.state.historical_as_of.isoformat(),
+                ).props(f"type=date outlined max={datetime.now(self.timezone).date().isoformat()}").classes("w-32")
+                count_input = ui.number(
+                    "Last", value=self.state.historical_count, min=1, step=1,
+                ).props("outlined").classes("w-20")
+                period_input = ui.select(
+                    ["hours", "days", "weeks", "months", "years"],
+                    value=self.state.historical_unit, label="Period",
+                ).props("outlined").classes("w-28")
+                group_by_input = ui.select(
+                    ["hour", "day", "week", "month", "season", "year"],
+                    value=self.state.historical_frequency,
+                    label="Group by",
+                ).props("outlined").classes("w-28")
+                aggregation_input = ui.select(
+                    ["Sum", "Average"],
+                    value=self.state.historical_aggregation,
+                    label="Aggregation",
+                ).props("outlined").classes("w-28")
+                split_by_input = ui.select(
+                    {None: "No split", "hour": "Hour", "day": "Day", "week": "Week", "month": "Month", "season": "Season", "year": "Year"},
+                    value=None, label="Split by",
+                ).props("outlined").classes("w-28")
+                selections_input = ui.select(
+                    metric_options,
+                    label="Variables",
+                    multiple=True,
+                    value=[],
+                ).props("outlined use-chips").classes("flex-grow")
+                with ui.element("div").classes("relative w-32").style("height: 2.5rem"):
+                    refresh_button = ui.button("Refresh", icon="refresh").classes("absolute inset-0 w-full")
+                    with ui.row().classes("absolute inset-0 items-center justify-center gap-2") as preview_spinner:
+                        ui.spinner(size="sm")
+                        ui.label("Loading").classes("text-sm text-gray-600")
+                    preview_spinner.set_visibility(False)
+            with ui.row().classes("w-full items-stretch gap-3"):
+                with ui.element("div").classes("flex-grow min-w-0"):
+                    preview_chart = ui.echart(
+                        charts.custom_chart_preview_options({"periods": [], "series": []}, metric_labels)
+                    ).classes("w-full").style("height: 34rem")
+                legend_container = ui.column().classes(
+                    "w-52 shrink-0 overflow-auto rounded border p-2"
+                ).style("height: 34rem")
+
+            def update_chart() -> None:
+                if preview_data is None:
+                    return
+                options = charts.custom_chart_preview_options(
+                    preview_data,
+                    metric_labels,
+                    visible_metrics=visible_metrics,
+                    visible_splits=(
+                        visible_splits
+                        if any(item.get("split") is not None for item in preview_data.get("series", []))
+                        else None
+                    ),
+                )
+                preview_chart.options.clear()
+                preview_chart.options.update(options)
+                preview_chart.update()
+
+            def render_dimension_legend() -> None:
+                legend_container.clear()
+                if preview_data is None or not preview_data.get("series"):
+                    return
+                series = preview_data["series"]
+                dimension_styles = charts.custom_chart_dimension_styles(series)
+                metrics = dimension_styles["metrics"]
+                splits = dimension_styles["splits"]
+                with legend_container:
+                    ui.label("Variables").classes("text-sm font-medium")
+                    for metric in metrics:
+                        with ui.row().classes("w-full items-center gap-1 flex-nowrap"):
+                            ui.html(charts.custom_chart_legend_sample(metrics[metric])).classes("shrink-0").tooltip(
+                                metrics[metric].get("name", "Colour")
+                            )
+                            checkbox = ui.checkbox(
+                                metric_labels.get(metric, metric.replace("_", " ").title()),
+                                value=metric in visible_metrics,
+                            ).props("dense").classes("min-w-0")
+
+                        def metric_changed(event, *, selected_metric=metric) -> None:
+                            if event.value:
+                                visible_metrics.add(selected_metric)
+                            else:
+                                visible_metrics.discard(selected_metric)
+                            update_chart()
+
+                        checkbox.on_value_change(metric_changed)
+                    if splits:
+                        ui.separator().classes("my-2")
+                        ui.label("Split by").classes("text-sm font-medium")
+                        for split in splits:
+                            with ui.row().classes("w-full items-center gap-1 flex-nowrap"):
+                                ui.html(charts.custom_chart_legend_sample(splits[split])).classes("shrink-0").tooltip(
+                                    splits[split].get("name", "Colour")
+                                )
+                                checkbox = ui.checkbox(split, value=split in visible_splits).props("dense").classes("min-w-0")
+
+                            def split_changed(event, *, selected_split=split) -> None:
+                                if event.value:
+                                    visible_splits.add(selected_split)
+                                else:
+                                    visible_splits.discard(selected_split)
+                                update_chart()
+
+                            checkbox.on_value_change(split_changed)
+
+            async def refresh_preview() -> None:
+                nonlocal loading, preview_data
+                if loading:
+                    return
+                selected = tuple(str(metric) for metric in (selections_input.value or []))
+                split_by = split_by_input.value
+                if split_by is not None:
+                    split_by = str(split_by)
+                selections = tuple((metric, split_by) for metric in selected)
+                loading = True
+                preview_spinner.set_visibility(True)
+                refresh_button.set_visibility(False)
+                refresh_button.disable()
+                if not selections:
+                    preview_data = {"periods": [], "series": []}
+                try:
+                    if selections:
+                        try:
+                            as_of = date.fromisoformat(str(as_of_input.value))
+                            raw_count = float(count_input.value)
+                            count = int(raw_count)
+                        except (TypeError, ValueError):
+                            ui.notify("Enter a valid As of date and Last value", type="negative")
+                            return
+                        if count < 1 or raw_count != count or as_of > datetime.now(self.timezone).date():
+                            ui.notify("As of must not be in the future and Last must be positive", type="negative")
+                            return
+                        bounds = data.analysis_range_bounds(as_of, count, str(period_input.value), self.timezone)
+                        preview = await run.io_bound(
+                            data.load_custom_chart_preview,
+                            self.config.database.path,
+                            self.config.timezone,
+                            bounds,
+                            str(group_by_input.value),
+                            str(aggregation_input.value).lower(),
+                            self.config.forecast.arrays,
+                            self.config.dashboard.actuals_to_forecast,
+                            selections,
+                        )
+                        preview_data = preview
+                    visible_metrics.clear()
+                    visible_metrics.update(str(item["metric"]) for item in preview_data.get("series", []))
+                    visible_splits.clear()
+                    visible_splits.update(
+                        str(item["split"])
+                        for item in preview_data.get("series", [])
+                        if item.get("split") is not None
+                    )
+                    render_dimension_legend()
+                    update_chart()
+                except Exception as error:
+                    ui.notify(f"Unable to build custom chart: {error}", type="negative")
+                finally:
+                    loading = False
+                    preview_spinner.set_visibility(False)
+                    refresh_button.enable()
+                    refresh_button.set_visibility(True)
+
+            refresh_button.on_click(refresh_preview)
+            with ui.row().classes("w-full justify-end gap-2 mt-2"):
+                ui.button("Close", on_click=dialog.close).props("outline")
+        dialog.open()
 
     def render_historical_tab(self) -> None:
         try:

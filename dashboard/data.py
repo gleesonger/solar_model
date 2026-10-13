@@ -6,6 +6,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta, tzinfo
 from pathlib import Path
+from time import perf_counter
 from typing import Any, cast
 from zoneinfo import ZoneInfo
 
@@ -61,6 +62,11 @@ FORECAST_WATT_HOURS_READERS: dict[str, dict[int, ForecastWattHoursReader]] = {
     },
 }
 IMPORT_COST_TARIFF_PREFIX = "import_cost_tariff__"
+CUSTOM_CHART_ENERGY_METRICS = (
+    "solar", "forecast_total", "forecast_raw_total", "load", "battery", "grid_import",
+    "grid_export", "grid_import_cost", "grid_export_revenue", "net_cost",
+    "no_solar_battery_import_cost", "import_rate", "export_rate",
+)
 ENERGY_SUMMARY_COLUMNS = (
     "solar_actual",
     "solar_forecast",
@@ -81,9 +87,47 @@ CURRENCY_SUMMARY_COLUMNS = frozenset({
 })
 
 
-def load_minute_samples(session: Session, statement, purpose: str) -> list[SigenStorModbusSample]:
+class _CustomChartTimings:
+    """Accumulate repeated daily steps for one custom-chart request."""
+
+    def __init__(self) -> None:
+        self.elapsed: dict[str, float] = {}
+        self.rows: dict[str, int] = {}
+
+    def record(self, name: str, started_at: float) -> None:
+        self.elapsed[name] = self.elapsed.get(name, 0.0) + perf_counter() - started_at
+
+    def log(self) -> None:
+        for name, elapsed in self.elapsed.items():
+            row_count = f", {self.rows[name]} rows" if name in self.rows else ""
+            LOGGER.info("Custom chart step: %s (%.3fs%s)", name, elapsed, row_count)
+
+
+def _record_chart_step(timings: _CustomChartTimings | None, name: str, started_at: float) -> None:
+    if timings is not None:
+        timings.record(name, started_at)
+
+
+def _load_chart_rows(
+    session: Session, statement, timings: _CustomChartTimings | None, name: str,
+) -> list[Any]:
+    started_at = perf_counter()
+    result = session.scalars(statement)
+    _record_chart_step(timings, f"{name}: execute SELECT and prepare ORM result", started_at)
+    started_at = perf_counter()
+    rows = list(result.all())
+    fetch_step = f"{name}: fetch rows and construct ORM objects"
+    _record_chart_step(timings, fetch_step, started_at)
+    if timings is not None:
+        timings.rows[fetch_step] = len(rows)
+    return rows
+
+
+def load_minute_samples(
+    session: Session, statement, purpose: str, *, timings: _CustomChartTimings | None = None,
+) -> list[SigenStorModbusSample]:
     """Execute a raw-minute query and log its returned-row count."""
-    samples = list(session.scalars(statement).all())
+    samples = _load_chart_rows(session, statement, timings, "Minute data")
     LOGGER.info("Minute-table query returned %s rows: %s", len(samples), purpose)
     return samples
 
@@ -673,9 +717,12 @@ def load_analysis_source_data(
     bounds: AnalysisRangeBounds,
     *,
     include_minute_samples: bool = True,
+    timings: _CustomChartTimings | None = None,
 ) -> AnalysisSourceData:
     """Load forecasts and, when needed, raw records for Analysis charts."""
+    started_at = perf_counter()
     engine = create_engine_for_database(database_path)
+    _record_chart_step(timings, "Source data: engine setup", started_at)
     try:
         with Session(engine) as session:
             samples = (
@@ -685,18 +732,22 @@ def load_analysis_source_data(
                     .where(SigenStorModbusSample.collected_at_utc <= bounds.end_at.isoformat())
                     .order_by(SigenStorModbusSample.collected_at_utc),
                     f"Analysis {bounds.start_at.isoformat()} to {bounds.end_at.isoformat()}",
+                    timings=timings,
                 )
                 if include_minute_samples
                 else []
             )
-            forecast_rows = list(session.scalars(
+            forecast_rows = _load_chart_rows(session,
                 select(ForecastSolarSample)
                 .where(ForecastSolarSample.collected_at_utc >= bounds.start_at.isoformat())
                 .where(ForecastSolarSample.collected_at_utc <= bounds.end_at.isoformat())
-                .order_by(ForecastSolarSample.collected_at_utc, ForecastSolarSample.forecast_time)
-            ).all())
+                .order_by(ForecastSolarSample.collected_at_utc, ForecastSolarSample.forecast_time),
+                timings, "Forecast data",
+            )
     finally:
+        started_at = perf_counter()
         engine.dispose()
+        _record_chart_step(timings, "Source data: engine disposal", started_at)
     return AnalysisSourceData(samples=samples, forecast_rows=forecast_rows)
 
 
@@ -919,34 +970,46 @@ def load_rollup_daily_energy_frames(
     forecast_arrays: tuple[SolarArrayConfig, ...],
     actuals_to_forecast: dict[str, int],
     forecast_rows: list[ForecastSolarSample],
+    *,
+    timings: _CustomChartTimings | None = None,
 ) -> list[pd.DataFrame]:
     """Build Analysis energy frames from one hourly range query and forecasts."""
     start_at = datetime.combine(start_date, time.min, tzinfo=timezone)
     end_at = datetime.combine(end_date + timedelta(days=1), time.min, tzinfo=timezone)
+    started_at = perf_counter()
     engine = create_engine_for_database(database_path)
+    _record_chart_step(timings, "Hourly data: engine setup", started_at)
     try:
         with Session(engine) as session:
-            actual_samples = list(session.scalars(
+            actual_samples = _load_chart_rows(session,
                 select(SigenStorHourlySample)
                 .where(SigenStorHourlySample.hour_start_utc >= start_at.isoformat())
                 .where(SigenStorHourlySample.hour_start_utc < end_at.isoformat())
-                .order_by(SigenStorHourlySample.hour_start_utc)
-            ).all())
+                .order_by(SigenStorHourlySample.hour_start_utc),
+                timings, "Hourly data",
+            )
     finally:
+        started_at = perf_counter()
         engine.dispose()
+        _record_chart_step(timings, "Hourly data: engine disposal", started_at)
 
+    started_at = perf_counter()
     actual_by_date: dict[str, list[SigenStorHourlySample]] = {}
     for sample in actual_samples:
         date_key = parse_time(sample.hour_start_utc, timezone).date().isoformat()
         actual_by_date.setdefault(date_key, []).append(sample)
+    _record_chart_step(timings, "Hourly data: index rows by local date", started_at)
 
+    started_at = perf_counter()
     first_collection_by_date: dict[str, str] = {}
     forecasts_by_collection: dict[str, list[ForecastSolarSample]] = {}
     for row in forecast_rows:
         collection_date = parse_time(row.collected_at_utc, timezone).date().isoformat()
         first_collection_by_date.setdefault(collection_date, row.collected_at_utc)
         forecasts_by_collection.setdefault(row.collected_at_utc, []).append(row)
+    _record_chart_step(timings, "Forecast data: index collections by local date", started_at)
 
+    started_at = perf_counter()
     hours = pd.DataFrame({"hour": [f"{index:02d}:00" for index in range(24)]})
     actual_columns = [actual_column_name(panel_id) for panel_id in actuals_to_forecast.values()]
     available_dates = sorted(
@@ -959,15 +1022,20 @@ def load_rollup_daily_energy_frames(
     if not available_dates:
         available_dates = [start_date.isoformat()]
     frames: list[pd.DataFrame] = []
+    _record_chart_step(timings, "Daily frames: prepare date range", started_at)
     for date_key in available_dates:
+        started_at = perf_counter()
         selected_date = date.fromisoformat(date_key)
         day_start = datetime(selected_date.year, selected_date.month, selected_date.day, tzinfo=timezone)
         day_samples = actual_by_date.get(date_key, [])
         if day_samples:
             actual = actual_hourly_from_rollup_samples(day_samples, day_start, fill_missing=False)
+            _record_chart_step(timings, "Daily frames: actual totals", started_at)
+            started_at = perf_counter()
             actual_by_array = actual_arrays_hourly_from_rollup_samples(
                 day_samples, day_start, actuals_to_forecast, fill_missing=False,
             )
+            _record_chart_step(timings, "Daily frames: actual panel values", started_at)
         else:
             actual = hours.assign(**{
                 column: float("nan")
@@ -978,6 +1046,8 @@ def load_rollup_daily_energy_frames(
                 )
             })
             actual_by_array = hours.assign(**{column: float("nan") for column in actual_columns})
+            _record_chart_step(timings, "Daily frames: empty-day frames", started_at)
+        started_at = perf_counter()
         forecast = aggregate_forecast(
             forecasts_by_collection.get(first_collection_by_date.get(date_key, ""), []),
             day_start,
@@ -985,6 +1055,8 @@ def load_rollup_daily_energy_frames(
             fill_missing=False,
             source="adjusted",
         )
+        _record_chart_step(timings, "Daily frames: adjusted forecast", started_at)
+        started_at = perf_counter()
         raw_forecast = aggregate_forecast(
             forecasts_by_collection.get(first_collection_by_date.get(date_key, ""), []),
             day_start,
@@ -992,14 +1064,19 @@ def load_rollup_daily_energy_frames(
             fill_missing=False,
             source="raw",
         ).rename(columns={"forecast_total": "forecast_raw_total"})[["hour", "forecast_raw_total"]]
+        _record_chart_step(timings, "Daily frames: raw forecast", started_at)
+        started_at = perf_counter()
         frame = (
             actual.merge(actual_by_array, on="hour", how="left")
             .merge(forecast, on="hour", how="left")
             .merge(raw_forecast, on="hour", how="left")
         )
+        _record_chart_step(timings, "Daily frames: merge actuals and forecasts", started_at)
+        started_at = perf_counter()
         frame = allocate_solar_energy_to_arrays(frame, actuals_to_forecast)
         frame["date"] = date_key
         frames.append(frame)
+        _record_chart_step(timings, "Daily frames: allocate panel energy and finalise", started_at)
     return frames
 
 
@@ -1167,6 +1244,161 @@ def historical_energy_from_frames(
         lambda value: historical_bucket_label(value, frequency)
     )
     return cast(pd.DataFrame, grouped[["period", *value_columns]])
+
+
+@heavy_work("dashboard custom chart aggregation")
+def load_custom_chart_preview(
+    database_path: str,
+    timezone_name: str,
+    bounds: AnalysisRangeBounds,
+    group_by: str,
+    aggregation: str,
+    forecast_arrays: tuple[SolarArrayConfig, ...],
+    actuals_to_forecast: dict[str, int],
+    selections: tuple[tuple[str, str | None], ...],
+) -> dict[str, Any]:
+    """Load the data required for the custom builder's energy-chart preview."""
+    if not selections:
+        return {"periods": [], "series": []}
+    request_started_at = perf_counter()
+    timings = _CustomChartTimings()
+    timezone = ZoneInfo(timezone_name)
+    battery_level_requested = any(metric == "battery" for metric, _ in selections)
+    source = load_analysis_source_data(
+        database_path, bounds, include_minute_samples=battery_level_requested, timings=timings,
+    )
+    frames = load_rollup_daily_energy_frames(
+        database_path, timezone, bounds.start_date, bounds.end_date, forecast_arrays,
+        actuals_to_forecast, source.forecast_rows, timings=timings,
+    )
+    if battery_level_requested:
+        started_at = perf_counter()
+        battery_rows = [{
+            "date": parse_time(sample.collected_at_utc, timezone).date().isoformat(),
+            "hour": parse_time(sample.collected_at_utc, timezone).strftime("%H:00"),
+            "battery": sample.plant_battery_available_discharge_kwh,
+        } for sample in source.samples]
+        battery_frame = pd.DataFrame(battery_rows)
+        timings.record("Battery: build hourly source frame", started_at)
+        if not battery_frame.empty:
+            started_at = perf_counter()
+            battery_hourly = battery_frame.groupby(["date", "hour"], as_index=False)["battery"].mean()
+            timings.record("Battery: calculate hourly averages", started_at)
+            started_at = perf_counter()
+            energy_frame = pd.concat(frames, ignore_index=True).drop(columns="battery", errors="ignore")
+            frames = [energy_frame.merge(battery_hourly, on=["date", "hour"], how="outer")]
+            timings.record("Battery: merge levels into energy frames", started_at)
+    preview = custom_chart_preview_from_frames(
+        frames, bounds.start_at, bounds.end_at, group_by, aggregation, selections, timings=timings,
+    )
+    elapsed = perf_counter() - request_started_at
+    timings.elapsed["Other request overhead"] = max(0.0, elapsed - sum(timings.elapsed.values()))
+    timings.log()
+    return preview
+
+
+def custom_chart_preview_from_frames(
+    daily_frames: list[pd.DataFrame],
+    start_at: datetime,
+    end_at: datetime,
+    group_by: str,
+    aggregation: str,
+    selections: tuple[tuple[str, str | None], ...],
+    *,
+    timings: _CustomChartTimings | None = None,
+) -> dict[str, Any]:
+    """Return ECharts-ready series for selected energy metrics and time splits."""
+    if group_by not in {"hour", "day", "week", "month", "season", "year"}:
+        raise ValueError(f"Unsupported custom chart grouping: {group_by}")
+    if aggregation not in {"sum", "average"}:
+        raise ValueError(f"Unsupported custom chart aggregation: {aggregation}")
+    started_at = perf_counter()
+    frame = pd.concat(daily_frames, ignore_index=True).copy()
+    _record_chart_step(timings, "Chart: concatenate daily frames", started_at)
+    started_at = perf_counter()
+    timestamps = pd.to_datetime(dataframe_column(frame, "date") + " " + dataframe_column(frame, "hour"))
+    frame = frame.loc[(timestamps >= start_at.replace(tzinfo=None)) & (timestamps <= end_at.replace(tzinfo=None))].copy()
+    _record_chart_step(timings, "Chart: parse timestamps and filter range", started_at)
+    if frame.empty:
+        return {"periods": [], "series": [], "empty_message": "No data in the selected Analysis range"}
+    started_at = perf_counter()
+    if group_by == "hour":
+        frame["_bucket"] = dataframe_column(frame, "hour")
+        frame["_period"] = dataframe_column(frame, "hour")
+    else:
+        frame["_bucket"] = dataframe_column(frame, "date").map(
+            lambda value: historical_bucket_start(date.fromisoformat(str(value)), group_by)
+        )
+        frame["_period"] = dataframe_column(frame, "_bucket").map(
+            lambda value: historical_bucket_label(value, group_by)
+        )
+    periods = frame[["_bucket", "_period"]].drop_duplicates().sort_values("_bucket")
+    _record_chart_step(timings, "Chart: calculate grouping buckets and periods", started_at)
+    result_series: list[dict[str, Any]] = []
+    for metric, split_by in selections:
+        if metric not in frame.columns:
+            continue
+        started_at = perf_counter()
+        values = pd.to_numeric(dataframe_column(frame, metric), errors="coerce")
+        series_frame = frame[["_bucket", "_period", "date", "hour"]].copy()
+        series_frame[metric] = values
+        method = "mean" if aggregation == "average" or metric in {"battery", "import_rate", "export_rate"} else "sum"
+        _record_chart_step(timings, f"Chart {metric}: prepare values", started_at)
+        if split_by is None:
+            started_at = perf_counter()
+            grouped = series_frame.groupby(["_bucket", "_period"], as_index=False)[metric].agg(method)
+            _record_chart_step(timings, f"Chart {metric}: aggregate values", started_at)
+            started_at = perf_counter()
+            values_by_bucket = grouped.set_index("_bucket")[metric]
+            result_series.append({
+                "metric": metric, "split": None,
+                "data": [chart_value(values_by_bucket.get(bucket)) for bucket in periods["_bucket"]],
+            })
+            _record_chart_step(timings, f"Chart {metric}: format output series", started_at)
+            continue
+        if split_by == group_by:
+            raise ValueError("Split by must be different from Group by")
+        started_at = perf_counter()
+        split_values = [
+            custom_chart_split_bucket(date.fromisoformat(str(day)), str(hour), split_by)
+            for day, hour in zip(dataframe_column(series_frame, "date"), dataframe_column(series_frame, "hour"), strict=True)
+        ]
+        series_frame[["_split_order", "_split"]] = pd.DataFrame(split_values, index=series_frame.index)
+        _record_chart_step(timings, f"Chart {metric}: calculate split buckets", started_at)
+        started_at = perf_counter()
+        grouped = series_frame.groupby(["_bucket", "_split_order", "_split"], as_index=False)[metric].agg(method)
+        _record_chart_step(timings, f"Chart {metric}: aggregate values", started_at)
+        started_at = perf_counter()
+        split_labels = grouped[["_split_order", "_split"]].drop_duplicates().sort_values("_split_order")["_split"]
+        for split_label in split_labels:
+            values_by_bucket = grouped.loc[grouped["_split"] == split_label].set_index("_bucket")[metric]
+            result_series.append({
+                "metric": metric, "split": str(split_label),
+                "data": [chart_value(values_by_bucket.get(bucket)) for bucket in periods["_bucket"]],
+            })
+        _record_chart_step(timings, f"Chart {metric}: format output series", started_at)
+    return {"periods": periods["_period"].tolist(), "series": result_series}
+
+
+def chart_value(value: object) -> float | None:
+    return None if pd.isna(value) else round(float(value), 1)
+
+
+def custom_chart_split_bucket(value: date, hour: str, split_by: str) -> tuple[int, str]:
+    if split_by == "hour":
+        return int(hour[:2]), hour
+    if split_by == "day":
+        return value.weekday(), value.strftime("%a")
+    if split_by == "week":
+        week = value.isocalendar().week
+        return week, f"Week {week:02d}"
+    if split_by == "month":
+        return value.month, value.strftime("%b")
+    if split_by == "season":
+        return ((value.month % 12) // 3), ("Winter", "Spring", "Summer", "Autumn")[(value.month % 12) // 3]
+    if split_by == "year":
+        return value.year, str(value.year)
+    raise ValueError(f"Unsupported custom chart split: {split_by}")
 
 
 @heavy_work("dashboard historical minute-energy aggregation")

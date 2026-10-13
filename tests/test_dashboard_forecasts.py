@@ -6,7 +6,7 @@ import pandas as pd
 import pytest
 
 from config import SolarArrayConfig
-from dashboard import data
+from dashboard import charts, data
 
 
 ARRAY = SolarArrayConfig(
@@ -47,6 +47,136 @@ def test_aggregate_forecast_rejects_an_implicit_unknown_source() -> None:
             (ARRAY,),
             source="other",
         )
+
+
+def test_custom_chart_preview_splits_each_selected_metric_independently() -> None:
+    frames = [
+        pd.DataFrame({
+            "date": ["2026-01-15", "2026-01-15"],
+            "hour": ["00:00", "01:00"],
+            "solar": [1.26, 10.0], "load": [2.0, 20.0],
+        }),
+        pd.DataFrame({
+            "date": ["2026-02-15", "2026-02-15"],
+            "hour": ["00:00", "01:00"],
+            "solar": [3.0, 30.0], "load": [4.0, 40.0],
+        }),
+    ]
+
+    preview = data.custom_chart_preview_from_frames(
+        frames,
+        datetime(2026, 1, 1),
+        datetime(2026, 12, 31, 23, 59),
+        "hour",
+        "average",
+        (("solar", "month"), ("load", None)),
+    )
+
+    assert preview["periods"] == ["00:00", "01:00"]
+    assert preview["series"] == [
+        {"metric": "solar", "split": "Jan", "data": [1.3, 10.0]},
+        {"metric": "solar", "split": "Feb", "data": [3.0, 30.0]},
+        {"metric": "load", "split": None, "data": [3.0, 30.0]},
+    ]
+    options = charts.custom_chart_preview_options(preview, {"solar": "Solar", "load": "Load"})
+    assert options["yAxis"]["name"] == "kWh"
+    assert "legend" not in options
+    filtered = charts.custom_chart_preview_options(
+        preview, {"solar": "Solar", "load": "Load"},
+        visible_metrics={"solar", "load"}, visible_splits={"Jan"},
+    )
+    assert [series["name"] for series in filtered["series"]] == ["Solar (kWh) — Jan", "Load (kWh)"]
+
+
+def test_custom_chart_treats_battery_as_a_level_not_an_energy_flow() -> None:
+    frame = pd.DataFrame({
+        "date": ["2026-01-15", "2026-01-16"],
+        "hour": ["00:00", "00:00"],
+        "battery": [4.0, 6.0],
+    })
+
+    preview = data.custom_chart_preview_from_frames(
+        [frame], datetime(2026, 1, 1), datetime(2026, 1, 31, 23, 59),
+        "hour", "sum", (("battery", None),),
+    )
+
+    assert preview["series"] == [{"metric": "battery", "split": None, "data": [5.0]}]
+
+
+def test_custom_chart_recognises_per_orientation_solar_as_energy() -> None:
+    assert charts.custom_chart_metric_unit("actual_panel_2") == "kWh"
+
+
+@pytest.mark.parametrize("metric_count,split_count,color_dimension", [
+    (2, 3, "splits"), (3, 2, "metrics"), (3, 3, "metrics"),
+])
+def test_custom_chart_styles_encode_dimensions_and_survive_filtering(
+    metric_count: int, split_count: int, color_dimension: str,
+) -> None:
+    preview = {"periods": ["00:00", "01:00"], "series": [
+        {"metric": f"metric_{metric}", "split": f"split_{split}", "data": [1, 2]}
+        for metric in range(metric_count) for split in range(split_count)
+    ]}
+    assert charts.custom_chart_dimension_styles(preview["series"])["color_dimension"] == color_dimension
+    full = charts.custom_chart_preview_options(preview, {})["series"]
+    for metric in range(metric_count):
+        for split in range(split_count):
+            appearance = full[metric * split_count + split]
+            color_index = metric if color_dimension == "metrics" else split
+            style_index = split if color_dimension == "metrics" else metric
+            assert appearance["lineStyle"]["color"] == charts.CUSTOM_CHART_COLORS[color_index]
+            assert appearance["itemStyle"]["color"] == charts.CUSTOM_CHART_COLORS[color_index]
+            assert appearance["lineStyle"]["type"] == ["solid", [5, 5], [2, 6]][style_index]
+    # Filtering reverses which dimension has more visible entries, but not its encoding.
+    filtered = charts.custom_chart_preview_options(
+        preview, {}, visible_metrics={"metric_1"}, visible_splits={"split_1"},
+    )["series"]
+    assert filtered == [full[split_count + 1]]
+
+
+def test_custom_chart_unsplit_lines_are_solid_and_keep_colours_when_filtered() -> None:
+    preview = {"series": [
+        {"metric": metric, "split": None, "data": [1, 2]}
+        for metric in ("solar", "load", "battery")
+    ]}
+    full = charts.custom_chart_preview_options(preview, {})["series"]
+    assert len({item["lineStyle"]["color"] for item in full}) == 3
+    assert all(item["lineStyle"].get("type", "solid") == "solid" and not item["showSymbol"] for item in full)
+    assert charts.custom_chart_preview_options(preview, {}, visible_metrics={"load"})["series"] == [full[1]]
+
+
+def test_custom_chart_uses_agreed_style_order_then_automatic_defaults() -> None:
+    import json
+    import xml.etree.ElementTree as ET
+
+    values = [None, *range(30), None]
+    preview = {"series": [
+        {"metric": f"metric_{metric}", "split": f"split_{split}", "data": values}
+        for metric in range(13) for split in range(12)
+    ]}
+    styles = charts.custom_chart_dimension_styles(preview["series"])["splits"]
+    assert [style["name"] for style in styles.values()] == [
+        "Solid", "Short dash", "Dotted", "Filled circle", "Filled square",
+        "Filled triangle", "Cross", "Empty circle", "Empty square",
+        "Empty triangle", "Long dash", "Automatic",
+    ]
+    full = charts.custom_chart_preview_options(preview, {})["series"][:12]
+    for index, (_, dash, symbol) in enumerate(charts.CUSTOM_CHART_STYLES):
+        assert full[index]["lineStyle"]["type"] == dash
+        assert full[index]["showSymbol"] == (symbol is not None)
+        sample = ET.fromstring(charts.custom_chart_legend_sample(styles[f"split_{index}"]))
+        assert len(sample) == (2 if symbol else 1)
+        if symbol:
+            callback = full[index][":symbol"]
+            assert json.dumps(symbol) in callback
+            indices = json.loads(callback.split("=> ", 1)[1].split(".includes", 1)[0])
+            assert len(indices) <= 12
+            assert indices[0] == 1 and indices[-1] == 30
+            assert all(values[position] is not None for position in indices)
+        if symbol and symbol.startswith("empty"):
+            assert sample[1].attrib["fill"] == "white"
+    assert "type" not in full[11]["lineStyle"]
+    assert ":symbol" not in full[11]
 
 
 def test_summary_rows_exposes_adjusted_forecast_and_raw_forecast_separately() -> None:

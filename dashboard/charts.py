@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+import json
 from typing import Any
 
 import pandas as pd
@@ -22,6 +23,91 @@ GRID_IMPORT_COLOR = "#D1495B"
 GRID_EXPORT_COLOR = "#009E73"
 NET_COST_COLOR = "#6C757D"
 NO_SOLAR_COST_COLOR = "#7B2CBF"
+CUSTOM_CHART_UNITS = {
+    "solar": "kWh", "forecast_total": "kWh", "forecast_raw_total": "kWh",
+    "load": "kWh", "battery": "kWh", "grid_import": "kWh", "grid_export": "kWh",
+    "grid_import_cost": "€", "grid_export_revenue": "€", "net_cost": "€",
+    "no_solar_battery_import_cost": "€", "import_rate": "€/kWh", "export_rate": "€/kWh",
+}
+
+CUSTOM_CHART_COLORS = (
+    "#5470C6", "#91CC75", "#FAC858", "#EE6666", "#73C0DE",
+    "#3BA272", "#FC8452", "#9A60B4", "#EA7CCC",
+    "#2F4554", "#C23531", "#61A0A8",
+)
+CUSTOM_CHART_CROSS_PATH = "M-5,-3 L-3,-5 L0,-2 L3,-5 L5,-3 L2,0 L5,3 L3,5 L0,2 L-3,5 L-5,3 L-2,0 Z"
+# Name, dash pattern, marker. Entries after these use ECharts defaults.
+CUSTOM_CHART_STYLES = (
+    ("Solid", "solid", None),
+    ("Short dash", [5, 5], None),
+    ("Dotted", [2, 6], None),
+    ("Filled circle", "solid", "circle"),
+    ("Filled square", "solid", "rect"),
+    ("Filled triangle", "solid", "triangle"),
+    ("Cross", "solid", "path://" + CUSTOM_CHART_CROSS_PATH),
+    ("Empty circle", "solid", "emptyCircle"),
+    ("Empty square", "solid", "emptyRect"),
+    ("Empty triangle", "solid", "emptyTriangle"),
+    ("Long dash", [14, 7], None),
+)
+
+
+def custom_chart_dimension_styles(series: list[dict[str, Any]]) -> dict[str, Any]:
+    """Assign styles to the full preview so filtering never changes them."""
+    metrics = list(dict.fromkeys(str(item["metric"]) for item in series))
+    splits = list(dict.fromkeys(
+        str(item["split"]) for item in series if item.get("split") is not None
+    ))
+    color_dimension = "metrics" if len(metrics) >= len(splits) else "splits"
+    result: dict[str, Any] = {"color_dimension": color_dimension}
+    for dimension, entries in (("metrics", metrics), ("splits", splits)):
+        result[dimension] = {}
+        for index, entry in enumerate(entries):
+            if dimension == color_dimension:
+                result[dimension][entry] = {
+                    "color": CUSTOM_CHART_COLORS[index % len(CUSTOM_CHART_COLORS)],
+                }
+            else:
+                name, dash, symbol = (
+                    CUSTOM_CHART_STYLES[index]
+                    if index < len(CUSTOM_CHART_STYLES)
+                    else ("Automatic", None, None)
+                )
+                result[dimension][entry] = {"name": name, "dash": dash, "symbol": symbol}
+    return result
+
+
+def custom_chart_legend_sample(style: dict[str, Any]) -> str:
+    """Render the same colour, dash and marker used by a legend entry."""
+    color = style.get("color", "#64748B")
+    dash = style.get("dash")
+    dash_attribute = (
+        ' stroke-dasharray="' + " ".join(str(value) for value in dash) + '"'
+        if isinstance(dash, list) else ""
+    )
+    symbol = style.get("symbol") or ""
+    fill = "white" if symbol.startswith("empty") else color
+    attributes = f'fill="{fill}" stroke="{color}" stroke-width="1.5"'
+    marker = ""
+    if symbol in {"circle", "emptyCircle"}:
+        marker = f'<circle cx="30" cy="10" r="4" {attributes}/>'
+    elif symbol in {"rect", "emptyRect"}:
+        marker = f'<rect x="26" y="6" width="8" height="8" {attributes}/>'
+    elif symbol in {"triangle", "emptyTriangle"}:
+        marker = f'<polygon points="30,5 35,14 25,14" {attributes}/>'
+    elif symbol.startswith("path://"):
+        marker = f'<path d="{CUSTOM_CHART_CROSS_PATH}" transform="translate(30 10)" {attributes}/>'
+    return (
+        '<svg xmlns="http://www.w3.org/2000/svg" width="60" height="20" viewBox="0 0 60 20" aria-hidden="true">'
+        f'<line x1="2" y1="10" x2="58" y2="10" stroke="{color}" stroke-width="2.5"{dash_attribute}/>'
+        f'{marker}</svg>'
+    )
+
+
+def custom_chart_metric_unit(metric: str) -> str:
+    if metric.startswith(("actual_panel_", "forecast_panel_")):
+        return "kWh"
+    return CUSTOM_CHART_UNITS.get(metric, "")
 
 ENERGY_TABLE_COLUMNS = (
     "period", "solar", "forecast_total", "forecast_raw_total", "load", "grid_import", "grid_export",
@@ -56,6 +142,98 @@ def analysis_column_labels(
         labels[forecast_column_name(array.panel_id)] = f"{array.name} Forecast"
     # Tariff band columns are added dynamically from stored sample metadata.
     return labels
+
+
+def custom_chart_preview_options(
+    preview: dict[str, Any],
+    metric_labels: dict[str, str],
+    *,
+    visible_metrics: set[str] | None = None,
+    visible_splits: set[str] | None = None,
+) -> dict[str, Any]:
+    """Build a live custom-builder preview from selected metrics and splits."""
+    series = preview.get("series", [])
+    if not series:
+        return {
+            "title": {
+                "text": preview.get("empty_message", "Add a variable to begin"),
+                "left": "center", "top": "middle",
+                "textStyle": {"color": "#6B7280", "fontSize": 16},
+            },
+            "xAxis": {"type": "category", "data": []},
+            "yAxis": {"type": "value"},
+            "series": [],
+        }
+    dimension_styles = custom_chart_dimension_styles(series)
+    chart_series = []
+    for item in series:
+        metric = str(item["metric"])
+        split = None if item.get("split") is None else str(item["split"])
+        if visible_metrics is not None and metric not in visible_metrics:
+            continue
+        if split is not None and visible_splits is not None and split not in visible_splits:
+            continue
+        unit = custom_chart_metric_unit(metric)
+        metric_style = dimension_styles["metrics"][metric]
+        split_style = dimension_styles["splits"].get(split, {})
+        color_style = metric_style if dimension_styles["color_dimension"] == "metrics" else split_style
+        line_style = split_style if dimension_styles["color_dimension"] == "metrics" else metric_style
+        # An unsplit series always uses a solid line, even in a mixed preview.
+        if split is None:
+            metric_index = list(dimension_styles["metrics"]).index(metric)
+            color_style = {"color": CUSTOM_CHART_COLORS[metric_index % len(CUSTOM_CHART_COLORS)]}
+            line_style = {}
+        appearance: dict[str, Any] = {
+            "lineStyle": {"color": color_style["color"], "width": 2.5},
+            "itemStyle": {"color": color_style["color"]},
+            "showSymbol": False,
+        }
+        if line_style.get("dash") is not None:
+            appearance["lineStyle"]["type"] = line_style["dash"]
+        if line_style.get("symbol"):
+            # Keep markers on actual data points, at most approximately twelve.
+            valid_indices = [index for index, value in enumerate(item["data"]) if value is not None]
+            step = max(1, (len(valid_indices) + 10) // 11)
+            marker_indices = valid_indices[::step]
+            if valid_indices and valid_indices[-1] not in marker_indices:
+                marker_indices.append(valid_indices[-1])
+            appearance.update({
+                "showSymbol": True, "showAllSymbol": True, "symbolSize": 8,
+                ":symbol": (
+                    f"(value, params) => {json.dumps(marker_indices)}.includes(params.dataIndex)"
+                    f" ? {json.dumps(line_style['symbol'])} : 'none'"
+                ),
+            })
+        chart_series.append({
+            "name": (
+                metric_labels.get(metric, metric.replace("_", " ").title())
+                + (f" ({unit})" if unit else "")
+                + (f" — {split}" if split else "")
+            ),
+            "type": "line",
+            **appearance,
+            "data": item["data"],
+        })
+    return {
+        "tooltip": {
+            "trigger": "axis",
+            ":valueFormatter": "value => Number(value).toFixed(1)",
+        },
+        "grid": {"left": 70, "right": 25, "top": 35, "bottom": 60},
+        "xAxis": {"type": "category", "data": preview.get("periods", [])},
+        "yAxis": {
+            "type": "value",
+            "name": _custom_chart_axis_unit(series),
+            "axisLabel": {":formatter": "value => Number(value).toFixed(1)"},
+        },
+        "series": chart_series,
+    }
+
+
+def _custom_chart_axis_unit(series: list[dict[str, Any]]) -> str:
+    units = {custom_chart_metric_unit(str(item["metric"])) for item in series}
+    units.discard("")
+    return units.pop() if len(units) == 1 else "Mixed units"
 
 
 def array_energy_table_columns(

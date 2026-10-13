@@ -31,6 +31,7 @@ from .models import (
     SUMMARY_LATEST_KEYS,
     TelemetryData,
 )
+from .chart_data_sql import ChartRequest
 
 ForecastWattHoursReader = Callable[[ForecastSolarSample], float | None]
 
@@ -100,7 +101,7 @@ class _CustomChartTimings:
     def log(self) -> None:
         for name, elapsed in self.elapsed.items():
             row_count = f", {self.rows[name]} rows" if name in self.rows else ""
-            LOGGER.info("Custom chart step: %s (%.3fs%s)", name, elapsed, row_count)
+            LOGGER.info("Chart data step: %s (%.3fs%s)", name, elapsed, row_count)
 
 
 def _record_chart_step(timings: _CustomChartTimings | None, name: str, started_at: float) -> None:
@@ -914,51 +915,45 @@ def load_analysis_range(
     actuals_to_forecast: dict[str, int],
     aggregation: str = "sum",
 ) -> AnalysisRangeData:
-    """Load every Analysis dataset through one database session and date range."""
+    """Request predefined, unsplit datasets from the shared chart SQL engine."""
     if power_interval_minutes < 1:
         raise ValueError("Power interval must be at least one minute")
 
-    timezone = ZoneInfo(timezone_name)
-    # Analysis energy always comes from the hourly rollup. Raw snapshots are
-    # reserved for the detailed Power/Battery view of one local day only.
+    started_at = perf_counter()
+    timings = _CustomChartTimings()
+    energy_selections = (
+        *((metric, None) for metric in (
+            "solar", "load", "grid_import", "grid_export", "grid_import_cost",
+            "grid_export_revenue", "net_cost", "no_solar_battery_import_cost",
+            IMPORT_COST_TARIFF_PREFIX + "*", "import_rate", "export_rate", "battery_flow",
+        )),
+        *((actual_column_name(panel), None) for panel in dict.fromkeys(actuals_to_forecast.values())),
+        *((forecast_column_name(array.panel_id), None) for array in forecast_arrays),
+        ("forecast_total", None), ("forecast_raw_total", None),
+    )
     requires_minute_samples = bounds.start_date == bounds.end_date
-    source = load_analysis_source_data(
-        database_path,
-        bounds,
-        include_minute_samples=requires_minute_samples,
+    power_metrics = (
+        "power_solar", *(f"power_actual_panel_{panel}" for panel in dict.fromkeys(actuals_to_forecast.values())),
+        "power_load", "power_battery", "power_inverter", "power_grid_import", "power_grid_export",
     )
-
-    daily_frames = load_rollup_daily_energy_frames(
-        database_path,
-        timezone,
-        bounds.start_date,
-        bounds.end_date,
-        forecast_arrays,
-        actuals_to_forecast,
-        source.forecast_rows,
+    datasets = load_chart_data_batch(
+        database_path, timezone_name, bounds, forecast_arrays, actuals_to_forecast,
+        (
+            ChartRequest("energy", energy_selections, group_by=frequency, aggregation=aggregation),
+            ChartRequest(
+                "telemetry", tuple((metric, None) for metric in (*power_metrics, "battery_level", "soc_percent")),
+                aggregation="average", sample_resolution="minute" if requires_minute_samples else "hour",
+                interval_minutes=1 if requires_minute_samples else 60,
+            ),
+        ),
+        timings=timings,
     )
-    energy = historical_energy_from_frames(
-        daily_frames,
-        frequency,
-        bounds.start_at,
-        bounds.end_at,
-        aggregation=aggregation,
-    )
-    if requires_minute_samples:
-        # One day is small enough to send at minute resolution once. The
-        # browser's chart zoom then filters those points without re-querying.
-        power_interval_minutes = 1
-        power, _ = average_telemetry_by_interval(
-            source.samples, timezone, power_interval_minutes, actuals_to_forecast,
-        )
-        _, battery = average_telemetry_by_interval(
-            source.samples, timezone, 1, actuals_to_forecast,
-        )
-    else:
-        hourly_samples = load_analysis_hourly_samples(database_path, bounds)
-        power, battery = average_hourly_rollup_telemetry(
-            hourly_samples, timezone, actuals_to_forecast,
-        )
+    energy = chart_data_to_dataframe(datasets["energy"], column_names={"battery_flow": "battery"})
+    telemetry_frame = chart_data_to_dataframe(datasets["telemetry"], period_column="time")
+    power = telemetry_frame[["time", *power_metrics]].rename(columns={metric: metric.removeprefix("power_") for metric in power_metrics})
+    battery = telemetry_frame[["time", "battery_level", "soc_percent"]].rename(columns={"battery_level": "available_energy_kwh"})
+    timings.elapsed["Other request overhead"] = max(0.0, perf_counter() - started_at - sum(timings.elapsed.values()))
+    timings.log()
     return AnalysisRangeData(energy=energy, power=power, battery=battery)
 
 
@@ -1262,39 +1257,79 @@ def load_custom_chart_preview(
         return {"periods": [], "series": []}
     request_started_at = perf_counter()
     timings = _CustomChartTimings()
-    timezone = ZoneInfo(timezone_name)
-    battery_level_requested = any(metric == "battery" for metric, _ in selections)
-    source = load_analysis_source_data(
-        database_path, bounds, include_minute_samples=battery_level_requested, timings=timings,
+    preview = load_chart_data(
+        database_path, timezone_name, bounds, group_by, aggregation,
+        forecast_arrays, actuals_to_forecast, selections, timings=timings,
     )
-    frames = load_rollup_daily_energy_frames(
-        database_path, timezone, bounds.start_date, bounds.end_date, forecast_arrays,
-        actuals_to_forecast, source.forecast_rows, timings=timings,
-    )
-    if battery_level_requested:
-        started_at = perf_counter()
-        battery_rows = [{
-            "date": parse_time(sample.collected_at_utc, timezone).date().isoformat(),
-            "hour": parse_time(sample.collected_at_utc, timezone).strftime("%H:00"),
-            "battery": sample.plant_battery_available_discharge_kwh,
-        } for sample in source.samples]
-        battery_frame = pd.DataFrame(battery_rows)
-        timings.record("Battery: build hourly source frame", started_at)
-        if not battery_frame.empty:
-            started_at = perf_counter()
-            battery_hourly = battery_frame.groupby(["date", "hour"], as_index=False)["battery"].mean()
-            timings.record("Battery: calculate hourly averages", started_at)
-            started_at = perf_counter()
-            energy_frame = pd.concat(frames, ignore_index=True).drop(columns="battery", errors="ignore")
-            frames = [energy_frame.merge(battery_hourly, on=["date", "hour"], how="outer")]
-            timings.record("Battery: merge levels into energy frames", started_at)
-    preview = custom_chart_preview_from_frames(
-        frames, bounds.start_at, bounds.end_at, group_by, aggregation, selections, timings=timings,
-    )
+    started_at = perf_counter()
+    for series in preview["series"]:
+        series["data"] = [chart_value(value) for value in series["data"]]
+    timings.record("Chart: round preview values for display", started_at)
     elapsed = perf_counter() - request_started_at
     timings.elapsed["Other request overhead"] = max(0.0, elapsed - sum(timings.elapsed.values()))
     timings.log()
     return preview
+
+
+def load_chart_data(
+    database_path: str,
+    timezone_name: str,
+    bounds: AnalysisRangeBounds,
+    group_by: str,
+    aggregation: str,
+    forecast_arrays: tuple[SolarArrayConfig, ...],
+    actuals_to_forecast: dict[str, int],
+    selections: tuple[tuple[str, str | None], ...],
+    *,
+    timings: _CustomChartTimings | None = None,
+    sample_resolution: str = "hour",
+    interval_minutes: int = 60,
+) -> dict[str, Any]:
+    """Aggregate selected variables once, at full precision, for either chart UI."""
+    return load_chart_data_batch(
+        database_path, timezone_name, bounds, forecast_arrays, actuals_to_forecast,
+        (ChartRequest("chart", selections, group_by, aggregation, sample_resolution, interval_minutes),),
+        timings=timings,
+    )["chart"]
+
+
+def load_chart_data_batch(
+    database_path: str,
+    timezone_name: str,
+    bounds: AnalysisRangeBounds,
+    forecast_arrays: tuple[SolarArrayConfig, ...],
+    actuals_to_forecast: dict[str, int],
+    requests: tuple[ChartRequest, ...],
+    *,
+    timings: _CustomChartTimings | None = None,
+) -> dict[str, dict[str, Any]]:
+    """Load every requested chart dataset with one shared SQL statement."""
+    from .chart_data_sql import aggregate_chart_data_batch
+
+    started_at = perf_counter()
+    own_timings = timings is None
+    timings = timings or _CustomChartTimings()
+    result = aggregate_chart_data_batch(
+        database_path, timezone_name, bounds, forecast_arrays, actuals_to_forecast, requests, timings,
+    )
+    if own_timings:
+        timings.elapsed["Other request overhead"] = max(0.0, perf_counter() - started_at - sum(timings.elapsed.values()))
+        timings.log()
+    return result
+
+
+def chart_data_to_dataframe(
+    chart_data: dict[str, Any], *, period_column: str = "period", column_names: dict[str, str] | None = None,
+) -> pd.DataFrame:
+    """Adapt unsplit shared results for Analysis tables without rounding values."""
+    column_names = column_names or {}
+    columns: dict[str, Any] = {period_column: chart_data["periods"]}
+    for series in chart_data["series"]:
+        if series["split"] is not None:
+            raise ValueError("Analysis tables require unsplit chart data")
+        name = column_names.get(series["metric"], series["metric"])
+        columns[name] = pd.Series(series["data"], dtype="float64")
+    return pd.DataFrame(columns)
 
 
 def custom_chart_preview_from_frames(

@@ -9,9 +9,11 @@ from numbers import Real
 from typing import Any
 
 import pandas as pd
+
 from nicegui import ui
 
 from .tables import mark_final_total_row
+from .warnings import notify_success
 from nicegui.elements.echart import EChart
 
 
@@ -158,7 +160,7 @@ class ChartDataDisplay:
     def _copy_data(self) -> None:
         text = self.dataframe.to_csv(index=False, sep="\t", lineterminator="\n")
         ui.clipboard.write(text)
-        ui.notify("Chart data copied to clipboard")
+        notify_success("Chart data copied to clipboard")
 
     def _download_data(self) -> None:
         filename = re.sub(r"[^a-z0-9]+", "-", self.title.text.lower()).strip("-")

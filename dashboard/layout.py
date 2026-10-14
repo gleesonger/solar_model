@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from nicegui import ui
@@ -17,6 +18,7 @@ from .models import DashboardElements, DashboardState
 from .recent import RecentTab
 from .system_info import SystemInfoTab
 from .snapshot import DashboardSnapshot
+from .warnings import DashboardWarnings
 
 
 class DashboardLayout:
@@ -35,7 +37,8 @@ class DashboardLayout:
             historical_as_of=today,
         )
 
-        self.recent_tab = RecentTab(config, self.state, self.elements, live_collector)
+        self.warnings = DashboardWarnings(config)
+        self.recent_tab = RecentTab(config, self.state, self.elements, live_collector, self.warnings)
         self.historical_tab = AnalysisTab(config, self.state, self.elements)
         self.system_info_tab = SystemInfoTab(config, self.elements)
         self.control_tab = ControlTab(config)
@@ -63,14 +66,6 @@ class DashboardLayout:
                         system_info = ui.tab("System Info")
                         control = ui.tab("Control")
                     self.historical_tab.render_mobile_controls_trigger()
-                # This status is deliberately outside normal document flow.
-                # Its initial visibility update arrives over the WebSocket and
-                # must not make the tab content jump as it is hidden/shown.
-                self.elements.updated_at_label = ui.label().classes(
-                    "dashboard-updated-label text-sm font-semibold text-white "
-                    "bg-red-600 border-4 border-red-900 rounded px-2 py-1"
-                )
-                self.elements.updated_at_label.set_visibility(False)
                 self.historical_tab.render_historical_controls()
                 self.historical_tab.set_controls_visibility(self.state.active_tab in {"Analysis", "Historical"})
             selected = {
@@ -108,12 +103,6 @@ def render_dashboard_styles() -> None:
             top: 0;
             z-index: 30;
             background: white;
-        }
-        .dashboard-updated-label {
-            position: absolute;
-            top: 0.25rem;
-            right: 1rem;
-            z-index: 1;
         }
         .analysis-controls {
             background: white;
@@ -193,57 +182,5 @@ def render_dashboard_styles() -> None:
             font-weight: 700;
         }
     """)
-    ui.add_head_html("""
-        <script>
-            function updateDashboardFreshness() {
-                document.querySelectorAll('.dashboard-updated-label').forEach((label) => {
-                    const lastUpdated = label.dataset.lastFullUpdate;
-                    const staleAfterSeconds = Number(label.dataset.staleAfterSeconds);
-                    const lastUpdatedMillis = Date.parse(lastUpdated || '');
-                    const hasTimestamp = Number.isFinite(lastUpdatedMillis);
-                    const isStale = hasTimestamp
-                        && Number.isFinite(staleAfterSeconds)
-                        && (Date.now() - lastUpdatedMillis) / 1000 > staleAfterSeconds;
-
-                    label.classList.toggle('hidden', !isStale);
-                    if (isStale) {
-                        label.textContent = `Last full update: ${lastUpdated.replace('T', ' ').slice(0, 19)}`;
-                    }
-                });
-
-                document.querySelectorAll('.live-data-freshness').forEach((label) => {
-                    const lastUpdated = label.dataset.lastLiveUpdate;
-                    const staleAfterSeconds = Number(label.dataset.staleAfterSeconds);
-                    const lastUpdatedMillis = Date.parse(lastUpdated || '');
-                    const isStale = Number.isFinite(lastUpdatedMillis)
-                        && Number.isFinite(staleAfterSeconds)
-                        && (Date.now() - lastUpdatedMillis) / 1000 > staleAfterSeconds;
-                    if (!isStale || label.dataset.reloading === 'true') return;
-
-                    label.dataset.reloading = 'true';
-                    label.textContent = 'Data is out of date — refreshing…';
-                    label.style.display = 'block';
-                    label.classList.add('text-orange-700', 'font-semibold');
-                    window.setTimeout(() => window.location.reload(), 1500);
-                });
-            }
-
-            updateDashboardFreshness();
-            setInterval(updateDashboardFreshness, 1000);
-
-            window.flashLiveUpdateIndicator = () => {
-                const indicator = document.querySelector('.live-update-indicator');
-                const message = document.querySelector('.live-update-message');
-                if (!indicator) return;
-
-                indicator.style.display = 'inline-flex';
-                if (message) message.style.display = 'none';
-                window.clearTimeout(window.liveUpdateIdleTimer);
-                window.liveUpdateIdleTimer = window.setTimeout(() => {
-                    indicator.style.display = 'none';
-                    if (message) message.style.display = '';
-                    window.liveUpdateIdleTimer = null;
-                }, 3000);
-            };
-        </script>
-    """)
+    script = Path(__file__).with_name("assets").joinpath("live_updates.js").read_text(encoding="utf-8")
+    ui.add_head_html(f"<script>{script}</script>")

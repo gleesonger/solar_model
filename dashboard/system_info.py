@@ -6,6 +6,8 @@ from nicegui.elements.table import Table
 from common import LOGGER
 from config import Config
 
+from .warnings import notify_error
+
 from . import data
 from .models import DashboardElements
 
@@ -22,7 +24,7 @@ class SystemInfoTab:
             )
         except Exception as error:
             LOGGER.exception("Dashboard system information initial load failed")
-            ui.label(f"Unable to load system information: {error}").classes("text-red-600")
+            notify_error(f"Unable to load system information: {error}")
 
     def refresh_system_info_tab(self) -> None:
         if self.elements.system_table is not None:

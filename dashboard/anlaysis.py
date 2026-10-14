@@ -8,6 +8,8 @@ from nicegui import run, ui
 from common import LOGGER
 from config import Config
 
+from .warnings import notify_error
+
 from . import charts, data
 from .download_data_dialog import show_download_data_dialog
 from .models import DashboardElements, DashboardState
@@ -97,30 +99,30 @@ class AnalysisTab:
                     raw_count = float(count_input.value)
                     count = int(raw_count)
                 except (TypeError, ValueError):
-                    ui.notify("Last must be a positive whole number", type="negative")
+                    notify_error("Last must be a positive whole number")
                     return None
                 if count < 1 or raw_count != count:
-                    ui.notify("Last must be a positive whole number", type="negative")
+                    notify_error("Last must be a positive whole number")
                     return None
                 try:
                     as_of = date.fromisoformat(str(as_of_input.value))
                 except ValueError:
-                    ui.notify("As of must be a valid date", type="negative")
+                    notify_error("As of must be a valid date")
                     return None
                 if as_of > datetime.now(self.timezone).date():
-                    ui.notify("As of cannot be in the future", type="negative")
+                    notify_error("As of cannot be in the future")
                     return None
                 unit = str(unit_input.value)
                 frequency = str(frequency_input.value)
                 if unit not in {"hours", "days", "weeks", "months", "years"}:
-                    ui.notify("Select a valid period", type="negative")
+                    notify_error("Select a valid period")
                     return None
                 if frequency not in {"hour", "day", "week", "month", "season", "year"}:
-                    ui.notify("Select a valid grouping", type="negative")
+                    notify_error("Select a valid grouping")
                     return None
                 aggregation = str(aggregation_input.value)
                 if aggregation not in {"Sum", "Average"}:
-                    ui.notify("Select a valid aggregation", type="negative")
+                    notify_error("Select a valid aggregation")
                     return None
                 return as_of, count, unit, frequency, aggregation
 
@@ -169,7 +171,7 @@ class AnalysisTab:
                     if after_action is not None:
                         after_action()
                 except Exception as error:
-                    ui.notify(f"Unable to update historical data: {error}", type="negative")
+                    notify_error(f"Unable to update historical data: {error}")
                 finally:
                     loading = False
                     progress.set_visibility(False)
@@ -192,10 +194,10 @@ class AnalysisTab:
                     raw_count = float(count_input.value)
                     count = int(raw_count)
                 except (TypeError, ValueError):
-                    ui.notify("Enter a valid As of date and Last value", type="negative")
+                    notify_error("Enter a valid As of date and Last value")
                     return
                 if count < 1 or raw_count != count:
-                    ui.notify("Last must be a positive whole number", type="negative")
+                    notify_error("Last must be a positive whole number")
                     return
                 unit = str(unit_input.value)
                 if unit == "hours":
@@ -209,7 +211,7 @@ class AnalysisTab:
                 elif unit == "years":
                     moved = data.shift_date_by_months(as_of, direction * 12 * count)
                 else:
-                    ui.notify("Select a valid period", type="negative")
+                    notify_error("Select a valid period")
                     return
                 as_of_input.set_value(min(moved, datetime.now(self.timezone).date()).isoformat())
                 # Keep the same async Apply path for the date navigation buttons.
@@ -399,10 +401,10 @@ class AnalysisTab:
                             raw_count = float(count_input.value)
                             count = int(raw_count)
                         except (TypeError, ValueError):
-                            ui.notify("Enter a valid As of date and Last value", type="negative")
+                            notify_error("Enter a valid As of date and Last value")
                             return
                         if count < 1 or raw_count != count or as_of > datetime.now(self.timezone).date():
-                            ui.notify("As of must not be in the future and Last must be positive", type="negative")
+                            notify_error("As of must not be in the future and Last must be positive")
                             return
                         bounds = data.analysis_range_bounds(as_of, count, str(period_input.value), self.timezone)
                         preview = await run.io_bound(
@@ -428,7 +430,7 @@ class AnalysisTab:
                     render_dimension_legend()
                     update_chart()
                 except Exception as error:
-                    ui.notify(f"Unable to build custom chart: {error}", type="negative")
+                    notify_error(f"Unable to build custom chart: {error}")
                 finally:
                     loading = False
                     preview_spinner.set_visibility(False)
@@ -445,7 +447,7 @@ class AnalysisTab:
             analysis_data = self._load_historical_data()
         except Exception as error:
             LOGGER.exception("Dashboard historical data initial load failed")
-            ui.notify(f"Unable to load historical data: {error}", type="negative")
+            notify_error(f"Unable to load historical data: {error}")
             return
 
         self.elements.historical_charts = charts.render_historical_charts(

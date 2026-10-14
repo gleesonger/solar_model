@@ -79,7 +79,17 @@ def main() -> None:
             client.safe_invoke(update_client)
 
         unsubscribe = snapshots.subscribe(apply_snapshot)
-        client.on_disconnect(unsubscribe)
+
+        def resume_updates() -> None:
+            nonlocal unsubscribe
+            unsubscribe()
+            unsubscribe = snapshots.subscribe(apply_snapshot)
+            latest_snapshot = snapshots.current()
+            if latest_snapshot is not None:
+                apply_snapshot(latest_snapshot)
+
+        client.on_connect(resume_updates)
+        client.on_disconnect(lambda: unsubscribe())
         ui.timer(
             config.actuals.data_retrival_schedule.live_update_interval_seconds,
             layout.refresh_live_power,

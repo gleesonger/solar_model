@@ -9,6 +9,8 @@ from nicegui import ui
 from common import LOGGER
 from config import Config
 
+from .warnings import notify_error
+
 from . import charts, data
 from .models import (
     DashboardElements,
@@ -122,7 +124,7 @@ class HourlyTab:
             hourly_range = self._load_hourly_range()
         except Exception as error:
             LOGGER.exception("Dashboard hourly data initial load failed")
-            ui.label(f"Unable to load hourly data: {error}").classes("text-red-600")
+            notify_error(f"Unable to load hourly data: {error}")
             return
         self.elements.hourly_range_label = ui.label(self._range_label()).classes("text-sm text-gray-600 mb-2")
         self.elements.hourly_charts = charts.render_hourly_charts(
@@ -147,7 +149,7 @@ class HourlyTab:
         try:
             self.refresh_hourly_tab()
         except Exception as error:
-            ui.notify(f"Unable to update hourly data: {error}", type="negative")
+            notify_error(f"Unable to update hourly data: {error}")
 
     def _load_hourly_range(self):
         return data.load_hourly_range(

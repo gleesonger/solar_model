@@ -56,7 +56,7 @@ def show_download_data_dialog(
                     except Exception as error:
                         progress.set_visibility(False)
                         form.set_visibility(True)
-                        ui.notify(f"Unable to prepare data download: {error}", type="negative")
+                        notify_error(f"Unable to prepare data download: {error}")
                         return
 
                     ui.download(content, filename=filename, media_type=media_type)

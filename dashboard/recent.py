@@ -17,6 +17,7 @@ from .live import LivePowerCollector
 from .models import DashboardElements, DashboardState, LivePowerData, SUMMARY_LATEST_KEYS
 from .snapshot import RecentData, load_recent_data
 from .tables import mark_final_total_row
+from .warnings import DashboardWarnings, notify_error
 
 class RecentTab:
     def __init__(
@@ -25,11 +26,13 @@ class RecentTab:
         state: DashboardState,
         elements: DashboardElements,
         live_collector: LivePowerCollector,
+        warnings: DashboardWarnings,
     ) -> None:
         self.config = config
         self.state = state
         self.elements = elements
         self.live_collector = live_collector
+        self.warnings = warnings
         self.timezone = ZoneInfo(config.timezone)
         array_names = {array.panel_id: array.name for array in config.forecast.arrays}
         self._summary_latest_keys = {
@@ -48,12 +51,11 @@ class RecentTab:
             day, full_updated_last_local, live_power, recent_daily, recent_monthly = loaded_data
         except Exception as error:
             LOGGER.exception("Dashboard Recent tab initial load failed")
-            ui.label(f"Unable to load Recent data: {error}").classes("text-red-600")
+            notify_error(f"Unable to load Recent data: {error}")
             return
 
 
-        self.elements.live_status_label = ui.label().classes("live-data-freshness text-sm mt-1")
-        self._update_live_status(live_power.collected_at_utc)
+        self.warnings.update_live(live_power.collected_at_utc)
 
         with ui.row().classes("items-center gap-1"):
             ui.label("Live / Today").classes("text-base font-semibold")
@@ -69,7 +71,7 @@ class RecentTab:
         ).classes("text-sm font-medium mt-1")
 
         latest = self._live_table_values(live_power)
-        self._set_full_updated_timestamp(full_updated_last_local)
+        self.warnings.update_full(full_updated_last_local)
         self._set_live_today_values(live_power)
 
         self.elements.live_table = render_live_today_table(
@@ -93,7 +95,7 @@ class RecentTab:
     def apply_loaded_data(self, loaded_data) -> None:
         day, full_updated_last_local, live_power, recent_daily, recent_monthly = loaded_data
         latest = self._live_table_values(live_power)
-        self._set_full_updated_timestamp(full_updated_last_local)
+        self.warnings.update_full(full_updated_last_local)
         self._set_live_today_values(live_power)
         if self.elements.live_table is not None:
             self.elements.live_table.rows = data.summary_rows(
@@ -108,7 +110,7 @@ class RecentTab:
             self.elements.recent_daily_table.rows = data.energy_summary_rows(recent_daily)
         if self.elements.recent_monthly_table is not None:
             self.elements.recent_monthly_table.rows = data.energy_summary_rows(recent_monthly)
-        self._update_live_status(live_power.collected_at_utc)
+        self.warnings.update_live(live_power.collected_at_utc)
         self.elements.live_timestamp = live_power.collected_at_utc
 
     def refresh_live_power(self) -> None:
@@ -126,22 +128,7 @@ class RecentTab:
             if self.elements.battery_status_label is not None:
                 self.elements.battery_status_label.set_text(self._battery_status_text(live_power))
             self._show_live_update_indicator()
-        self._update_live_status(live_power.collected_at_utc)
-        self._set_full_updated_timestamp(self.elements.full_updated_last_local)
-
-    def _set_full_updated_timestamp(self, full_updated_last_local: str | None) -> None:
-        self.elements.full_updated_last_local = full_updated_last_local
-        label = self.elements.updated_at_label
-        if label is None:
-            return
-
-        stale_after_seconds = (
-            self.config.actuals.data_retrival_schedule.full_updated_interval_seconds * 3
-        )
-        label.props(add=(
-            f'data-last-full-update="{full_updated_last_local or ""}" '
-            f'data-stale-after-seconds="{stale_after_seconds}"'
-        ))
+        self.warnings.update_live(live_power.collected_at_utc)
 
     def _load_data(self) -> RecentData:
         LOGGER.info("Dashboard loading data from database")
@@ -214,43 +201,6 @@ class RecentTab:
         if live_power.collected_at_utc is None:
             return ""
         return data.battery_status_text(live_power.values)
-
-    def _log_database_staleness(self, collected_at_utc: str | None) -> None:
-        if collected_at_utc is None:
-            LOGGER.warning("Dashboard database telemetry is unavailable")
-            return
-        age_seconds = (
-            datetime.now(ZoneInfo("UTC"))
-            - data.parse_time(collected_at_utc, ZoneInfo("UTC"))
-        ).total_seconds()
-        if age_seconds > self.config.actuals.data_retrival_schedule.full_updated_interval_seconds * 2:
-            LOGGER.warning("Dashboard database telemetry is stale")
-
-    def _update_live_status(self, collected_at_utc: str | None) -> None:
-        label = self.elements.live_status_label
-        if label is None:
-            return
-        label.classes(replace="live-data-freshness text-sm mt-1")
-        label.props(add=(
-            f'data-last-live-update="{collected_at_utc or ""}" '
-            'data-stale-after-seconds="900"'
-        ))
-        if collected_at_utc is None:
-            label.set_text("")
-            label.set_visibility(False)
-            return
-        age_seconds = max(
-            0.0,
-            (datetime.now(ZoneInfo("UTC")) - data.parse_time(collected_at_utc, ZoneInfo("UTC"))).total_seconds(),
-        )
-        if age_seconds > 60 * 15:
-            LOGGER.warning("Dashboard live data is stale")
-            label.set_text(f"Data is out of date — last updated {data.human_readable_age(age_seconds)}. Refreshing…")
-            label.set_visibility(True)
-            label.classes(add="text-orange-700 font-semibold")
-            return
-        label.set_text("")
-        label.set_visibility(False)
 
     def _show_live_update_indicator(self) -> None:
         """Tell this browser that a new live reading was applied."""

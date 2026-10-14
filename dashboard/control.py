@@ -14,6 +14,8 @@ from nicegui import run, ui
 from common import source_path
 from config import Config
 
+from .warnings import notify_error, notify_info
+
 
 def recalculation_command(start: date, end: date, config_path: Path) -> list[str]:
     """Build the non-shell command used by the tariff recalculation control."""
@@ -65,6 +67,12 @@ class ControlTab:
         self.config_path = Path.cwd() / "config.yaml"
 
     def render_control_tab(self) -> None:
+        def restart_with_feedback() -> None:
+            try:
+                restart_application()
+            except (RuntimeError, OSError) as error:
+                notify_error(f"Unable to restart application: {error}")
+
         today = datetime.now(self.timezone).date()
         year_start = one_year_before(today)
         ui.label("Control").classes("text-xl font-semibold")
@@ -95,29 +103,27 @@ class ControlTab:
                     if end > today:
                         raise ValueError("To date cannot be in the future")
                 except ValueError as error:
-                    status.set_text(f"Recalculation failed: {error}")
-                    status.classes(replace="text-sm whitespace-pre-wrap text-red-600")
-                    ui.notify(f"Recalculation failed: {error}", type="negative")
+                    status.set_text("Recalculation did not complete.")
+                    notify_error(f"Recalculation failed: {error}")
                     return
 
                 if not os.environ.get("SOLAR_MODEL_RESTART_FILE"):
                     message = "Start the application with docker_start.py before using this control."
-                    status.set_text(f"Recalculation failed: {message}")
-                    status.classes(replace="text-sm whitespace-pre-wrap text-red-600")
-                    ui.notify(message, type="negative")
+                    status.set_text("Recalculation did not complete.")
+                    notify_error(message)
                     return
 
                 running = True
                 recalculation_button.set_visibility(False)
                 progress.set_visibility(True)
+                status.classes(replace="text-sm whitespace-pre-wrap")
                 status.set_text("Recalculating tariff costs...")
                 try:
                     output = await run.io_bound(run_recalculation, start, end, self.config_path)
                 except (RuntimeError, subprocess.CalledProcessError) as error:
                     detail = error.stderr.strip() if isinstance(error, subprocess.CalledProcessError) and error.stderr else str(error)
-                    status.set_text(f"Recalculation failed: {detail}")
-                    status.classes(replace="text-sm whitespace-pre-wrap text-red-600")
-                    ui.notify(f"Recalculation failed: {detail}", type="negative")
+                    status.set_text("Recalculation did not complete.")
+                    notify_error(f"Recalculation failed: {detail}")
                     return
                 finally:
                     running = False
@@ -126,7 +132,7 @@ class ControlTab:
                 message = output or f"Recalculated tariff costs from {start} through {end}."
                 status.set_text(f"{message}\nRestarting application to load the updated configuration...")
                 status.classes(replace="text-sm whitespace-pre-wrap text-green-700")
-                ui.timer(0.5, restart_application, once=True)
+                ui.timer(0.5, restart_with_feedback, once=True)
 
             with ui.dialog() as recalculation_confirm, ui.card().classes("w-96"):
                 ui.label("Recalculate tariff costs?").classes("text-lg font-semibold")
@@ -163,8 +169,8 @@ class ControlTab:
 
                     def confirm_restart() -> None:
                         restart_confirm.close()
-                        ui.notify("Restarting application...", type="info")
-                        ui.timer(0.5, restart_application, once=True)
+                        notify_info("Restarting application...")
+                        ui.timer(0.5, restart_with_feedback, once=True)
 
                     ui.button("Restart", on_click=confirm_restart, color="negative")
             ui.button("Restart application", on_click=restart_confirm.open, icon="restart_alt", color="negative")

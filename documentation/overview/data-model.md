@@ -4,6 +4,8 @@ For sample derivation, transaction/rollup behavior, and reader contracts, see [s
 
 Source: [database.py](../../database.py), especially `ScaledInteger`, `EpochSeconds`, and `SolarDatabase`.
 
+For a consolidated comparison of units, signs, missing values, time attribution and chart/download aggregation, see [metric semantics](../reference/metric-semantics.md).
+
 ## Tables
 
 | Table | Key | Meaning |

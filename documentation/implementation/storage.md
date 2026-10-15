@@ -171,7 +171,7 @@ Typical ORM row: `{id, collected_at_utc, collected_at_local, variable_name, vari
 | `load_previous_cumulatives` | Latest `sigenstor` by collection time | Mixed-value previous-state dict |
 | Recent actual loaders | Local-day `sigenstor_hourly` rows | ORM physical values → 24-hour frames |
 | Analysis SQL | Selected hourly/minute/forecast fields in bounded CTEs | Explicitly normalised SQL rows → chart dictionaries |
-| Operational model | All forecast rows and non-null plant PV samples | Raw-storage pandas frames → normalised helper columns |
+| Operational model | All forecast vintages projected to collection/target plus four raw-watt fields; non-null PV readings averaged by UTC hour in SQL | Scaled forecast fields plus physical hourly actuals → model helper columns |
 | Device UI | Device history descending ID | Newest-per-variable list of label/value/unit dicts |
 | As-of planner | Cutoff-selected sample/vintage/device history | ORM physical values → typed device/interval objects |
 | Data export | SQL-aggregated bounded electrical samples and selected first-per-day forecast vintages | Explicit fixed-point normalisation → readable-column DataFrame |

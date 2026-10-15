@@ -42,6 +42,9 @@ def load_recent_data(config: Config, live_collector: LivePowerCollector) -> Rece
     """Load the data common to every browser's Recent tab."""
     timezone = ZoneInfo(config.timezone)
     today = datetime.now(timezone).date()
+    recent_daily, recent_monthly = data.load_recent_energy_summaries(
+        config.database.path, config.timezone, today, config.forecast.arrays,
+    )
     return (
         data.load_day(
             config.database.path,
@@ -51,20 +54,8 @@ def load_recent_data(config: Config, live_collector: LivePowerCollector) -> Rece
         ).copy(),
         data.load_latest_collection_local(config.database.path, config.timezone),
         live_collector.snapshot(),
-        data.load_recent_daily_energy(
-            config.database.path,
-            config.timezone,
-            today,
-            7,
-            config.forecast.arrays,
-        ),
-        data.load_recent_monthly_energy(
-            config.database.path,
-            config.timezone,
-            today,
-            12,
-            config.forecast.arrays,
-        ),
+        recent_daily,
+        recent_monthly,
     )
 
 

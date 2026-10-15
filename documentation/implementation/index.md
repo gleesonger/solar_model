@@ -4,6 +4,8 @@ This is the detailed companion to the [project overview](../index.md). It explai
 
 ## Pipeline guides
 
+For a concrete change across these stages, follow [adding a metric](adding-a-metric.md). The [metric semantics reference](../reference/metric-semantics.md) compares storage, charts and downloads.
+
 | Stage | Detailed guide | Main questions answered |
 | --- | --- | --- |
 | Process startup | [Runtime and configuration](runtime.md) | What calls what? Where do configuration, workers, and client state live? |

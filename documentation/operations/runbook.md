@@ -53,11 +53,73 @@ python test_energy_plan_as_of.py --database solar.db --as-of "2026-09-15T00:00:0
 - `python -m forecast.solar_adjustment --database solar.db` writes pending adjusted fields using the older tree model. It is not the operational rebuild; avoid mixing outputs unintentionally.
 - Training/backtest tools default to `forecast/solar.db`; pass `--database solar.db` explicitly when using the root database.
 
-## Backups and troubleshooting
+## Backup, restore and recovery
+
+Stop the managed application/container before restoring or running bulk maintenance. Retain the matching configuration, register maps and source revision with the backup. Choose paths explicitly; examples below use the repository's standard `solar.db` path, which may differ from `config.database.path`.
+
+### Create and verify a backup
+
+From the repository root, this command opens the source **read-only**, uses SQLite's backup API, refuses an existing destination, and checks the result. It does not call the application's migrating opener. The backup API also works with a live database; stop writers when you need a fixed maintenance baseline and matching configuration snapshot.
+
+```powershell
+@'
+import sqlite3
+from contextlib import closing
+from pathlib import Path
+
+source = Path("solar.db").resolve(strict=True)
+destination = Path("solar-before-maintenance.db").resolve()
+if destination.exists():
+    raise SystemExit("Choose a new backup filename; destination already exists")
+with closing(sqlite3.connect(source.as_uri() + "?mode=ro", uri=True)) as original:
+    with closing(sqlite3.connect(destination)) as backup:
+        original.backup(backup)
+        result = backup.execute("PRAGMA integrity_check").fetchall()
+        if result != [("ok",)]:
+            raise SystemExit(f"Backup failed integrity check: {result}")
+print(f"Verified backup: {destination}")
+'@ | .\.venv\Scripts\python.exe -
+```
+
+Save the configuration/maps separately; a database backup does not include them. Do not copy only the main database file while writers are active: journal/WAL state can matter even though this application does not explicitly enable WAL.
+
+### Restore and validate
+
+1. Stop **all** processes using the destination database, including standalone dashboard/collector and maintenance scripts. For Docker, stop the container first and work on its persistent `/config` data.
+2. Preserve the failed/current database and any `-wal`, `-shm`, or `-journal` siblings together in a separate recovery directory. Do not overwrite the only copy or mix old sidecars with the replacement.
+3. Copy the verified backup to a new `restore-check.db`. Inspect it through read-only SQLite first: `PRAGMA integrity_check`, raw/forecast counts and time ranges. Compare with values recorded before maintenance; missing history is not repaired by a successful integrity check.
+4. Test the intended source revision's `open_database("restore-check.db")` on this expendable copy, then close it and repeat the checks. Opening can migrate/rebuild; the original backup must remain untouched. Reopening should preserve raw values and complete hourly readiness.
+5. With writers still stopped and the destination clear of the prior file/sidecars, copy the verified backup into the configured database path. Restore the matching configuration/maps, check file ownership for Docker, and launch through `docker_start.py`.
+6. Confirm persisted timestamps advance, recent known energy/cost totals are plausible, and hourly initialization succeeds without repeated rebuilds. A synthetic live reading or healthy browser connection alone does not prove persisted collection is working.
+
+Useful **read-only SQL** for before/after comparison (timestamps here are UTC epoch seconds):
+
+```sql
+PRAGMA integrity_check;
+SELECT COUNT(*), MIN(collected_at_utc), MAX(collected_at_utc) FROM sigenstor;
+SELECT COUNT(*), MIN(collected_at_utc), MAX(collected_at_utc),
+       MIN(forecast_time), MAX(forecast_time) FROM forecast_solar;
+SELECT COUNT(*), SUM(sample_count), MIN(hour_start_utc), MAX(hour_start_utc)
+FROM sigenstor_hourly;
+SELECT key, value FROM database_metadata;
+```
+
+Run only queries for tables present in the backup; a legacy schema may lack hourly/metadata tables. After current initialization, hourly sample counts should account for raw rows, including rows with missing measurements. Raw/forecast counts and ranges should not change just because hourly history was rebuilt. SQL checks require a read-only SQLite connection; do not use `open_database()` merely to inspect an unknown backup.
+
+### Interrupted maintenance
+
+| Operation | Recovery boundary and next step |
+| --- | --- |
+| Initial hourly rebuild/statistics upgrade | Readiness and replacement commit together. Restart with the same intended revision and let initialization retry; do not fabricate a completion marker. Raw history is retained. |
+| Other schema changes in `open_database()` | The entire opener is not one migration transaction. Preserve the failed database, inspect the exception, and test repeat opening on a copy. Some renames/additions may already have committed; conflicting legacy/raw forecast values require reconciliation, not forced column removal. |
+| Tariff recalculation | Raw rates/costs and hourly replacement share one transaction. After fixing the failure, rerun the same dates/configuration; inspect both raw and hourly values. Initialization performed before recalculation is a separate transaction. |
+| Operational forecast rebuild | Clearing commits before per-day writes. For the same model/configuration, rerun the original explicit range to recompute it; this is not checkpoint resume. To restore the exact prior adjusted history, use the backup. Replay still has its documented future-day parity limitation. |
+| Source rollback | Do not assume older source understands a migrated schema. Test the old revision against a copy, or restore its matching pre-upgrade backup/configuration. No reverse-migration command exists. |
+
+## Troubleshooting
 
 The first startup after the R06 valid-count upgrade rebuilds hourly history once for databases lacking `hourly_rollup_initialized_v3` (including v1/v2 databases), inside a write transaction. This populates per-field valid counts and split grid statistics without changing raw data. Large histories may take longer and temporarily block other writers. Use the managed launcher so this completes before its children start; later opens only check readiness. Failed/interrupted initialization rolls back and retries.
 
-- Make a consistent SQLite backup (SQLite backup API or copy while writers are stopped); retain the matching configuration and register maps.
 - Invalid config: inspect startup `ValueError`, field spelling, complete rule coverage, effective dates, and YAML types.
 - Missing readings: check device/network/map IDs, server logs, and warning timestamp age. Failed reads retain old live values.
 - Stale summaries after tariff changes: confirm raw update and hourly rebuild both completed.

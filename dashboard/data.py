@@ -264,19 +264,10 @@ def load_recent_daily_energy(
     days: int,
     forecast_arrays: tuple[SolarArrayConfig, ...],
 ) -> pd.DataFrame:
-    if days < 1:
-        raise ValueError("Recent daily period must contain at least one day")
-    start_date = end_date - timedelta(days=days - 1)
-    daily = load_daily_energy_totals(
-        database_path,
-        timezone_name,
-        start_date,
-        end_date,
-        forecast_arrays,
+    daily, _ = _load_recent_energy_summaries(
+        database_path, timezone_name, end_date, forecast_arrays, days=days,
     )
-    daily["period"] = dataframe_column(daily, "date")
-    ordered = daily.sort_values("date", ascending=False).reset_index(drop=True)
-    return append_energy_total(ordered, "Total")
+    return daily
 
 
 def load_lifetime_start_date(database_path: str, fallback: date, timezone_name: str = "Europe/Dublin") -> date:
@@ -308,51 +299,62 @@ def load_recent_monthly_energy(
     months: int,
     forecast_arrays: tuple[SolarArrayConfig, ...],
 ) -> pd.DataFrame:
-    if months < 1:
+    _, monthly = _load_recent_energy_summaries(
+        database_path, timezone_name, end_date, forecast_arrays, months=months,
+    )
+    return monthly
+
+
+@heavy_work("dashboard recent daily monthly and lifetime energy summaries")
+def load_recent_energy_summaries(
+    database_path: str,
+    timezone_name: str,
+    end_date: date,
+    forecast_arrays: tuple[SolarArrayConfig, ...],
+    days: int = 7,
+    months: int = 12,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Load both Recent tables from one shared native SQL aggregation."""
+    return _load_recent_energy_summaries(
+        database_path, timezone_name, end_date, forecast_arrays, days=days, months=months,
+    )
+
+
+def _load_recent_energy_summaries(
+    database_path: str,
+    timezone_name: str,
+    end_date: date,
+    forecast_arrays: tuple[SolarArrayConfig, ...],
+    *,
+    days: int | None = None,
+    months: int | None = None,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    from .summary_data_sql import load_energy_summaries
+
+    if days is not None and days < 1:
+        raise ValueError("Recent daily period must contain at least one day")
+    if months is not None and months < 1:
         raise ValueError("Recent monthly period must contain at least one month")
-    current_month = end_date.replace(day=1)
-    start_date = shift_date_by_months(current_month, -(months - 1))
-    daily = load_daily_energy_totals(
-        database_path,
-        timezone_name,
-        start_date,
-        end_date,
-        forecast_arrays,
+    daily_start = end_date - timedelta(days=days - 1) if days is not None else None
+    monthly_start = shift_date_by_months(end_date.replace(day=1), -(months - 1)) if months is not None else None
+    lifetime_start = load_lifetime_start_date(database_path, end_date, timezone_name) if months is not None else None
+    start = min(value for value in (daily_start, monthly_start, lifetime_start) if value is not None)
+    frame = load_energy_summaries(
+        database_path, timezone_name, start, end_date, forecast_arrays,
+        datetime.now(ZoneInfo(timezone_name)), daily_start=daily_start,
+        monthly_start=monthly_start, lifetime_start=lifetime_start,
     )
-    value_columns = list(ENERGY_SUMMARY_COLUMNS)
-    daily["month"] = dataframe_column(daily, "date").map(
-        lambda value: str(value)[:7]
+    daily = frame.loc[frame["kind"] == "daily"].copy()
+    monthly = frame.loc[frame["kind"] == "monthly"].copy()
+    daily["period"] = daily["label"].fillna(daily["date"])
+    monthly["period"] = [
+        label if pd.notna(label) else datetime.strptime(month, "%Y-%m").strftime("%b %Y")
+        for month, label in zip(monthly["date"], monthly["label"])
+    ]
+    return (
+        daily[["date", *ENERGY_SUMMARY_COLUMNS, "period"]].reset_index(drop=True),
+        monthly[["date", "period", *ENERGY_SUMMARY_COLUMNS]].reset_index(drop=True),
     )
-    totals = cast(
-        pd.DataFrame,
-        daily.groupby("month", as_index=False)[value_columns].sum(min_count=1),
-    )
-    rows: list[dict[str, Any]] = []
-    for months_ago in range(months):
-        month = shift_date_by_months(current_month, -months_ago)
-        month_key = month.strftime("%Y-%m")
-        matching = totals.loc[dataframe_column(totals, "month") == month_key]
-        row: dict[str, Any] = {
-            "date": month_key,
-            "period": month.strftime("%b %Y"),
-        }
-        for column in value_columns:
-            row[column] = (
-                dataframe_column(matching, column).iloc[0]
-                if not matching.empty
-                else float("nan")
-            )
-        rows.append(row)
-    recent = append_energy_total(pd.DataFrame(rows), "Total")
-    lifetime_start = load_lifetime_start_date(database_path, end_date, timezone_name)
-    lifetime = load_daily_energy_totals(
-        database_path,
-        timezone_name,
-        lifetime_start,
-        end_date,
-        forecast_arrays,
-    )
-    return append_energy_total(recent, "Lifetime", source=lifetime)
 
 
 @heavy_work("dashboard daily energy aggregation")
@@ -363,138 +365,13 @@ def load_daily_energy_totals(
     end_date: date,
     forecast_arrays: tuple[SolarArrayConfig, ...],
 ) -> pd.DataFrame:
-    if end_date < start_date:
-        raise ValueError("End date must not be before first date")
+    from .summary_data_sql import load_energy_summaries
 
-    timezone = ZoneInfo(timezone_name)
-    current_time = datetime.now(timezone)
-    start_text = start_date.isoformat()
-    end_text = end_date.isoformat()
-    engine = create_engine_for_database(database_path)
-    try:
-        with Session(engine) as session:
-            actual_start = datetime.combine(start_date, time.min, tzinfo=timezone)
-            actual_end = datetime.combine(
-                end_date + timedelta(days=1),
-                time.min,
-                tzinfo=timezone,
-            )
-            # The hourly rows retain the minute-table measurement names, with
-            # period values already summed.  A tariff transition creates a
-            # second row for that hour, so summing all selected rows remains
-            # exact while avoiding a scan of every minute sample.
-            actual_samples = list(session.scalars(
-                select(SigenStorHourlySample)
-                .where(SigenStorHourlySample.hour_start_utc >= actual_start.isoformat())
-                .where(SigenStorHourlySample.hour_start_utc < actual_end.isoformat())
-                .order_by(SigenStorHourlySample.hour_start_utc)
-            ).all())
-
-            actual_totals: dict[str, dict[str, float]] = {}
-            actual_columns = (
-                ("solar_actual", "plant_pv_total_kwh_period"),
-                ("load", "plant_load_total_kwh_period"),
-                ("grid_import", "plant_grid_import_total_kwh_period"),
-                ("grid_export", "plant_grid_export_total_kwh_period"),
-                ("grid_import_cost", "grid_import_cost_period"),
-                ("grid_export_revenue", "grid_export_revenue_period"),
-                ("net_cost", "net_cost_period"),
-                ("no_solar_battery_import_cost", "no_solar_battery_import_cost_period"),
-            )
-            for sample in actual_samples:
-                actual_date = parse_time(sample.hour_start_utc, timezone).date().isoformat()
-                totals = actual_totals.setdefault(actual_date, {})
-                for output_name, attribute in actual_columns:
-                    value = getattr(sample, attribute)
-                    if value is not None:
-                        totals[output_name] = totals.get(output_name, 0.0) + value
-            actual_rows = [
-                {"date": actual_date, **totals}
-                for actual_date, totals in actual_totals.items()
-            ]
-
-            collections = session.scalars(
-                select(ForecastSolarSample.collected_at_utc)
-                .where(ForecastSolarSample.collected_at_utc >= actual_start.isoformat())
-                .where(ForecastSolarSample.collected_at_utc < actual_end.isoformat())
-                .distinct()
-                .order_by(ForecastSolarSample.collected_at_utc)
-            ).all()
-            first_guid_by_date: dict[str, str] = {}
-            for collection_timestamp in collections:
-                if collection_timestamp is not None:
-                    collection_date = parse_time(collection_timestamp, timezone).date().isoformat()
-                    first_guid_by_date.setdefault(
-                        str(collection_date),
-                        str(collection_timestamp),
-                    )
-            selected_guids = set(first_guid_by_date.values())
-            forecast_rows = (
-                list(session.scalars(
-                    select(ForecastSolarSample)
-                    .where(ForecastSolarSample.collected_at_utc.in_(selected_guids))
-                    .order_by(ForecastSolarSample.forecast_time)
-                ).all())
-                if selected_guids
-                else []
-            )
-    finally:
-        engine.dispose()
-
-    actual_by_date = {str(row["date"]): row for row in actual_rows}
-    forecast_rows_by_guid: dict[str, list[ForecastSolarSample]] = {}
-    for forecast_row in forecast_rows:
-        if forecast_row.collected_at_utc is not None:
-            forecast_rows_by_guid.setdefault(
-                forecast_row.collected_at_utc,
-                [],
-            ).append(forecast_row)
-
-    rows: list[dict[str, Any]] = []
-    number_of_days = (end_date - start_date).days + 1
-    for day_offset in range(number_of_days):
-        selected_date = start_date + timedelta(days=day_offset)
-        selected_text = selected_date.isoformat()
-        actual = actual_by_date.get(selected_text, {})
-        day_start = datetime(
-            selected_date.year,
-            selected_date.month,
-            selected_date.day,
-            tzinfo=timezone,
-        )
-        selected_guid = first_guid_by_date.get(selected_text)
-        selected_forecast_rows = (
-            forecast_rows_by_guid.get(selected_guid, [])
-            if selected_guid is not None
-            else []
-        )
-        forecast = aggregate_forecast(
-            selected_forecast_rows,
-            day_start,
-            forecast_arrays,
-            fill_missing=False,
-            source="adjusted",
-        )
-        if selected_date == current_time.date():
-            forecast = scale_forecast_to_elapsed_time(forecast, current_time)
-        rows.append({
-            "date": selected_text,
-            "solar_actual": actual.get("solar_actual"),
-            "solar_forecast": dataframe_column(
-                forecast,
-                "forecast_total",
-            ).sum(min_count=1),
-            "load": actual.get("load"),
-            "grid_import": actual.get("grid_import"),
-            "grid_export": actual.get("grid_export"),
-            "grid_import_cost": actual.get("grid_import_cost"),
-            "grid_export_revenue": actual.get("grid_export_revenue"),
-            "net_cost": actual.get("net_cost"),
-            "no_solar_battery_import_cost": actual.get(
-                "no_solar_battery_import_cost"
-            ),
-        })
-    return pd.DataFrame(rows)
+    frame = load_energy_summaries(
+        database_path, timezone_name, start_date, end_date, forecast_arrays,
+        datetime.now(ZoneInfo(timezone_name)), daily_start=start_date, include_totals=False,
+    )
+    return frame[["date", *ENERGY_SUMMARY_COLUMNS]].sort_values("date").reset_index(drop=True)
 
 
 def append_energy_total(

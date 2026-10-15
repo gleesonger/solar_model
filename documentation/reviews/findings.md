@@ -41,6 +41,8 @@ Original documentation review: 2026-10-14. The lists below reflect remaining ite
 
 ## Application fixes completed
 
+- **2026-10-15, Recent summary performance:** daily/monthly/lifetime tables now share one native SQL aggregation, replacing overlapping ORM/pandas history processing. Full twelve-month presentation and previous numeric results are preserved; see [measurements and validation](recent-summary-performance.md).
+
 - **2026-10-15, R05-R19:** tariff raw/rollup atomicity, per-field valid counts with v3 upgrade, table totals, exact date bounds, configured-timezone summaries, configured-panel selectors, exact forecast targets, non-hour-zone rebuilds, UTC planning, completed-hour evaluation, partial-launch cleanup, bounded model preparation, symmetric day-based hour navigation, full pytest collection and mobile custom dialogs are addressed. See [follow-up verification](system-review-follow-up.md). Remaining policies and coverage limits above are unchanged.
 
 - **2026-10-15, R04:** hourly import/export power now accumulates signs separately and counts valid grid observations; chart SQL and retained hourly readers use the corrected means. V2 initialization atomically rebuilds historical rollups once. Added 18 regression cases; documented broader subset 178 passed/1 skipped. Other nullable telemetry counts were subsequently addressed by R06/v3.
@@ -50,6 +52,8 @@ Original documentation review: 2026-10-14. The lists below reflect remaining ite
 - **2026-10-15:** Analysis downloads now aggregate text tariff bands as distinct labels instead of attempting a numeric average. The dialog imports the shared error notifier and logs the underlying failure before restoring the form. Regression checks cover CSV/Excel output, optional forecasts, numeric aggregation, mixed/repeated bands, and missing labels in temporary databases.
 
 ## Documentation corrections completed
+
+- **2026-10-15:** added a worked metric-extension recipe, temporary synthetic-dashboard walkthrough, backup/restore recovery procedures and a cross-output metric semantics reference. Corrected operational-model input loading and lifetime timezone descriptions. Availability downloads are now consistently documented as last-reading output; changing that behavior remains a policy decision.
 
 - Root README now links these guides and corrects unknown-key behavior, effective-dated tariff YAML, table/storage descriptions, and live/shared/Analysis refresh behavior.
 - Existing warning and notification descriptions were preserved. Remaining model/runtime limitations are described in the subsystem guides and findings above.

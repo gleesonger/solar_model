@@ -1,6 +1,6 @@
 # Dashboard queries and intermediate data structures
 
-Sources: [dashboard/data.py](../../dashboard/data.py), [dashboard/chart_data_sql.py](../../dashboard/chart_data_sql.py), [dashboard/models.py](../../dashboard/models.py), [dashboard/snapshot.py](../../dashboard/snapshot.py).
+Sources: [dashboard/data.py](../../dashboard/data.py), [dashboard/chart_data_sql.py](../../dashboard/chart_data_sql.py), [dashboard/summary_data_sql.py](../../dashboard/summary_data_sql.py), [dashboard/models.py](../../dashboard/models.py), [dashboard/snapshot.py](../../dashboard/snapshot.py).
 
 This guide covers database-to-dataset processing. The [presentation guide](dashboard-ui.md) follows these datasets into browser elements. Existing ORM/pandas compatibility helpers and the mounted Analysis SQL path are distinguished below.
 
@@ -12,8 +12,9 @@ DashboardSnapshotStore.refresh()
     load_day()
     load_latest_collection_local()
     live_collector.snapshot()
-    load_recent_daily_energy(today, 7)
-    load_recent_monthly_energy(today, 12)
+    load_recent_energy_summaries(today, days=7, months=12)
+      load_lifetime_start_date()
+      summary_data_sql.load_energy_summaries()  one shared aggregation
   run.io_bound(load_device_information)
   DashboardSnapshot(version, loaded_at, recent_data, device_information)
 ```
@@ -99,16 +100,20 @@ Returned fields are `hour`, `forecast_panel_n` for configured arrays, and `forec
 
 ## 3. Daily and monthly summary queries
 
-`load_daily_energy_totals(start_date,end_date,arrays)` reads bounded hourly rows and sums nine summary fields by configured-local date:
+`summary_data_sql.load_energy_summaries()` computes the nine summary fields in native SQLite:
 
 ```text
 date, solar_actual, solar_forecast, load, grid_import, grid_export,
 grid_import_cost, grid_export_revenue, net_cost, no_solar_battery_import_cost
 ```
 
-Actual fields map to the same energy/economics storage fields above. Forecast selection differs from the current-day table: it finds the **first collection on each configured-local date**, converting bounded UTC collection epochs in Python, reads those collections, and aggregates adjusted energy. Today's summary forecast is scaled to elapsed hours/current-hour fraction, so it compares production-to-date rather than full-day production.
+Python prepares a calendar of configured-local days with UTC epoch boundaries, and a compact timezone-offset lookup using the export helper. SQL range joins use the existing timestamp indexes; no host-local timezone function or Python callback runs per measurement. Only the eight required hourly actual fields are summed, with explicit `/10000.0` conversion from storage units. Multiple tariff rows contribute independently; SQL sums preserve all-null values as missing.
 
-Daily wrappers add `period`, sort newest first, and append Total. Monthly wrappers group daily values into `YYYY-MM` rows, use labels like `Sep 2026`, fill absent months with missing values, append Total, then load lifetime daily history for a separate Lifetime row. `load_lifetime_start_date()` also uses local-time hybrids; this is a broader historical scan than twelve displayed months suggest.
+Forecast selection differs from the current-day table: `MIN(collected_at_utc)` selects the **first collection on each configured-local date**, even when configured panels are absent from that vintage. SQL unpivots only configured panels' non-null adjusted cumulative Wh. `LAG` partitions by collection day, panel and target local date; first values contribute themselves, decreases clamp to zero, and `/10000000.0` converts stored Wh into kWh. The offset lookup covers eligible target dates; a left join retains out-of-range targets for forecast-presence semantics. Eligible hours are the existing 24 elapsed-hour labels after collection-day local midnight, including their existing DST behavior. Today's forecast uses completed hours plus the current label's elapsed fraction; later labels have zero weight. No configured non-null points means missing, while configured points entirely outside eligible hours mean zero.
+
+The shared snapshot calls `load_recent_energy_summaries()`: two minimum-timestamp queries establish the lifetime start, then **one aggregation statement** materializes daily history once and returns both finished numeric tables. SQL produces seven descending days plus Total, all twelve descending calendar months (including empty months) plus their Total, and a separate Lifetime row. Recent and lifetime totals have distinct date predicates when history exceeds twelve months. Python only separates the small tables and formats month/period labels. Standalone `load_recent_daily_energy()` and `load_recent_monthly_energy()` use the same SQL engine; `load_daily_energy_totals()` requests ascending daily rows without totals.
+
+`load_lifetime_start_date()` continues to read minimum raw electrical/forecast collection timestamps and converts them to the configured timezone. The combined query covers the union of daily, monthly and lifetime date ranges. Current-day Live/Today reads remain a separate loader and are not part of this single-statement guarantee. See [performance measurements](../reviews/recent-summary-performance.md) and [regression tests](../../tests/test_recent_summary_sql.py).
 
 `load_device_information()` reads device history descending ID, keeps the newest row per human `variable`, sorts labels case-insensitively, and returns `{variable,value,unit}` strings. It is not a historical as-of selector.
 
@@ -223,7 +228,7 @@ With forecasts enabled, SQL first selects distinct bounded collection epochs, fi
 Native `SUM`/`AVG` handle numeric fields. For each last-reading field, `MAX(CASE WHEN field IS NOT NULL THEN reading_order END)` identifies its own final reading and a join retrieves that value; forecast reading order sorts collection then target time. Tariff labels use first-reading positions and ordered window `GROUP_CONCAT`. SQL also joins actual/forecast periods and assigns output labels. No Python SQLite functions/aggregates or pandas grouping/merging run on this path. A small Python-generated UTC-offset lookup supports native local-time bucketing; only final period values need timezone conversion. SQL removes fixed-point scaling once, and only aggregated result rows are converted into DataFrames. The resulting export preserves the previous field rules:
 
 - `_kwh_period`, `_cost_period`, `_revenue_period`: sum.
-- `_kwh` and `_watt_hours_day`: last reading.
+- `_kwh` and `_watt_hours_day`: last non-null reading, including the available-battery-energy level; it is not averaged like its chart counterpart.
 - `import_tariff_band`: distinct non-null labels in reading order, joined with ` / `; all-missing labels remain missing.
 - Other numeric fields, including cumulative forecast `_watt_hours`: average.
 - Output column names are readable labels, with `Forecast ` prefixes. This exports stored-field aggregates, not chart forecast differences.

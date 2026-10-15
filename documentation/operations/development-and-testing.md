@@ -19,10 +19,13 @@ python -m venv .venv
 
 ## Test map
 
+Use the [isolated development walkthrough](isolated-development.md) for synthetic full-dashboard checks without hardware/provider calls. For a feature change spanning layers, follow the [worked metric recipe](../implementation/adding-a-metric.md).
+
 | Tests | What they cover |
 | --- | --- |
 | [test_forecast_schedule.py](../../tests/test_forecast_schedule.py) | Persistent external-request cadence, restart/history fallback, exact due boundary, failed attempts, duplicate claims, UTC DST duration and schedule-database failure recovery |
 | [test_custom_chart_sql.py](../../tests/test_custom_chart_sql.py) | SQL/pandas parity, batching, selected-field reads, grouping/splits, timezone/DST, minute telemetry, tariff quoting |
+| [test_recent_summary_sql.py](../../tests/test_recent_summary_sql.py) | Native summary/Python parity, DST/timezone boundaries, nulls/resets/vintages, empty months, leap-day/lifetime totals and shared single-aggregation refresh |
 | [test_dashboard_forecasts.py](../../tests/test_dashboard_forecasts.py) | Raw/adjusted selection, summary semantics, battery-level custom charts, stable colours/dashes/markers |
 | [test_grid_power_rollup.py](../../tests/test_grid_power_rollup.py) | R04 sign-separated import/export means, zeros/nulls, tariff-split hours, raw/hourly parity, incremental/rebuild statistics and interrupted legacy-to-current upgrade |
 | [test_review_recovery.py](../../tests/test_review_recovery.py) | R01 finite/neutral residuals and real adjusted writes; R02 startup/midnight baseline retry and partial PV rollback; R03 transactional creation/rebuild, interruption/retry and no repeated history scan |

@@ -36,6 +36,8 @@ Keep concise explanations in `overview/`, detailed code/data contracts in `imple
 | [Dashboard](overview/dashboard.md) | Tabs, caches, live readings, queries, exports, reconnects |
 | [Styling](overview/styling.md) | CSS, colours, chart conventions, responsive layouts |
 | [Development and testing](operations/development-and-testing.md) | Setup, checks, coverage, verification limits |
+| [Isolated development](operations/isolated-development.md) | Temporary-database tests and synthetic full-dashboard walkthrough |
+| [Adding a metric](implementation/adding-a-metric.md) | Worked ingestion → storage → statistics → query → chart/export change recipe |
 | [Operations](operations/runbook.md) | Launch, Docker, restart, maintenance, troubleshooting |
 | [Review findings](reviews/findings.md) | Confirmed defects and open questions |
 | [System review plan](reviews/system-review-plan.md) | Approved deep review scope, independent reviewers, browser/output checks, and consolidation assessment |
@@ -44,7 +46,9 @@ Keep concise explanations in `overview/`, detailed code/data contracts in `imple
 | [System review recommendations](reviews/system-review-recommendations.md) | Prioritized fixes, acceptance criteria, policy decisions, and consolidation work |
 | [Documentation development trial](reviews/documentation-development-trial.md) | Fresh-agent proposals tested against source, and resulting documentation gaps |
 | [Download performance](reviews/download-performance.md) | Profiling findings, SQL/Excel optimisations, measured timings, and regression coverage |
+| [Recent summary performance](reviews/recent-summary-performance.md) | Native SQL implementation, profiling, before/after timings and parity checks |
 | [Schema reference](reference/schema.md) | Every declared database column, key, type, and index |
+| [Metric semantics](reference/metric-semantics.md) | Units, signs, missing values, time attribution and chart/download aggregation differences |
 
 ## Essential distinctions
 

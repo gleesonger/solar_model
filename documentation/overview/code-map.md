@@ -30,6 +30,7 @@ For call hierarchies and structures crossing module boundaries, see the [detaile
 - [anlaysis.py](../../dashboard/anlaysis.py): Analysis controls, chart builder, zoom and download actions. **Keep the existing misspelling when locating/importing this file.**
 - [data.py](../../dashboard/data.py): summaries, forecast selection, exports, calendar helpers, chart adapters; also retains older ORM/pandas paths.
 - [chart_data_sql.py](../../dashboard/chart_data_sql.py): selection-aware `ChartRequest` aggregation and batched SQL.
+- [summary_data_sql.py](../../dashboard/summary_data_sql.py): shared native SQL daily/monthly/lifetime summaries, forecast differences and elapsed-day weighting.
 - [export_data_sql.py](../../dashboard/export_data_sql.py): raw-sample/selected-vintage SQL aggregation for downloads; chronological last readings and tariff labels.
 - [charts.py](../../dashboard/charts.py), [chart_display.py](../../dashboard/chart_display.py): ECharts options and reusable chart/table/export UI.
 - [warnings.py](../../dashboard/warnings.py), [warnings.js](../../dashboard/assets/warnings.js), [live_updates.js](../../dashboard/assets/live_updates.js): notifications, persistent freshness banner, update indicator.
@@ -50,7 +51,7 @@ For call hierarchies and structures crossing module boundaries, see the [detaile
 
 ## Change routing
 
-- New metric: register JSON, ORM model/derived fields, rollup semantics, dashboard adapters/SQL, labels, tests.
+- New metric: follow the [worked recipe](../implementation/adding-a-metric.md) through register JSON, declared storage, historical-data policy, valid counts, SQL, frame/chart registration, labels and tests.
 - Forecast change: production model, collector integration, rebuild behavior, dashboard snapshot meaning, evaluation.
 - Tariff change: configuration and matching, stored economics, recalculation, rollups, money charts.
 - Styling change: follow [styling.md](styling.md); freshness policy lives in warning code, not tab layout.

@@ -4,9 +4,11 @@ from __future__ import annotations
 
 from datetime import date, datetime
 from io import BytesIO
+from time import perf_counter
 from zoneinfo import ZoneInfo
 
 import pandas as pd
+from xlsxturbo import df_to_xlsx
 from nicegui import run, ui
 
 from common import LOGGER
@@ -81,28 +83,46 @@ def prepare_download(
     include_forecast: bool,
     file_format: str,
 ) -> tuple[bytes, str, str]:
+    started = perf_counter()
     exported = data.analysis_export_dataframe(
         database_path, bounds, timestep, timezone, include_forecast=include_forecast
     )
+    data_seconds = perf_counter() - started
+    file_started = perf_counter()
     filename_base = f"analysis-data-{bounds.start_date:%Y-%m-%d}-to-{bounds.end_date:%Y-%m-%d}"
     if file_format == "CSV":
-        return exported.to_csv(index=False).encode(), f"{filename_base}.csv", "text/csv"
-    return (
-        excel_bytes(exported),
-        f"{filename_base}.xlsx",
-        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        result = exported.to_csv(index=False).encode(), f"{filename_base}.csv", "text/csv"
+    else:
+        result = (
+            excel_bytes(exported),
+            f"{filename_base}.xlsx",
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+    LOGGER.info(
+        "Analysis %s download prepared: %s rows, %s bytes (data %.3fs, file %.3fs, total %.3fs)",
+        file_format, len(exported), len(result[0]), data_seconds,
+        perf_counter() - file_started, perf_counter() - started,
     )
+    return result
 
 
 def excel_bytes(dataframe: pd.DataFrame) -> bytes:
+    if len(dataframe) > 1_048_575 or len(dataframe.columns) > 16_384:
+        raise ValueError("The export exceeds Excel's sheet limits; choose a larger timestep or CSV")
     # Excel has no timezone-aware datetime type.  Keep the displayed local
     # interval, but remove its timezone metadata for the workbook.
     exported = dataframe.copy()
     for column in exported.select_dtypes(include=["datetimetz"]):
         exported[column] = exported[column].dt.tz_localize(None)
+    # Excel cannot represent infinities; retain pandas' textual convention.
+    exported = exported.replace({float("inf"): "inf", float("-inf"): "-inf"})
     buffer = BytesIO()
-    with pd.ExcelWriter(buffer, engine="xlsxwriter") as writer:
-        exported.to_excel(writer, sheet_name="Analysis Data", index=False)
+    # Pass the whole DataFrame to the Rust writer; no Python cell iteration.
+    df_to_xlsx(
+        exported, buffer, sheet_name="Analysis Data", constant_memory=True,
+        header_format={"bold": True, "border": "thin", "align_horizontal": "center", "align_vertical": "top"},
+        column_formats={"period": {"num_format": "yyyy-mm-dd hh:mm:ss"}},
+    )
     return buffer.getvalue()
 
 

@@ -198,14 +198,32 @@ Energy `battery_flow` is renamed `battery`; telemetry `power_*` prefixes are rem
 
 ## 7. Export and compatibility paths
 
-Exports use `load_analysis_source_data()` rather than chart SQL: bounded **full electrical ORM rows** and **forecast ORM rows filtered by collection time**, ordered by collection/target. They become `AnalysisSourceData(samples,forecast_rows)`.
+Exports use dedicated [export_data_sql.py](../../dashboard/export_data_sql.py) aggregation rather than loading full ORM objects or using the chart-specific SQL. The public `analysis_export_dataframe()` adapter delegates to `load_analysis_export_dataframe()`:
 
-`analysis_export_dataframe()` creates local interval-record dictionaries, aggregates every declared measurement field, and optionally outer-merges forecast records on `period`. It retains the first collection per local collection date and then filters target times to bounds.
+```text
+prepare_download()
+  analysis_export_dataframe()
+    export_data_sql.load_analysis_export_dataframe()
+      build a small timezone-offset lookup for the requested date range
+      group bounded raw electrical rows in native SQLite
+      optionally select first-per-day forecast vintages and aggregate targets
+      join periods and label columns within the same SQL statement
+      pandas.read_sql_query() loads the final result; restore period timezones
+  pandas CSV serialisation or one DataFrame-to-XlsxTurbo call (Rust writer)
+```
+
+The electrical query uses indexed collection-time bounds on `sigenstor` and aggregates all declared export fields directly into the requested local intervals. It deliberately uses raw samples, preserving per-field null handling, cumulative last readings, and sample-weighted means rather than substituting hourly-rollup semantics.
+
+With forecasts enabled, SQL first selects distinct bounded collection epochs, finds the earliest collection per configured-local collection date, and joins only those vintages. Target bounds are applied before aggregation. Disabling forecasts omits all forecast-table references from the single export query. Calendar bucketing supports minute/hour/day/week/month/season/year, including configured timezone and UTC-offset transitions.
+
+Native `SUM`/`AVG` handle numeric fields. For each last-reading field, `MAX(CASE WHEN field IS NOT NULL THEN reading_order END)` identifies its own final reading and a join retrieves that value; forecast reading order sorts collection then target time. Tariff labels use first-reading positions and ordered window `GROUP_CONCAT`. SQL also joins actual/forecast periods and assigns output labels. No Python SQLite functions/aggregates or pandas grouping/merging run on this path. A small Python-generated UTC-offset lookup supports native local-time bucketing; only final period values need timezone conversion. SQL removes fixed-point scaling once, and only aggregated result rows are converted into DataFrames. The resulting export preserves the previous field rules:
 
 - `_kwh_period`, `_cost_period`, `_revenue_period`: sum.
 - `_kwh` and `_watt_hours_day`: last reading.
 - `import_tariff_band`: distinct non-null labels in reading order, joined with ` / `; all-missing labels remain missing.
 - Other numeric fields, including cumulative forecast `_watt_hours`: average.
 - Output column names are readable labels, with `Forecast ` prefixes. This exports stored-field aggregates, not chart forecast differences.
+
+The retained `load_analysis_source_data()`/`AnalysisSourceData` and pandas export helpers serve older/reference paths and regression comparisons; current downloads do not materialise those source-row lists. Logs report the native SQL/read duration, data preparation, and file-generation time. See the [performance investigation](../reviews/download-performance.md) for measured results and limits.
 
 Older `load_hourly_range`, `load_telemetry`, historical ORM/pandas frame helpers, and `custom_chart_preview_from_frames` remain in `data.py`. Some are used by the unmounted Hourly component or test comparison paths. The mounted `AnalysisTab` uses `load_analysis_range` and shared SQL; do not assume a similarly named old helper is its active implementation.

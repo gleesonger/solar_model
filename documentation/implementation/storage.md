@@ -162,7 +162,7 @@ Typical ORM row: `{id, collected_at_utc, collected_at_local, variable_name, vari
 | Operational model | All forecast rows and non-null plant PV samples | Raw-storage pandas frames → normalised helper columns |
 | Device UI | Device history descending ID | Newest-per-variable list of label/value/unit dicts |
 | As-of planner | Cutoff-selected sample/vintage/device history | ORM physical values → typed device/interval objects |
-| Data export | All bounded electrical rows and forecast collections | ORM values → readable-column DataFrame |
+| Data export | SQL-aggregated bounded electrical samples and selected first-per-day forecast vintages | Explicit fixed-point normalisation → readable-column DataFrame |
 
 No foreign keys link these tables. Their relation is temporal and metric-based. Model opening/migration and reader creation are different operations: many dashboard reads use `create_engine_for_database()` directly and do not trigger schema migration.
 

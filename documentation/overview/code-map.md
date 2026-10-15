@@ -30,6 +30,7 @@ For call hierarchies and structures crossing module boundaries, see the [detaile
 - [anlaysis.py](../../dashboard/anlaysis.py): Analysis controls, chart builder, zoom and download actions. **Keep the existing misspelling when locating/importing this file.**
 - [data.py](../../dashboard/data.py): summaries, forecast selection, exports, calendar helpers, chart adapters; also retains older ORM/pandas paths.
 - [chart_data_sql.py](../../dashboard/chart_data_sql.py): selection-aware `ChartRequest` aggregation and batched SQL.
+- [export_data_sql.py](../../dashboard/export_data_sql.py): raw-sample/selected-vintage SQL aggregation for downloads; chronological last readings and tariff labels.
 - [charts.py](../../dashboard/charts.py), [chart_display.py](../../dashboard/chart_display.py): ECharts options and reusable chart/table/export UI.
 - [warnings.py](../../dashboard/warnings.py), [warnings.js](../../dashboard/assets/warnings.js), [live_updates.js](../../dashboard/assets/live_updates.js): notifications, persistent freshness banner, update indicator.
 - [control.py](../../dashboard/control.py): operator recalculation/restart actions; [download_data_dialog.py](../../dashboard/download_data_dialog.py): interval CSV/Excel downloads.

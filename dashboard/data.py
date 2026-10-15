@@ -823,26 +823,12 @@ def analysis_export_dataframe(
     database_path: str, bounds: AnalysisRangeBounds, timestep: str, timezone: tzinfo,
     *, include_forecast: bool,
 ) -> pd.DataFrame:
-    """Aggregate Analysis records into chronological export intervals."""
-    source = load_analysis_source_data(database_path, bounds)
-    actual_records = [{
-        "period": analysis_interval_start(parse_time(sample.collected_at_utc, timezone), timestep),
-        **{column: getattr(sample, column) for column in SAMPLE_EXPORT_COLUMNS},
-    } for sample in source.samples]
-    actual = aggregate_analysis_export_records(
-        actual_records,
-        columns=SAMPLE_EXPORT_COLUMNS,
+    """Aggregate export fields in SQL and fetch only the requested intervals."""
+    from .export_data_sql import load_analysis_export_dataframe
+
+    return load_analysis_export_dataframe(
+        database_path, bounds, timestep, timezone, include_forecast=include_forecast,
     )
-    if not include_forecast:
-        return actual
-    forecast = aggregate_analysis_export_records(
-        analysis_forecast_export_records(
-            source.forecast_rows, bounds, timestep, timezone,
-        ),
-        columns=FORECAST_EXPORT_COLUMNS,
-        forecast=True,
-    )
-    return actual.merge(forecast, on="period", how="outer").sort_values("period").reset_index(drop=True)
 
 
 def analysis_interval_start(value: datetime, timestep: str) -> datetime:

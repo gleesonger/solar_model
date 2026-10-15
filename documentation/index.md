@@ -39,6 +39,7 @@ Keep concise explanations in `overview/`, detailed code/data contracts in `imple
 | [Operations](operations/runbook.md) | Launch, Docker, restart, maintenance, troubleshooting |
 | [Review findings](reviews/findings.md) | Confirmed defects and open questions |
 | [Documentation development trial](reviews/documentation-development-trial.md) | Fresh-agent proposals tested against source, and resulting documentation gaps |
+| [Download performance](reviews/download-performance.md) | Profiling findings, SQL/Excel optimisations, measured timings, and regression coverage |
 | [Schema reference](reference/schema.md) | Every declared database column, key, type, and index |
 
 ## Essential distinctions

@@ -167,9 +167,9 @@ Single-day telemetry already contains minute points, so its zoom is client-side.
 
 ## 7. Export bytes and operator actions
 
-`download_data_dialog.prepare_download()` receives bounds/timestep/forecast flag/format, calls `analysis_export_dataframe`, and returns `(content: bytes, filename: str, media_type: str)`. CSV serialises directly; Excel copies the frame, removes timezone metadata while retaining local displayed time, and writes `Analysis Data` with XlsxWriter into `BytesIO`.
+`download_data_dialog.prepare_download()` receives bounds/timestep/forecast flag/format, calls `analysis_export_dataframe`, and returns `(content: bytes, filename: str, media_type: str)`. CSV serialises directly. Excel removes timezone metadata while retaining displayed local time, then passes the whole pandas DataFrame to `xlsxturbo.df_to_xlsx` in constant-memory mode into `BytesIO`. XlsxTurbo uses the Rust `rust_xlsxwriter` library; project code performs no row/cell writing or formatting loops. Missing cells remain blank, infinities become text, datetimes retain date formatting, and headers remain formatted. Install `xlsxturbo>=1.11,<2` from requirements. Sheet-limit violations give a validation error. Logs separate data preparation from file generation.
 
-Chart-specific CSV/clipboard serialise the component's current chart DataFrame. They do not query all underlying database fields. Full Analysis downloads aggregate the broader ORM field set described in [dashboard-data.md](dashboard-data.md).
+Chart-specific CSV/clipboard serialise the component's current chart DataFrame. They do not query all underlying database fields. Full Analysis downloads aggregate the broader declared database field set directly in SQLite as described in [dashboard-data.md](dashboard-data.md).
 
 `ControlTab` turns date inputs into a subprocess argv list, runs recalculation in `run.io_bound`, and after success requests a supervisor restart. It confirms writes/restarts with local dialogs. Download failures log the underlying exception, restore the form, and show the shared error notification so the user can correct the inputs or retry.
 

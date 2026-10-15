@@ -23,6 +23,7 @@ python -m venv .venv
 | --- | --- |
 | [test_custom_chart_sql.py](../../tests/test_custom_chart_sql.py) | SQL/pandas parity, batching, selected-field reads, grouping/splits, timezone/DST, minute telemetry, tariff quoting |
 | [test_dashboard_forecasts.py](../../tests/test_dashboard_forecasts.py) | Raw/adjusted selection, summary semantics, battery-level custom charts, stable colours/dashes/markers |
+| [test_analysis_download.py](../../tests/test_analysis_download.py) | CSV/Excel downloads, optional forecasts, numeric aggregation, mixed/repeated/missing tariff-band labels |
 | [test_solar_adjustment.py](../../tests/test_solar_adjustment.py) | Older tree model's rolling windows, as-of features, cumulative/day Wh |
 | [test_forecast_schema_migration.py](../../tests/test_forecast_schema_migration.py) | Legacy forecast renaming and repeat-open preservation |
 | [test_sigenstor_schema_migration.py](../../tests/test_sigenstor_schema_migration.py) | Battery-availability rename preserves values |

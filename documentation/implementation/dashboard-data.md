@@ -204,7 +204,8 @@ Exports use `load_analysis_source_data()` rather than chart SQL: bounded **full 
 
 - `_kwh_period`, `_cost_period`, `_revenue_period`: sum.
 - `_kwh` and `_watt_hours_day`: last reading.
-- Other fields, including cumulative forecast `_watt_hours`: average.
+- `import_tariff_band`: distinct non-null labels in reading order, joined with ` / `; all-missing labels remain missing.
+- Other numeric fields, including cumulative forecast `_watt_hours`: average.
 - Output column names are readable labels, with `Forecast ` prefixes. This exports stored-field aggregates, not chart forecast differences.
 
 Older `load_hourly_range`, `load_telemetry`, historical ORM/pandas frame helpers, and `custom_chart_preview_from_frames` remain in `data.py`. Some are used by the unmounted Hourly component or test comparison paths. The mounted `AnalysisTab` uses `load_analysis_range` and shared SQL; do not assume a similarly named old helper is its active implementation.

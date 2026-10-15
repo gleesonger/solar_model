@@ -7,7 +7,6 @@ Reviewed 2026-10-14 against the working tree described in the [documentation ind
 | Finding | Evidence / consequence |
 | --- | --- |
 | Full test suite cannot collect | [test_database_0_1_0_migration.py](../../tests/test_database_0_1_0_migration.py) imports absent `migrate_database_0_1_0`. Full pytest run reproduced `ModuleNotFoundError`. |
-| Download error handler lacks import | [download_data_dialog.py](../../dashboard/download_data_dialog.py) calls `notify_error` without importing it. A validation/export failure reaches an undefined name. |
 | Host timezone leaks into ORM local dates | [database.py](../../database.py) hybrids use host `astimezone()`/SQLite `localtime`; some summary/export queries use those hybrids. Configured timezone can differ from host, especially Docker. |
 | Recalculation error message overstates rollback | [recalculate_economics.py](../../recalculate_economics.py) commits raw updates before rebuilding rollups, yet caught failures say “no changes committed”. |
 | Missing planning rules pass config load | Minimum/maximum schedules default empty and validate only when non-empty, but [simulate_energy_plan](../../energy_plan_simulation.py) calls `tariff_rule` on both unconditionally. |
@@ -40,10 +39,14 @@ Reviewed 2026-10-14 against the working tree described in the [documentation ind
 
 ## Suggested repair order
 
-1. Restore/reconcile the missing migration test dependency and import the download error notifier.
+1. Restore/reconcile the missing migration test dependency.
 2. Unify configured-timezone handling, forecast interval meaning, and required planning-rule validation.
 3. Add production-model/replay and optimiser checks before changing their algorithms.
 4. Reconcile dependency declaration, port metadata, and retained legacy paths.
+
+## Application fixes completed
+
+- **2026-10-15:** Analysis downloads now aggregate text tariff bands as distinct labels instead of attempting a numeric average. The dialog imports the shared error notifier and logs the underlying failure before restoring the form. Regression checks cover CSV/Excel output, optional forecasts, numeric aggregation, mixed/repeated bands, and missing labels in temporary databases.
 
 ## Documentation corrections completed
 

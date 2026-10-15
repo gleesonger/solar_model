@@ -171,7 +171,7 @@ Single-day telemetry already contains minute points, so its zoom is client-side.
 
 Chart-specific CSV/clipboard serialise the component's current chart DataFrame. They do not query all underlying database fields. Full Analysis downloads aggregate the broader ORM field set described in [dashboard-data.md](dashboard-data.md).
 
-`ControlTab` turns date inputs into a subprocess argv list, runs recalculation in `run.io_bound`, and after success requests a supervisor restart. It confirms writes/restarts with local dialogs. The source's download error handler currently references an unimported notification helper; this remains in [review findings](../reviews/findings.md).
+`ControlTab` turns date inputs into a subprocess argv list, runs recalculation in `run.io_bound`, and after success requests a supervisor restart. It confirms writes/restarts with local dialogs. Download failures log the underlying exception, restore the form, and show the shared error notification so the user can correct the inputs or retry.
 
 ## 8. Python-to-browser freshness contract
 

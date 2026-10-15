@@ -13,6 +13,7 @@ from common import LOGGER
 
 from . import data
 from .data import AnalysisRangeBounds
+from .warnings import notify_error
 
 
 def show_download_data_dialog(
@@ -54,6 +55,7 @@ def show_download_data_dialog(
                             str(format_input.value),
                         )
                     except Exception as error:
+                        LOGGER.exception("Dashboard data download failed")
                         progress.set_visibility(False)
                         form.set_visibility(True)
                         notify_error(f"Unable to prepare data download: {error}")

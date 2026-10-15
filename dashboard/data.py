@@ -808,6 +808,8 @@ def export_field_label(column: str, *, forecast: bool = False) -> str:
 
 def export_aggregation(column: str) -> str:
     """Return the appropriate interval aggregation for a database metric."""
+    if column == "import_tariff_band":
+        return "labels"
     if column.endswith("_kwh_period") or column.endswith("_cost_period") or column.endswith("_revenue_period"):
         return "sum"
     if column.endswith("_kwh") or column.endswith("_watt_hours_day"):
@@ -873,6 +875,11 @@ def aggregate_analysis_export_records(
             result[label] = groups[column].sum(min_count=1)
         elif aggregation == "last":
             result[label] = groups[column].last()
+        elif aggregation == "labels":
+            # A bucket may cross tariff bands; retain each label once in reading order.
+            result[label] = groups[column].agg(
+                lambda values: " / ".join(dict.fromkeys(values.dropna())) or None
+            )
         else:
             result[label] = groups[column].mean()
     return result.reset_index()

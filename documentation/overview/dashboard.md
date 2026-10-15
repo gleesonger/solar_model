@@ -29,7 +29,7 @@ Source: [main_dashboard.py](../../main_dashboard.py), [dashboard/layout.py](../.
 - Energy/cost charts normally use hourly rollups. Single-day telemetry retains minute points; longer ranges use hourly telemetry. Custom battery-level charts can query minute data.
 - Energy is summed; telemetry and rates use averages where appropriate. Custom `battery` means available energy level with a no-minute-record fallback; Analysis energy `battery_flow` means charge minus discharge.
 - [ChartDataDisplay](../../dashboard/chart_display.py) shares chart/table toggle, clipboard, CSV, labels, and totals. It preserves user legend state during normal updates.
-- Analysis downloads support minute/hour/day/week/month/season/year, CSV or Excel, optional forecasts. Interval energy/costs sum; cumulative kWh/daily Wh use the last reading; other fields average (including cumulative forecast Wh). These exports are stored-field aggregates, not identical to forecast-energy chart differences. Excel strips timezone metadata while retaining displayed local time.
+- Analysis downloads support minute/hour/day/week/month/season/year, CSV or Excel, optional forecasts. Interval energy/costs sum; cumulative kWh/daily Wh use the last reading; other numeric fields average (including cumulative forecast Wh). Import tariff bands retain distinct non-null labels in reading order, joined with ` / ` when an interval spans multiple bands. These exports are stored-field aggregates, not identical to forecast-energy chart differences. Excel strips timezone metadata while retaining displayed local time.
 - Changing range/custom selection runs database work via `run.io_bound` and shows progress. Analysis is not automatically refreshed by shared Recent snapshots.
 
 ## Freshness and notifications

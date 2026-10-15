@@ -76,7 +76,7 @@ def main(argv: list[str] | None = None) -> int:
         maximum = None if args.end is None or args.end == date.max else int(datetime.combine(date.fromordinal(args.end.toordinal() + 1), datetime.min.time(), zone).timestamp())
         database = open_database(path)
         try:
-            with database.engine.connect() as connection:
+            with database.engine.begin() as connection:
                 raw = connection.connection.driver_connection
                 def configured_localtime(value: int) -> str:
                     return datetime.fromtimestamp(value, zone).strftime("%Y-%m-%d %H:%M:%S")
@@ -117,11 +117,11 @@ def main(argv: list[str] | None = None) -> int:
                  WHERE sample.collected_at_utc = matched.collected_at_utc
                 """, params)
                 raw.execute("DROP TABLE tariff_intervals")
-                raw.commit()
-            # Dashboard summaries use sigenstor_hourly, so replacing the
-            # selected rollup range is required after recalculating its minute
-            # source rows.
-            database.rebuild_hourly_rollup(args.start, args.end or datetime.now(zone).date(), zone)
+                latest = raw.execute("SELECT MAX(collected_at_utc) FROM sigenstor WHERE collected_at_utc >= ?", (minimum,)).fetchone()[0]
+                rebuild_end = args.end or (datetime.fromtimestamp(latest, zone).date() if latest is not None else args.start)
+                # The same connection/transaction owns both raw and rollup
+                # changes. A rebuild failure rolls the entire update back.
+                database.rebuild_hourly_rollup(args.start, rebuild_end, zone, connection=connection)
         finally:
             database.close()
     except (ValueError, OSError, SQLAlchemyError) as error:

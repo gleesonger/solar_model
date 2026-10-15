@@ -112,6 +112,7 @@ All measurement/economics fields are nullable. Only `collected_at_utc` identifie
 `_add_hourly_sample()` floors UTC epoch seconds to an hour, replaces a missing band with `Unknown`, and uses SQLite conflict-update on `(hour_start_utc, import_tariff_band)`.
 
 - `sample_count` increments for every source row.
+- Each nullable non-counter/non-period measurement has an integer `<field>_sample_count` from `HOURLY_VALID_COUNT_COLUMNS`; only non-null values increment it. Grid uses its separate `grid_power_sample_count`. Zero counts as observed; missing does not.
 - Fields in `CUMULATIVE_COLUMNS` merge by maximum.
 - All other numeric fields merge by addition.
 - A null incoming/current side preserves the non-null side; both missing remain null.
@@ -120,11 +121,11 @@ All measurement/economics fields are nullable. Only `collected_at_utc` identifie
 
 Grid import/export power means use `plant_grid_import_power_kw` / `plant_grid_export_power_kw` divided by `grid_power_sample_count`, combined across tariff bands. The signed `plant_grid_power_kw` sum is retained separately and must not be split after summation. These fields are power statistics, not imported/exported meter energy.
 
-Hourly **energy/cost** is already an aggregate. Hourly **power/rate/SOC/available energy** must divide sums by count; different readers handle per-field missingness slightly differently. Tariff transitions create multiple rows for an hour; readers must combine them.
+Hourly **energy/cost** is already an aggregate. Hourly **power/rate/SOC/available energy** divides each sum by that field's valid count. Thus 4/NULL averages to 4, 4/0 to 2, and all-null remains missing. Combine sums and counts across tariff bands before dividing.
 
-`_insert_hourly_rollup()` reproduces sums/maxima using SQL grouped by hour and band. Startup `initialize_hourly_rollup()` uses an explicit SQLite `BEGIN IMMEDIATE` transaction: table creation (if needed), full replacement from raw samples and metadata key `hourly_rollup_initialized_v2 = "1"` commit together. Interrupted work rolls back; the next open retries. The v2 marker requires the sign-separated grid statistics; earlier v1 markers do not bypass this upgrade. Older databases without the v2 marker receive a one-time full rebuild even if an hourly table already exists, repairing incomplete initialization. A present marked table skips reaggregation; a missing table is rebuilt even if an old marker survives. The write lock serializes this rebuild with collector transactions. This marker is not a database schema version.
+`_insert_hourly_rollup()` reproduces sums/maxima and per-field valid counts using SQL grouped by hour and band. Startup `initialize_hourly_rollup()` uses explicit SQLite `BEGIN IMMEDIATE`: table creation (if needed), full replacement and metadata key `hourly_rollup_initialized_v3 = "1"` commit together. Interrupted work rolls back and retries. V3 requires valid counts as well as v2's split grid statistics; earlier markers do not bypass the upgrade. Databases without v3 receive one full rebuild even if hourly rows exist. A present marked table skips reaggregation; a missing table is rebuilt even if a marker survives. The lock serializes initialization with collector writes. This is a readiness marker, not a global schema version.
 
-Manual `backfill_hourly_rollup()` still inserts missing groups with `OR IGNORE`; it does not repair stale existing groups. `rebuild_hourly_rollup(start,end,zone)` deletes/replaces an inclusive local-date range in one rollup transaction. Adding columns to an existing table does not backfill derived historical data.
+Manual `backfill_hourly_rollup()` still inserts missing groups with `OR IGNORE`; it does not repair stale existing groups. `rebuild_hourly_rollup(start,end,zone,connection=None)` replaces whole UTC hours overlapping the inclusive local-date range, including neighboring-date samples in boundary hours. It owns a transaction unless a caller supplies one; tariff recalculation supplies its raw-update connection. Adding unrelated columns alone does not backfill derived historical data.
 
 ## 4. Forecast persistence and adjusted writers
 

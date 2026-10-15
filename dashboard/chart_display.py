@@ -153,6 +153,8 @@ class ChartDataDisplay:
         return formatted_rows
 
     def _format_table_value(self, value: object, column: str) -> object:
+        if value is None or (isinstance(value, Real) and pd.isna(value)):
+            return ""
         if isinstance(value, Real) and not isinstance(value, bool):
             return f"{float(value):.{self._decimal_places.get(column, 2)}f}"
         return value

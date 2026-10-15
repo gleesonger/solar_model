@@ -46,7 +46,7 @@ class DashboardWarnings:
         )
         ui.add_body_html('''
             <div id="dashboard-warning-banner" role="alert"
-                 style="position:fixed;bottom:0;left:0;right:0;z-index:10000;
+                 style="position:fixed;bottom:0;left:0;right:0;z-index:1999;
                         background:#991b1b;color:white;padding:12px 16px;
                         padding-bottom:max(12px,env(safe-area-inset-bottom));
                         font-weight:600;box-shadow:0 -2px 8px #0003">

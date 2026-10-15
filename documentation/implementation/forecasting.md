@@ -16,13 +16,13 @@ forecast_collector.collect_once()
           _day_bounds()
           merge actuals on target_hour
         _training_frames()
-          _official_day_frame() for preceding target days
+          select official vintages within scalar lookback; merge actuals once
         _fit_scalars()
         _hour_distributions()
         _interpolate() -> completed-hour baseline
         _today_residual()
         _prediction_fields() -> per-target adjusted watts
-        map official-hour predictions onto current snapshot targets
+        align exact target predictions onto current snapshot targets
     database.save_adjusted_forecasts()       watts pass
     _recalculate_energy()
       read the saved snapshot
@@ -37,23 +37,27 @@ forecast_collector.collect_once()
 `_load_inputs()` uses direct sqlite3/pandas queries:
 
 ```sql
-SELECT * FROM forecast_solar;
-SELECT collected_at_utc, plant_pv_power_kw
-FROM sigenstor WHERE plant_pv_power_kw IS NOT NULL;
+SELECT collected_at_utc, forecast_time,
+       panel_1_raw_watts, panel_2_raw_watts,
+       panel_3_raw_watts, panel_4_raw_watts FROM forecast_solar;
+SELECT (collected_at_utc / 3600) * 3600 AS target_hour,
+       AVG(plant_pv_power_kw) / 10000.0 AS plant_pv_power_kw
+FROM sigenstor WHERE plant_pv_power_kw IS NOT NULL
+GROUP BY target_hour ORDER BY target_hour;
 ```
 
-It loads the whole available forecast history and PV sample history, not just the latest day or hourly rollup. Original SQL numeric columns remain fixed-point storage values. Normalisation adds physical helper columns instead of dividing every original forecast field in place.
+It retains forecast history but projects only collection/target epochs and four raw-watt fields. SQLite reduces minute PV history to hourly means before loading; the distributions still use all preceding hourly history. Original forecast numeric columns remain fixed-point storage values; normalisation adds physical helper columns.
 
 | Forecast-frame field | Type / units / derivation |
 | --- | --- |
-| Original `panel_n_raw_*`, `panel_n_adj_*` | Raw SQL scaled numeric values; null is generally pandas `NaN` |
+| Original `panel_n_raw_watts` | Raw SQL scaled numeric values; null is generally pandas `NaN`; adjusted/Wh fields are not loaded |
 | `snapshot` | UTC-aware pandas timestamp, replacing collection epoch column |
 | `target` | UTC-aware pandas timestamp, replacing forecast epoch column |
 | `target_hour` | `target.floor('h')`, UTC |
 | `raw_1_kw` … `raw_4_kw` | Raw panel watts `/10000/1000`, with missing raw values replaced by zero |
 | `raw_total_kw` | Sum of four physical helper columns |
 
-Actual samples become a separate frame with `target_hour` and physical `plant_pv_power_kw`. The sample collection epoch is floored to a UTC hour, grouped by mean, then divided by 10,000. This is observed hourly **mean power**, not meter-derived hourly energy. It does not require a complete hour of samples.
+Actuals form a separate frame with UTC `target_hour` and physical `plant_pv_power_kw`. SQL buckets epochs to UTC hours, averages non-null powers and divides by 10,000. This is observed hourly **mean power**, not meter-derived hourly energy. It does not require a complete hour of samples.
 
 ```python
 # Abbreviated normalised rows; original scaled columns still coexist
@@ -76,7 +80,7 @@ Keep the two numeric representations distinct: model helpers are kW, while origi
 
 The selected official frame is left-joined to actuals by `target_hour`, adding nullable physical observed power. Collection selection happens before target filtering; an older snapshot with targets is not searched if the newest selected snapshot lacks them.
 
-The destination is separately chosen as the latest available collection ≤ `as_of`. Predictions derived from the official raw vintage are written against matching target hours in this current collection. Thus a stored current raw value and stored adjusted value may come from **different underlying raw vintages**: the current provider response versus the midnight-anchored source.
+The destination is separately chosen as the latest available collection ≤ `as_of`. Predictions derived from the official raw vintage are aligned by exact target timestamp to this collection. Thus a stored current raw value and stored adjusted value may come from **different underlying raw vintages**: the current provider response versus the midnight-anchored source.
 
 This distinction explains why correction is not simply “multiply the newest provider row by a scalar”. Returned type is:
 
@@ -89,7 +93,7 @@ tuple[pd.Timestamp, dict[str, dict[str, float]]] | None
 
 ## 4. Calibration structures
 
-`_training_frames()` concatenates official frames for target days preceding the requested target day. Each row carries raw helper powers, UTC times, and joined observed plant power. `_fit_scalars()` selects complete `(raw_total_kw, plant_pv_power_kw, target)` rows within the last 56 days relative to `as_of`.
+`_training_frames()` first restricts targets to the 56-day scalar window and days before the requested target day. It selects official vintages against the full collection-time list, filters matching rows, then merges actuals once. A chosen snapshot lacking that day's targets does not fall back to another vintage. `_fit_scalars()` retains its complete-row/window checks and weighting.
 
 For each UTC hour 0–23:
 
@@ -135,7 +139,7 @@ panel_share = panel_raw_watts / site_raw_watts  (zero if site raw is zero)
 panel_adj_watts = scalar × panel_raw_watts + correction_kw × 1000 × share
 ```
 
-Intermediate dictionary keys are integer target epochs. It is then indexed by `target_hour` and mapped onto destination target timestamps. Multiple provider timestamps within one UTC hour share the hour-mapped fields; the dictionary construction retains the last source row encountered for that hour.
+Intermediate dictionary keys are integer target epochs. Exact destination timestamps retain their own predictions, including multiple targets per hour. Differing destination grids use linear interpolation of instantaneous panel watts between source points; targets outside source coverage receive no update. There is no extrapolation. For identity calibration, 10:00/10:30/11:00 retain 1000/2000/3000 W; a 10:15 destination receives 1500 W.
 
 ```python
 # Final physical-unit writer contract, abbreviated to one panel

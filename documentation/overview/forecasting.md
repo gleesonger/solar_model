@@ -25,8 +25,8 @@ Source: [dashboard/data.py](../../dashboard/data.py), `load_day` and forecast se
 | View | Selection / meaning |
 | --- | --- |
 | Raw Forecast | Latest raw snapshot available at/before local midnight |
-| BoD Forecast | First same-day snapshot containing panel-1 adjusted cumulative Wh; fallback to pre-midnight snapshot |
-| Latest Forecast | Newest same-day snapshot with panel-1 adjusted watts, falling back to the pre-midnight snapshot; blended with actuals for completed hours and an observed partial current hour |
+| BoD Forecast | First same-day snapshot containing selected-day adjusted cumulative Wh for any configured panel; fallback to pre-midnight snapshot |
+| Latest Forecast | Newest same-day snapshot with selected-day adjusted watts for any configured panel, falling back to the pre-midnight snapshot; blended with actuals for completed hours and an observed partial current hour |
 | Analysis/custom-chart forecasts | First collection within each selected local day/range, from shared chart SQL |
 
 - These selection policies differ; do not treat every displayed forecast as the same vintage.
@@ -37,7 +37,7 @@ Source: [dashboard/data.py](../../dashboard/data.py), `load_day` and forecast se
 ## Maintenance and research
 
 - [rebuild_operational_adjusted_forecasts.py](../../forecast/rebuild_operational_adjusted_forecasts.py): `--apply` clears adjusted fields in a target-date range and replays collection times, committing by local day. It currently rebuilds same-day targets rather than every future day handled live.
-- [evaluate_forecasts.py](../../forecast/evaluate_forecasts.py): MAE/RMSE/bias and improvement, overall and by lead band; compares stored vintages with hourly actuals and excludes collections after target time.
+- [evaluate_forecasts.py](../../forecast/evaluate_forecasts.py): MAE/RMSE/bias and improvement, overall and by lead band; compares stored vintages with hourly actuals and excludes collections after target time and hours not completed by `--as-of` (default now). Sparse completed hours remain eligible.
 - [solar_adjustment.py](../../forecast/solar_adjustment.py): separate HistGradientBoosting correction with rolling solar-energy features. Its retrospective backfill fits one model at the supplied/current as-of time; it is not a leakage-safe chronological replay.
 - [train_models.py](../../forecast/train_models.py): load/solar tree experiments, 70/15/15 chronological whole-day split, pickle models/JSON metrics; not loaded by production.
 - [intraday_backtest.py](../../forecast/intraday_backtest.py): repeated intraday research predictions and Excel report.

@@ -338,7 +338,7 @@ def render_historical_charts(
             state.historical_time_zoom_end,
         ),
         column_labels=column_labels,
-        show_total=True,
+        show_total=False,
     )
     battery_display = ChartDataDisplay(
         dataframe=battery_data,
@@ -347,7 +347,7 @@ def render_historical_charts(
         chart_options=battery_chart_options,
         column_labels=column_labels,
         decimal_places={"available_energy_kwh": 1},
-        show_total=True,
+        show_total=False,
     )
     array_energy_display = ChartDataDisplay(
         dataframe=data,

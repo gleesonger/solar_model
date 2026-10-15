@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date, datetime, time, timedelta
+from datetime import date, datetime
 from zoneinfo import ZoneInfo
 
 from nicegui import run, ui
@@ -69,13 +69,13 @@ class AnalysisTab:
         with container.classes(classes) as controls:
             if compact:
                 with ui.row().classes("w-full items-end gap-2"):
-                    ui.button("<", on_click=lambda: move_as_of(-1)).props("dense outline")
+                    ui.button("<", on_click=lambda: move_as_of(-1)).props("dense outline").tooltip("Previous period; hour ranges move one day")
                     as_of_input = ui.input("As of", value=self.state.historical_as_of.isoformat()).props(f"type=date outlined dense max={datetime.now(self.timezone).date().isoformat()}").classes("flex-grow")
-                    ui.button(">", on_click=lambda: move_as_of(1)).props("dense outline")
+                    ui.button(">", on_click=lambda: move_as_of(1)).props("dense outline").tooltip("Next period; hour ranges move one day")
             else:
-                ui.button("<", on_click=lambda: move_as_of(-1)).props("dense outline")
+                ui.button("<", on_click=lambda: move_as_of(-1)).props("dense outline").tooltip("Previous period; hour ranges move one day")
                 as_of_input = ui.input("As of", value=self.state.historical_as_of.isoformat()).props(f"type=date outlined dense max={datetime.now(self.timezone).date().isoformat()}").classes("w-40").style("width: 8rem")
-                ui.button(">", on_click=lambda: move_as_of(1)).props("dense outline")
+                ui.button(">", on_click=lambda: move_as_of(1)).props("dense outline").tooltip("Next period; hour ranges move one day")
 
             count_input = ui.number("Last", value=self.state.historical_count, min=1, step=1).props("outlined dense").classes("w-full" if compact else "w-28").style("" if compact else "width: 4.2rem")
             unit_input = ui.select(
@@ -200,18 +200,10 @@ class AnalysisTab:
                     notify_error("Last must be a positive whole number")
                     return
                 unit = str(unit_input.value)
-                if unit == "hours":
-                    moved = as_of + timedelta(hours=direction * count)
-                elif unit == "days":
-                    moved = as_of + timedelta(days=direction * count)
-                elif unit == "weeks":
-                    moved = as_of + timedelta(weeks=direction * count)
-                elif unit == "months":
-                    moved = data.shift_date_by_months(as_of, direction * count)
-                elif unit == "years":
-                    moved = data.shift_date_by_months(as_of, direction * 12 * count)
-                else:
-                    notify_error("Select a valid period")
+                try:
+                    moved = data.shift_analysis_date(as_of, count, unit, direction)
+                except ValueError as error:
+                    notify_error(str(error))
                     return
                 as_of_input.set_value(min(moved, datetime.now(self.timezone).date()).isoformat())
                 # Keep the same async Apply path for the date navigation buttons.
@@ -265,11 +257,11 @@ class AnalysisTab:
         visible_metrics: set[str] = set()
         visible_splits: set[str] = set()
 
-        with ui.dialog() as dialog, ui.card().classes("w-full").style("max-width: 90rem"):
+        with ui.dialog() as dialog, ui.card().classes("w-full custom-chart-dialog").style("max-width: 90rem"):
             with ui.row().classes("w-full items-center justify-between"):
                 ui.label("Custom chart builder").classes("text-lg font-semibold")
                 ui.button(icon="close", on_click=dialog.close).props("flat round dense")
-            with ui.row().classes("w-full gap-3"):
+            with ui.row().classes("w-full gap-3 custom-chart-controls"):
                 as_of_input = ui.input(
                     "As of", value=self.state.historical_as_of.isoformat(),
                 ).props(f"type=date outlined max={datetime.now(self.timezone).date().isoformat()}").classes("w-32")
@@ -299,20 +291,20 @@ class AnalysisTab:
                     label="Variables",
                     multiple=True,
                     value=[],
-                ).props("outlined use-chips").classes("flex-grow")
+                ).props("outlined use-chips").classes("flex-grow custom-chart-variables")
                 with ui.element("div").classes("relative w-32").style("height: 2.5rem"):
                     refresh_button = ui.button("Refresh", icon="refresh").classes("absolute inset-0 w-full")
                     with ui.row().classes("absolute inset-0 items-center justify-center gap-2") as preview_spinner:
                         ui.spinner(size="sm")
                         ui.label("Loading").classes("text-sm text-gray-600")
                     preview_spinner.set_visibility(False)
-            with ui.row().classes("w-full items-stretch gap-3"):
-                with ui.element("div").classes("flex-grow min-w-0"):
+            with ui.row().classes("w-full items-stretch gap-3 custom-chart-preview-layout"):
+                with ui.element("div").classes("flex-grow min-w-0 custom-chart-plot"):
                     preview_chart = ui.echart(
                         charts.custom_chart_preview_options({"periods": [], "series": []}, metric_labels)
-                    ).classes("w-full").style("height: 34rem")
+                    ).classes("w-full custom-chart-preview").style("height: 34rem")
                 legend_container = ui.column().classes(
-                    "w-52 shrink-0 overflow-auto rounded border p-2"
+                    "w-52 shrink-0 overflow-auto rounded border p-2 custom-chart-legend"
                 ).style("height: 34rem")
 
             def update_chart() -> None:

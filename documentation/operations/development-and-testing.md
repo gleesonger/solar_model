@@ -23,18 +23,22 @@ python -m venv .venv
 | --- | --- |
 | [test_custom_chart_sql.py](../../tests/test_custom_chart_sql.py) | SQL/pandas parity, batching, selected-field reads, grouping/splits, timezone/DST, minute telemetry, tariff quoting |
 | [test_dashboard_forecasts.py](../../tests/test_dashboard_forecasts.py) | Raw/adjusted selection, summary semantics, battery-level custom charts, stable colours/dashes/markers |
-| [test_grid_power_rollup.py](../../tests/test_grid_power_rollup.py) | R04 sign-separated import/export means, zeros/nulls, tariff-split hours, raw/hourly parity, incremental/rebuild statistics and interrupted v1-to-v2 upgrade |
+| [test_grid_power_rollup.py](../../tests/test_grid_power_rollup.py) | R04 sign-separated import/export means, zeros/nulls, tariff-split hours, raw/hourly parity, incremental/rebuild statistics and interrupted legacy-to-current upgrade |
 | [test_review_recovery.py](../../tests/test_review_recovery.py) | R01 finite/neutral residuals and real adjusted writes; R02 startup/midnight baseline retry and partial PV rollback; R03 transactional creation/rebuild, interruption/retry and no repeated history scan |
 | [test_analysis_download.py](../../tests/test_analysis_download.py) | CSV/Excel downloads, SQL/pandas parity across every timestep and DST, optional/empty forecasts, single-query execution/forecast skipping, tariff labels, XlsxTurbo Excel values/dates/blanks |
 | [test_solar_adjustment.py](../../tests/test_solar_adjustment.py) | Older tree model's rolling windows, as-of features, cumulative/day Wh |
 | [test_forecast_schema_migration.py](../../tests/test_forecast_schema_migration.py) | Legacy forecast renaming and repeat-open preservation |
 | [test_sigenstor_schema_migration.py](../../tests/test_sigenstor_schema_migration.py) | Battery-availability rename preserves values |
-| [test_database_0_1_0_migration.py](../../tests/test_database_0_1_0_migration.py) | Intended standalone migration/version behavior; referenced module is missing |
+| [test_database_0_1_0_migration.py](../../tests/test_database_0_1_0_migration.py) | Current opener preserves legacy readings/primary keys, renames availability, publishes rollup readiness and tolerates repeat opens; historical filename retained |
 | [test_config.py](../../tests/test_config.py), [test_common.py](../../tests/test_common.py), [test_control.py](../../tests/test_control.py) | Backup-rule parsing, exception helper, recalculation command, restart marker |
 | [test_live_grid_energy_day_start.py](../../tests/test_live_grid_energy_day_start.py) | Configured-timezone meter baseline |
 | [test_dashboard_freshness_browser.py](../../tests/test_dashboard_freshness_browser.py) | Offline/socket/server-silence/resume/stale behavior; isolated NiceGUI test server |
 
-## Review verification: 2026-10-14
+## Current follow-up verification: 2026-10-15
+
+Full collection is restored (R18). [test_remaining_review_fixes.py](../../tests/test_remaining_review_fixes.py) adds independent numerical/recovery checks for R05-R17, including the real HiGHS solver across both DST transitions. See [follow-up verification](../reviews/system-review-follow-up.md) for current suite counts, browser evidence and model benchmarks.
+
+## Original review verification: 2026-10-14
 
 - Full `python -m pytest -q`: collection stopped because `migrate_database_0_1_0` is missing.
 - Temporary subset: `python -m pytest -q --ignore=tests/test_database_0_1_0_migration.py` → **82 passed, 1 skipped** (Playwright module unavailable), 215 dependency/NumPy deprecation warnings.

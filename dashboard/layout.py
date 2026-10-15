@@ -121,6 +121,26 @@ def render_dashboard_styles() -> None:
             padding: 1rem;
         }
         @media (max-width: 767px) {
+            .custom-chart-controls {
+                display: grid !important;
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+            }
+            .custom-chart-controls > * {
+                width: 100% !important;
+                min-width: 0;
+            }
+            .custom-chart-variables { grid-column: 1 / -1; }
+            .custom-chart-preview-layout {
+                flex-direction: column;
+                flex-wrap: nowrap;
+            }
+            .custom-chart-plot { width: 100%; flex: none; }
+            .custom-chart-preview { height: 18rem !important; }
+            .custom-chart-legend {
+                width: 100% !important;
+                height: auto !important;
+                max-height: 12rem;
+            }
             .analysis-controls-desktop {
                 display: none !important;
             }

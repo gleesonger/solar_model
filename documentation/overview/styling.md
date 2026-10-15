@@ -18,7 +18,7 @@ There is no standalone theme stylesheet or central typography/token system. Curr
 
 - Page uses a centred `max-w-7xl` container, full-width sections, `p-2 md:p-4` spacing, white background, and a sticky topbar (`z-index: 30`).
 - Section titles typically use `text-lg font-semibold`; Recent subsection titles use `text-base`; hints use `text-sm text-gray-600`.
-- Charts usually use `w-full h-96`. The custom builder uses a 34rem chart and matching scrollable legend, with a fixed-width legend column.
+- Charts usually use `w-full h-96`. The desktop custom builder uses a 34rem chart and matching scrollable legend, with a fixed-width legend column.
 - Tables use `dense flat bordered`, right-aligned numeric columns, and fit-content width where appropriate. Global table headers are blue `#0070C0` with white text.
 - Final summary rows use `.summary-total-table`, grey `#f1f3f5`, bold. Only mark tables whose last row really is a total.
 
@@ -43,13 +43,14 @@ There is no standalone theme stylesheet or central typography/token system. Curr
 ## Responsive and status states
 
 - At widths ≤767px, desktop Analysis controls hide and a drawer/trigger appears; drawer width is min(22rem, 90vw).
+- The mobile custom builder uses two control columns, full-width Variables, an 18rem full-width chart, and a stacked legend capped at 12rem. Shared `.custom-chart-*` rules live in `layout.py`.
 - Live/Today table switches to 0.7rem text, tight padding, wrapping headers, non-wrapping values, and full width. Solar-orientation subrows become muted `#64748b`.
 - Loading uses spinners/progress labels; repeated live updates flash a small indicator. Do not infer freshness from the spinner alone.
-- Persistent stale/connection banner uses dark red `#991b1b`, white text, high stacking order, and safe-area bottom padding.
+- Persistent stale/connection banner uses dark red `#991b1b`, white text, `z-index:1999` below modal dialogs, and safe-area bottom padding.
 
 ## Guidance for future changes
 
 - Reuse existing series colours, component classes, and warning helpers. Change shared rules at their owning source.
 - Keep units, forecast patterns, and legend styles aligned with meaning; preserve missing-value blanks and user selections.
 - Check mobile table width, drawer access, chart legends, notification/banner overlap, and loading/stale states.
-- A central theme and responsive custom-builder layout would be improvements, not existing conventions.
+- A central theme remains a possible improvement.

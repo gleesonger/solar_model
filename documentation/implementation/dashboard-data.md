@@ -63,7 +63,7 @@ Actual queries select ORM hourly rows with `hour_start_utc >= local midnight` an
 | `battery` | Summed charge `_period` minus summed discharge `_period` |
 | `grid_import_cost`, `grid_export_revenue` | Sum stored cost/revenue periods |
 | `net_cost`, `no_solar_battery_import_cost` | Sum stored comparator/net costs |
-| `import_rate`, `export_rate` | Summed rollup rates / participating rollup `sample_count` |
+| `import_rate`, `export_rate` | Summed rollup rates / each rate's valid sample count |
 | `import_cost_tariff__<band>` | Import cost grouped by band; columns depend on history |
 | `actual_panel_n` | Initially summed string interval kWh from configured PV mappings |
 
@@ -76,10 +76,10 @@ Each selector chooses a collection timestamp, then returns **all target rows for
 | Selector | Collection query |
 | --- | --- |
 | `load_forecast_for_day` | Latest collection ≤ local midnight; no adjusted-field predicate |
-| `load_bod_adjusted_forecast_for_day` | First collection in `[midnight,next midnight)` with non-null panel-1 adjusted cumulative Wh |
-| `load_latest_adjusted_forecast_for_day` | Last collection in the same bounds with non-null panel-1 adjusted watts |
+| `load_bod_adjusted_forecast_for_day` | First same-day collection with a selected-day target holding adjusted cumulative Wh for any configured panel |
+| `load_latest_adjusted_forecast_for_day` | Last same-day collection with a selected-day target holding adjusted watts for any configured panel |
 
-Both adjusted selectors fall back to the official selector. The predicate does not prove every configured panel/day is complete. The operational model's same-day cold-start raw fallback is not present in the official dashboard selector.
+Both adjusted selectors fall back to the official selector. Partial-panel snapshots qualify when at least one configured panel is populated; unconfigured panels and other target days do not qualify. This does not prove every panel/day is complete. The operational model's same-day cold-start raw fallback is not present in the official dashboard selector. Recent daily/lifetime collection dates use configured-timezone conversion of UTC epochs, independent of host timezone.
 
 ### Cumulative forecast rows to hourly energy
 
@@ -115,6 +115,8 @@ Daily wrappers add `period`, sort newest first, and append Total. Monthly wrappe
 ## 4. Analysis request and bounds contracts
 
 `AnalysisRangeBounds` is a frozen dataclass with local `start_date/end_date` plus aware `start_at/end_at`. The shared controls use inclusive end-of-day `time.max`; an hour-count range anchors to the final hour of the selected date, not the current wall-clock hour. Export date bounds select whole local days.
+
+Integer-second source queries use `ceil(start)` / `floor(end)` to retain final-second samples while excluding next midnight. Hour-range navigation moves the date anchor one calendar day in either direction; tooltips make this explicit. Other periods move by the selected count. The future-date cap still applies.
 
 ```python
 ChartRequest(
@@ -153,7 +155,7 @@ data.load_chart_data_batch()
 | Shared minute source | Selected `sigenstor` columns inside inclusive timestamp bounds, only when needed |
 | Collections/first collections | Distinct collection epochs inside selected bounds; minimum by configured local collection date |
 | Shared forecast source | Selected fields for those first-per-day collections |
-| Hourly actuals | Period fields `/10000` and sum; rates divide by participating sample counts |
+| Hourly actuals | Period fields `/10000` and sum; rates divide by their own valid sample counts |
 | Telemetry daily | Raw/minute or rollup sums `/10000`, divided by count into interval means |
 | Array weights | Mapped string energies; allocate plant solar with equal fallback |
 | Forecast differences | `LAG` cumulative Wh by collection day/variant/panel/target date, clip decreases, `/1000` |
@@ -162,7 +164,7 @@ data.load_chart_data_batch()
 | Grid/values-by-hour | Fill calendar bucket scaffolding, join datasets, apply range filters |
 | Final aggregation | Sum or mean by requested group and optional split |
 
-Grid power signs are split per observation: minute queries use positive/negative magnitudes directly; hourly queries use the stored `plant_grid_import_power_kw` / `plant_grid_export_power_kw` sums and `grid_power_sample_count`. Both yield import/export means 1/1 kW for observations +2/-2 kW. Missing grid observations are excluded, zero is counted, and all-null stays missing. Other nullable rollup telemetry retains the separate R06 valid-count limitation.
+Grid power signs are split per observation: minute queries use positive/negative magnitudes directly; hourly queries use stored split sums and `grid_power_sample_count`. Both yield means 1/1 kW for +2/-2 kW. Other nullable hourly telemetry/rates use their own `<field>_sample_count`. Missing values are excluded, zero is counted, and all-null stays missing.
 
 SQL averages are mandatory for battery levels/rates/telemetry even when energy aggregation is `sum`. Telemetry computes per-day interval means before aggregating across dates, so it is not necessarily the mean of every raw sample across the whole selection. Hour-grouped multi-day data is a clock-hour profile rather than chronological timestamps.
 

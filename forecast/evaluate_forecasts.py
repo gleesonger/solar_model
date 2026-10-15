@@ -40,8 +40,11 @@ def forecast_performance(
     *,
     timezone_name: str = "Europe/Dublin",
     target_date: str | None = None,
+    as_of: str | pd.Timestamp | None = None,
 ) -> pd.DataFrame:
     """Return one comparable forecast/actual row for each stored snapshot target."""
+    cutoff = pd.Timestamp.now(tz="UTC") if as_of is None else pd.Timestamp(as_of)
+    cutoff = (cutoff.tz_localize("UTC") if cutoff.tzinfo is None else cutoff.tz_convert("UTC")).floor("h")
     connection = sqlite3.connect(database_path)
     try:
         forecast_columns = existing_columns(connection, "forecast_solar")
@@ -53,8 +56,9 @@ def forecast_performance(
         forecasts = pd.read_sql_query(f"SELECT {fields} FROM forecast_solar", connection)
         actuals = pd.read_sql_query(
             "SELECT collected_at_utc, plant_pv_power_kw FROM sigenstor "
-            "WHERE plant_pv_power_kw IS NOT NULL",
+            "WHERE plant_pv_power_kw IS NOT NULL AND collected_at_utc < ?",
             connection,
+            params=[int(cutoff.timestamp())],
         )
     finally:
         connection.close()
@@ -75,7 +79,7 @@ def forecast_performance(
     actual_hourly_kw = actuals.groupby("target", as_index=False)["plant_pv_power_kw"].mean()
     actual_hourly_kw["actual_kw"] = actual_hourly_kw.pop("plant_pv_power_kw") / SCALE
     result = forecasts.merge(actual_hourly_kw, on="target", how="inner")
-    result = result[result["snapshot"] <= result["target"]].copy()
+    result = result[(result["snapshot"] <= result["target"]) & (result["target"] < cutoff)].copy()
     result["lead_hours"] = (result["target"] - result["snapshot"]).dt.total_seconds() / 3_600
     if target_date is not None:
         try:
@@ -124,9 +128,10 @@ def main() -> None:
     parser.add_argument("--date", help="Evaluate target hours on this local date (YYYY-MM-DD)")
     parser.add_argument("--timezone", default="Europe/Dublin", help="Timezone used by --date")
     parser.add_argument("--csv", help="Optional CSV path for the summary report")
+    parser.add_argument("--as-of", help="Evaluate only hours completed by this ISO timestamp (default: now; naive values use UTC)")
     args = parser.parse_args()
 
-    data = forecast_performance(args.database, timezone_name=args.timezone, target_date=args.date)
+    data = forecast_performance(args.database, timezone_name=args.timezone, target_date=args.date, as_of=args.as_of)
     report = performance_report(data)
     if report.empty:
         print("No completed adjusted forecast/actual pairs match the requested range.")

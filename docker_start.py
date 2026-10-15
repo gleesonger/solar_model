@@ -25,16 +25,14 @@ def main() -> int:
         database = open_database(load_config().database.path)
         database.close()
         environment = os.environ | {"SOLAR_MODEL_RESTART_FILE": str(restart_file)}
-        return [
-            subprocess.Popen(
-                [sys.executable, str(app_directory / "main_data_collection.py")],
-                env=environment,
-            ),
-            subprocess.Popen(
-                [sys.executable, str(app_directory / "main_dashboard.py")],
-                env=environment,
-            ),
-        ]
+        started = []
+        try:
+            for script in ("main_data_collection.py", "main_dashboard.py"):
+                started.append(subprocess.Popen([sys.executable, str(app_directory / script)], env=environment))
+        except BaseException:
+            stop_processes(started)
+            raise
+        return started
 
     def stop_processes(processes: list[subprocess.Popen]) -> None:
         for process in processes:

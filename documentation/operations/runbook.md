@@ -48,18 +48,18 @@ python test_energy_plan_as_of.py --database solar.db --as-of "2026-09-15T00:00:0
 ```
 
 - Recalculation date bounds are inclusive; omitted `--to` updates all later matching raw rows. CLI alone does not restart the application; Control does.
-- Raw tariff updates and rollup rebuild are separate commits. An error after the first commit can leave rollups stale despite the CLI's “no changes committed” message.
+- Raw tariff updates and rollup rebuild share one transaction; either both commit or both roll back. Without `--to`, rebuilding extends through the latest available raw date. Neighboring samples in overlapping UTC hours are retained.
 - Forecast rebuild infers missing date bounds from earliest forecast/latest hourly actual. It commits clearing first and results by day, so interruption can leave a partial rebuild. It preserves raw fields.
 - `python -m forecast.solar_adjustment --database solar.db` writes pending adjusted fields using the older tree model. It is not the operational rebuild; avoid mixing outputs unintentionally.
 - Training/backtest tools default to `forecast/solar.db`; pass `--database solar.db` explicitly when using the root database.
 
 ## Backups and troubleshooting
 
-The first startup after the R04 grid-statistics upgrade rebuilds hourly history once for databases lacking `hourly_rollup_initialized_v2`, (including databases with only the earlier v1 marker), inside a write transaction. This populates the new split grid-power sums/count without changing raw data. Large histories may take longer and temporarily block other writers. Use the managed launcher so this completes before its children start; later opens only check readiness. A failed/interrupted initialization rolls back and retries on the next open; raw samples remain unchanged.
+The first startup after the R06 valid-count upgrade rebuilds hourly history once for databases lacking `hourly_rollup_initialized_v3` (including v1/v2 databases), inside a write transaction. This populates per-field valid counts and split grid statistics without changing raw data. Large histories may take longer and temporarily block other writers. Use the managed launcher so this completes before its children start; later opens only check readiness. Failed/interrupted initialization rolls back and retries.
 
 - Make a consistent SQLite backup (SQLite backup API or copy while writers are stopped); retain the matching configuration and register maps.
 - Invalid config: inspect startup `ValueError`, field spelling, complete rule coverage, effective dates, and YAML types.
 - Missing readings: check device/network/map IDs, server logs, and warning timestamp age. Failed reads retain old live values.
 - Stale summaries after tariff changes: confirm raw update and hourly rebuild both completed.
-- Blank forecasts: check pre-midnight history, partial panel requests, adjustment failure, and panel-1 selector assumptions.
+- Blank forecasts: check pre-midnight history, configured-panel availability, partial requests and adjustment failure.
 - Planning failure: check required metadata/history, interval alignment, HiGHS, and infeasible battery/power limits.

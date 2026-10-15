@@ -24,6 +24,8 @@ Supervisor state is a list of `Popen` objects, a boolean shutdown flag, and a te
 
 Shutdown terminates children, waits up to ten seconds per child, then kills survivors. A child crash stops the managed application; automatic restart after a crash requires an external service/container policy.
 
+If either child launch fails, `start_processes()` terminates and reaps any children already launched, then propagates the original failure. This applies during both initial start and requested restart.
+
 ## 2. YAML to typed configuration
 
 ```text

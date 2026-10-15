@@ -163,6 +163,8 @@ Typical browser options have `xAxis.data: list[str]` and `series: list[{name,typ
 
 `ChartDataDisplay` owns the DataFrame, title/hint callbacks, chart-options callback, chart element, table element, and show-table flag. It supports tab-separated clipboard, CSV download, and an optional Total row whose fields sum or mean according to configured aggregation. Normal updates retain browser legend selection by removing incoming `legend.selected`; explicit `refresh_chart()` uses `notMerge=True`.
 
+Analysis power and battery/SOC tables omit Total rows because summing levels or percentages is misleading. Missing aggregate values render blank. Energy/array/money tables retain their configured totals. The custom builder uses responsive controls and a stacked plot/legend on mobile; the persistent warning sits below modal dialogs so Close remains usable.
+
 Single-day telemetry already contains minute points, so its zoom is client-side. Longer-range telemetry remains hourly. Chart/CSV values and Analysis full-data downloads follow different export routes; see below.
 
 ## 7. Export bytes and operator actions

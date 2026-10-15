@@ -32,7 +32,7 @@ Source: [database.py](../../database.py), especially `ScaledInteger`, `EpochSeco
 - Costs use the tariff at the collection timestamp for the whole measured interval. Gaps and tariff boundaries are not split into smaller billing intervals.
 - Electrical rows and hourly updates commit together. Previous in-memory readings advance only after success. Device history is saved separately.
 - Hourly grid import/export power stores separate sign magnitudes and a valid grid observation count, preserving activity even when net power is zero. These are distinct from cumulative meter energy.
-- Hourly cumulative meters use maxima; other numeric fields use sums. Grid power uses `grid_power_sample_count`; other power/rate/level averages divide by `sample_count`; summed power is not an hourly power reading.
+- Hourly cumulative meters use maxima; other numeric fields use sums. Means divide by each field's non-null count (`<field>_sample_count`; grid uses `grid_power_sample_count`). Zeros count as observations; summed power is not an hourly power reading.
 - Missing measurements remain nullable. Some display paths substitute zeros; this must not be mistaken for observed zero generation.
 - Raw and adjusted forecast fields stay separate. Adjusted writers accept only `_adj_` fields; raw collection can update its own panel fields at the same composite key.
 
@@ -40,5 +40,5 @@ Source: [database.py](../../database.py), especially `ScaledInteger`, `EpochSeco
 
 - `open_database()` renames legacy forecast fields to `_raw_`, renames battery availability to the plant-level name, creates tables, adds missing columns, and drops legacy JSON columns.
 - Conflicting duplicate raw/legacy forecast values cause migration refusal rather than silent data loss.
-- Initial hourly creation/rebuild and the `hourly_rollup_initialized_v2` marker commit together. Missing/unmarked hourly history is rebuilt from raw samples once; interrupted initialization retries on next open. Later marked opens skip the historical scan. Adding columns alone does not trigger another rebuild.
+- Initial hourly creation/rebuild and `hourly_rollup_initialized_v3` commit together. Older v1/v2 or unmarked history rebuilds once to populate valid counts; interrupted initialization retries. Later marked opens skip the scan. Adding unrelated columns alone does not trigger another rebuild.
 - Schema opening can write substantial data. Back up before deployment; additive schema changes do not automatically derive historical values for new metrics.

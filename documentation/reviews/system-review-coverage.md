@@ -4,9 +4,13 @@ Reviewed **2026-10-15**. Read alongside the [report](system-review-report.md) an
 
 **Important limits:** no real hardware/provider capture, production writes, target Docker build, actual migration process kill, sustained multi-process lock test or complete live/replay comparison. Browser checks use isolated services and synthetic records, not the production website. Numerical verification is representative and does not cover every plotted point/selection combination.
 
+## Current R05-R19 follow-up
+
+All confirmed IDs are addressed; see [follow-up verification](system-review-follow-up.md) for current regressions, desktop/mobile workflow checks and 1-/3-year model measurements. The matrix below preserves original review observations and failures. Later fixes do not imply untested hardware/deployment/replay cases passed.
+
 ## R04 follow-up
 
-R04 is fixed in the working tree: 18 new regression cases independently verify separate import/export magnitudes, valid grid counts, raw/hourly equivalence and historical upgrade/retry. Current documented project subset: **178 passed, 1 skipped**. The matrix records original review observations; R06 remains open for non-grid telemetry counts. No additional browser/hardware verification is implied.
+R04 is fixed in the working tree: 18 new regression cases independently verify separate import/export magnitudes, valid grid counts, raw/hourly equivalence and historical upgrade/retry. Current documented project subset: **178 passed, 1 skipped**. The matrix records original review observations; R06 was subsequently fixed by the v3 valid-count upgrade. No additional browser/hardware verification is implied.
 
 ## R01-R03 follow-up
 

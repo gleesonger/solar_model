@@ -9,7 +9,13 @@ from sqlalchemy.orm import Session
 
 from config import SolarArrayConfig
 from dashboard import data
-from database import ForecastSolarSample, SigenStorHourlySample, SigenStorModbusSample
+from database import HOURLY_VALID_COUNT_COLUMNS, ForecastSolarSample, SigenStorHourlySample, SigenStorModbusSample
+
+
+def _hourly_sample(**values):
+    counts = {counter: values.get("sample_count", 0) if values.get(field) is not None else 0
+              for field, counter in HOURLY_VALID_COUNT_COLUMNS.items()}
+    return SigenStorHourlySample(**counts, **values)
 
 
 ARRAYS = (
@@ -99,7 +105,7 @@ def chart_database(tmp_path, request):
                     if datetime.fromtimestamp(stamp.timestamp(), zone).replace(tzinfo=None) != stamp.replace(tzinfo=None):
                         continue
                     for tariff, count in (("night", 2), ("day", 3)):
-                        session.add(SigenStorHourlySample(
+                        session.add(_hourly_sample(
                             hour_start_utc=stamp.isoformat(), import_tariff_band=tariff, sample_count=count,
                             plant_pv_total_kwh_period=0.015 if hour == 0 else 2.1,
                             plant_load_total_kwh_period=3.2,
@@ -142,7 +148,7 @@ def chart_database(tmp_path, request):
         # Both occurrences of the repeated local hour on the DST transition.
         if timezone_name == "Europe/Dublin" and start == date(2026, 10, 24):
             repeated = datetime(2026, 10, 25, 1, tzinfo=zone, fold=1)
-            session.add(SigenStorHourlySample(
+            session.add(_hourly_sample(
                 hour_start_utc=repeated.isoformat(), import_tariff_band="night", sample_count=1,
                 plant_pv_total_kwh_period=0.8, plant_load_total_kwh_period=0.4,
                 inverter_pv1_energy_kwh_period=0.1, inverter_pv2_energy_kwh_period=0.7,
@@ -313,7 +319,7 @@ def test_tariff_names_are_bound_and_quoted_safely(chart_database):
     path, zone, bounds = chart_database
     name = 'peak \'A";--'
     with Session(data.create_engine_for_database(path)) as session:
-        session.add(SigenStorHourlySample(
+        session.add(_hourly_sample(
             hour_start_utc=bounds.start_at.isoformat(), import_tariff_band=name, sample_count=1,
             grid_import_cost_period=0.1234,
         ))

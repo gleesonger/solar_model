@@ -17,6 +17,7 @@ import pandas as pd
 from sqlalchemy import inspect, select
 
 from config import Config, load_config
+from common import add_elapsed, utc_instant
 from database import ForecastSolarSample, SigenStorDevice, SigenStorModbusSample, SolarDatabase, create_engine_for_database
 from energy_plan_simulation import DeviceInfo, DeviceState, ForecastData, ForecastInterval, simulate_energy_plan
 
@@ -77,7 +78,11 @@ def main() -> None:
 def group_plan(plan: pd.DataFrame, output_timestep_mins: int) -> pd.DataFrame:
     """Aggregate projection rows into clock-aligned output periods."""
     grouped_plan = plan.copy()
-    grouped_plan["_output_start"] = pd.to_datetime(grouped_plan["starts_at"]).dt.floor(f"{output_timestep_mins}min")
+    starts = pd.to_datetime(grouped_plan["starts_at"])
+    grouped_plan["_output_start"] = starts.dt.floor(
+        f"{output_timestep_mins}min", ambiguous=starts.map(lambda value: value.fold == 0).to_numpy(),
+        nonexistent="shift_forward",
+    )
     sum_columns = {column for column in plan.columns if column.endswith("_kwh") or column in {"import_cost", "export_revenue", "net_cost"}}
     sum_columns -= {"minimum_battery_kwh", "maximum_battery_kwh", "battery_start_kwh", "battery_end_kwh", "limit_battery_export_rate_to_grid_kw"}
     rows = []
@@ -120,11 +125,11 @@ def _half_hour_intervals(intervals: tuple[ForecastInterval, ...]) -> list[tuple[
     """Sample one forecast series into contiguous half-hour energy intervals without extrapolation."""
     starts_at = intervals[0].starts_at
     ends_at = intervals[-1].ends_at
-    if starts_at.minute % 30 or starts_at.second or starts_at.microsecond or (ends_at - starts_at).total_seconds() % (30 * 60):
+    if starts_at.minute % 30 or starts_at.second or starts_at.microsecond or (utc_instant(ends_at) - utc_instant(starts_at)).total_seconds() % (30 * 60):
         raise ValueError("forecast coverage must start and end on a 30-minute boundary")
     half_hours = []
-    while starts_at < ends_at:
-        ends_at_half_hour = starts_at + timedelta(minutes=30)
+    while utc_instant(starts_at) < utc_instant(ends_at):
+        ends_at_half_hour = add_elapsed(starts_at, timedelta(minutes=30))
         half_hours.append((starts_at, ForecastData._sum_intervals(intervals, starts_at, ends_at_half_hour)))
         starts_at = ends_at_half_hour
     return half_hours
@@ -141,7 +146,7 @@ def _scenario_intervals(half_hours: list[tuple[datetime, float]], multiplier: fl
         if stress_split:
             total_kwh = first_kwh + second_kwh
             first_kwh, second_kwh = total_kwh * stress_split[0], total_kwh * stress_split[1]
-        intervals.extend((ForecastInterval(first_starts_at, first_starts_at + timedelta(minutes=30), first_kwh), ForecastInterval(second_starts_at, second_starts_at + timedelta(minutes=30), second_kwh)))
+        intervals.extend((ForecastInterval(first_starts_at, add_elapsed(first_starts_at, timedelta(minutes=30)), first_kwh), ForecastInterval(second_starts_at, add_elapsed(second_starts_at, timedelta(minutes=30)), second_kwh)))
     return intervals
 
 
@@ -150,7 +155,7 @@ def interval_energies(rows: list[ForecastSolarSample], panel_ids: tuple[int, ...
     by_panel: dict[int, list[tuple[datetime, float]]] = {}
     for panel_id in panel_ids:
         field = f"panel_{panel_id}_{source}_watt_hours"
-        points = [(datetime.fromisoformat(row.forecast_time).astimezone(timezone), getattr(row, field)) for row in rows if getattr(row, field) is not None]
+        points = [(utc_instant(datetime.fromisoformat(row.forecast_time)), getattr(row, field)) for row in rows if getattr(row, field) is not None]
         if not points:
             return None
         by_panel[panel_id] = sorted(points, key=lambda point: point[0])
@@ -158,7 +163,7 @@ def interval_energies(rows: list[ForecastSolarSample], panel_ids: tuple[int, ...
     for points in by_panel.values():
         previous_by_day: dict[datetime.date, float] = {}
         for timestamp, watt_hours in points:
-            day = timestamp.date()
+            day = timestamp.astimezone(timezone).date()
             previous = previous_by_day.get(day)
             current = float(watt_hours)
             totals[timestamp] += (current if previous is None else max(0.0, current - previous)) / 1_000
@@ -176,7 +181,7 @@ def load_weighted_profile(database: SolarDatabase, timezone: ZoneInfo, now: date
     daily_slots: dict[tuple[datetime.date, int], float] = defaultdict(float)
     for sample in samples:
         ends_at = datetime.fromisoformat(sample.collected_at_utc).astimezone(timezone)
-        interval_start = ends_at - timedelta(microseconds=1)
+        interval_start = add_elapsed(ends_at, -timedelta(microseconds=1))
         daily_slots[(interval_start.date(), interval_start.hour)] += float(sample.plant_load_total_kwh_period)
     totals: dict[tuple[int, int], float] = defaultdict(float)
     weights: dict[tuple[int, int], float] = defaultdict(float)
@@ -216,28 +221,28 @@ def load_forecast_as_of(database: SolarDatabase, as_of: datetime, config: Config
     solar: list[ForecastInterval] = []
     previous_ends_at: datetime | None = None
     for ends_at, solar_kwh in sorted(solar_intervals.items()):
-        if ends_at < as_of:
+        if ends_at < utc_instant(as_of):
             continue
-        starts_at = previous_ends_at or ends_at - timedelta(seconds=config.forecast.interval_seconds)
+        starts_at = previous_ends_at or add_elapsed(ends_at, -timedelta(seconds=config.forecast.interval_seconds))
         solar.append(ForecastInterval(starts_at, ends_at, float(solar_kwh)))
         previous_ends_at = ends_at
 
-    projection_end = as_of + timedelta(hours=config.energy_plan.num_projection_hours)
+    projection_end = add_elapsed(as_of, timedelta(hours=config.energy_plan.num_projection_hours))
     if not solar:
         raise ValueError("the as-of forecast contains no future solar intervals")
-    if solar[0].starts_at > as_of:
+    if utc_instant(solar[0].starts_at) > utc_instant(as_of):
         solar.insert(0, ForecastInterval(as_of, solar[0].starts_at, 0.0))
-    if solar[-1].ends_at < projection_end:
+    if utc_instant(solar[-1].ends_at) < utc_instant(projection_end):
         solar.append(ForecastInterval(solar[-1].ends_at, projection_end, 0.0))
 
     load: list[ForecastInterval] = []
-    starts_at = as_of
-    while starts_at < projection_end:
+    starts_at = as_of.astimezone(timezone)
+    while utc_instant(starts_at) < utc_instant(projection_end):
         expected_load_kwh = load_profile.get((starts_at.weekday(), starts_at.hour))
         if expected_load_kwh is None:
             raise ValueError(f"no historical load profile exists for {starts_at.isoformat()}")
-        load.append(ForecastInterval(starts_at, starts_at + timedelta(hours=1), float(expected_load_kwh)))
-        starts_at += timedelta(hours=1)
+        load.append(ForecastInterval(starts_at, add_elapsed(starts_at, timedelta(hours=1)), float(expected_load_kwh)))
+        starts_at = add_elapsed(starts_at, timedelta(hours=1))
 
     return ForecastData(name="base", solar=solar, load=load)
 

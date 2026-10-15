@@ -56,8 +56,13 @@ def _fit_scalars(training: pd.DataFrame, as_of: pd.Timestamp) -> np.ndarray:
 def _load_inputs(database_path: str | Path) -> tuple[pd.DataFrame, pd.DataFrame]:
     connection = sqlite3.connect(database_path)
     try:
-        forecasts = pd.read_sql_query("SELECT * FROM forecast_solar", connection)
-        actuals = pd.read_sql_query("SELECT collected_at_utc, plant_pv_power_kw FROM sigenstor WHERE plant_pv_power_kw IS NOT NULL", connection)
+        fields = ", ".join(f"panel_{panel}_raw_watts" for panel in PANEL_IDS)
+        forecasts = pd.read_sql_query(f"SELECT collected_at_utc, forecast_time, {fields} FROM forecast_solar", connection)
+        actuals = pd.read_sql_query(
+            "SELECT (collected_at_utc / 3600) * 3600 AS target_hour, "
+            "AVG(plant_pv_power_kw) / 10000.0 AS plant_pv_power_kw FROM sigenstor "
+            "WHERE plant_pv_power_kw IS NOT NULL GROUP BY target_hour ORDER BY target_hour", connection,
+        )
     finally:
         connection.close()
     forecasts["snapshot"] = pd.to_datetime(forecasts.pop("collected_at_utc"), unit="s", utc=True)
@@ -67,9 +72,7 @@ def _load_inputs(database_path: str | Path) -> tuple[pd.DataFrame, pd.DataFrame]
         column = f"panel_{panel}_raw_watts"
         forecasts[f"raw_{panel}_kw"] = pd.to_numeric(forecasts.get(column, 0), errors="coerce").fillna(0) / SCALE / 1_000
     forecasts["raw_total_kw"] = sum(forecasts[f"raw_{panel}_kw"] for panel in PANEL_IDS)
-    actuals["target_hour"] = pd.to_datetime(actuals.pop("collected_at_utc"), unit="s", utc=True).dt.floor("h")
-    actuals = actuals.groupby("target_hour", as_index=False).mean(numeric_only=True)
-    actuals["plant_pv_power_kw"] /= SCALE
+    actuals["target_hour"] = pd.to_datetime(actuals["target_hour"], unit="s", utc=True)
     return forecasts, actuals
 
 
@@ -128,16 +131,29 @@ def _official_day_frame(forecasts: pd.DataFrame, actuals: pd.DataFrame, day, tim
     return snapshot, frame
 
 
-def _training_frames(forecasts: pd.DataFrame, actuals: pd.DataFrame, day, timezone: ZoneInfo) -> pd.DataFrame:
-    first = forecasts.target_hour.dt.tz_convert(timezone).dt.date.min()
-    frames = []
-    for historic_day in pd.date_range(first, day, freq="D").date:
-        if historic_day >= day:
-            break
-        official = _official_day_frame(forecasts, actuals, historic_day, timezone)
-        if official is not None:
-            frames.append(official[1])
-    return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
+def _training_frames(forecasts: pd.DataFrame, actuals: pd.DataFrame, day, timezone: ZoneInfo, as_of: pd.Timestamp) -> pd.DataFrame:
+    """Select official vintages only within the scalar lookback, before merging."""
+    start, _ = _day_bounds(day, timezone)
+    candidates = forecasts[
+        (forecasts.target_hour < start)
+        & (forecasts.target >= as_of - pd.Timedelta(days=SCALAR_LOOKBACK_DAYS))
+    ].copy()
+    if candidates.empty:
+        return candidates.merge(actuals, on="target_hour", how="left")
+    # Select against all collection times, even when the selected snapshot has
+    # no targets for this day. Falling back to a different vintage changes training.
+    snapshots = pd.DatetimeIndex(forecasts.snapshot.unique()).sort_values()
+    local_days = candidates.target_hour.dt.tz_convert(timezone).dt.date
+    selected = {}
+    for historic_day in sorted(local_days.unique()):
+        midnight, next_midnight = _day_bounds(historic_day, timezone)
+        position = snapshots.searchsorted(midnight, side="right") - 1
+        if position >= 0:
+            selected[historic_day] = snapshots[position]
+        elif len(snapshots) and snapshots[0] < next_midnight:
+            selected[historic_day] = snapshots[0]
+    candidates = candidates[candidates.snapshot == local_days.map(selected)]
+    return candidates.sort_values("target", kind="stable").merge(actuals, on="target_hour", how="left")
 
 
 def _prediction_fields(frame: pd.DataFrame, scalars, distributions, residual: float, strength: float) -> dict[int, dict[str, float]]:
@@ -182,7 +198,7 @@ def calculate_adjusted_forecast(
     if current_available.empty:
         return None
     current_snapshot = current_available.snapshot.max()
-    training = _training_frames(forecasts, actuals, day, timezone)
+    training = _training_frames(forecasts, actuals, day, timezone, as_of)
     scalars = _fit_scalars(training, as_of)
     day_start, day_end = _day_bounds(day, timezone)
     distributions = _hour_distributions(actuals, day_start)
@@ -198,20 +214,24 @@ def calculate_adjusted_forecast(
     first_target = max(cutoff, day_start)
     source_future = frame[frame.target_hour >= first_target]
     source_values = _prediction_fields(source_future, scalars, distributions, residual, strength)
-    fields_by_hour = {
-        row.target_hour: source_values[int(row.target.timestamp())]
-        for row in source_future.itertuples()
-    }
     current_rows = forecasts[
         (forecasts.snapshot == current_snapshot)
         & (forecasts.target_hour >= first_target)
         & (forecasts.target_hour < day_end)
     ]
-    values = {
-        row.target.isoformat(): fields_by_hour[row.target_hour]
-        for row in current_rows.itertuples()
-        if row.target_hour in fields_by_hour
-    }
+    # Watts are instantaneous values: preserve exact targets and linearly
+    # interpolate differing grids within known coverage, without extrapolation.
+    epochs = sorted(source_values)
+    values = {}
+    if epochs:
+        fields = tuple(source_values[epochs[0]])
+        for target in current_rows.target:
+            epoch = int(target.timestamp())
+            if epochs[0] <= epoch <= epochs[-1]:
+                values[target.isoformat()] = {
+                    field: float(np.interp(epoch, epochs, [source_values[t][field] for t in epochs]))
+                    for field in fields
+                }
     return current_snapshot, values
 
 

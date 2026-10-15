@@ -4,6 +4,7 @@ from collections import Counter
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 from functools import lru_cache
+from math import ceil, floor
 import json
 import re
 from time import perf_counter
@@ -132,8 +133,8 @@ def _build_plan(
     if interval_minutes != 60 and not only_telemetry:
         raise ValueError("Energy variables require hourly source intervals")
     parameters: dict[str, Any] = {
-        "start": round(bounds.start_at.timestamp()),
-        "end": round(bounds.end_at.timestamp()),
+        "start": ceil(bounds.start_at.timestamp()),
+        "end": floor(bounds.end_at.timestamp()),
         "day_start": round(datetime.combine(bounds.start_date, time.min, zone).timestamp()),
         "day_end": round(datetime.combine(bounds.end_date + timedelta(days=1), time.min, zone).timestamp()),
         "first_day": bounds.start_date.isoformat(),
@@ -214,8 +215,7 @@ def _build_plan(
         elif metric in {"import_rate", "export_rate"}:
             # Stored rate readings are already sums of samples within each hour.
             hourly_fields[metric] = (
-                f"SUM({metric} / 10000.0) / NULLIF(SUM(CASE WHEN {metric} IS NOT NULL "
-                f"THEN sample_count END), 0) AS {metric}"
+                f"SUM({metric} / 10000.0) / NULLIF(SUM({metric}_sample_count), 0) AS {metric}"
             )
             expressions[metric] = f"a.{metric}"
         elif metric == "battery_flow":
@@ -241,6 +241,9 @@ def _build_plan(
             count = f"COUNT({metric})" if sample_resolution == "minute" else f"SUM(CASE WHEN {metric} IS NOT NULL THEN samples END)"
             if sample_resolution == "hour" and metric in {"power_grid_import", "power_grid_export"}:
                 count = "SUM(grid_samples)"
+            elif sample_resolution == "hour":
+                source_fields.append(f"{telemetry_columns[metric]}_sample_count AS count_{metric}")
+                count = f"SUM(count_{metric})"
             # Each day's interval contributes equally, matching the Analysis views.
             source_fields.append(f"{raw} AS {metric}")
             averaged_fields.append(f"SUM({metric}) / NULLIF({count}, 0) AS {metric}")

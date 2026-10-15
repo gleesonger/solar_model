@@ -6,17 +6,19 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta, tzinfo
 from pathlib import Path
+from math import ceil, floor
 from time import perf_counter
 from typing import Any, cast
 from zoneinfo import ZoneInfo
 
 import pandas as pd
-from sqlalchemy import create_engine, func, select
+from sqlalchemy import create_engine, func, or_, select
 from sqlalchemy.orm import Session
 
 from common import LOGGER, heavy_work
 from config import SolarArrayConfig
 from database import (
+    HOURLY_VALID_COUNT_COLUMNS,
     ForecastSolarSample,
     SigenStorDevice,
     SigenStorHourlySample,
@@ -149,10 +151,11 @@ def load_day(
             # This is the immutable, official snapshot selected at the start
             # of the day.  It supplies both the raw and BoD-adjusted views.
             bod_forecast_rows = load_forecast_for_day(session, day_start)
-            bod_adjusted_forecast_rows = load_bod_adjusted_forecast_for_day(session, day_start)
+            panel_ids = tuple(array.panel_id for array in forecast_arrays)
+            bod_adjusted_forecast_rows = load_bod_adjusted_forecast_for_day(session, day_start, panel_ids)
             # This may be a later provider collection, with the intraday
             # adjustment recalculated at collection time.
-            latest_adjusted_forecast_rows = load_latest_adjusted_forecast_for_day(session, day_start)
+            latest_adjusted_forecast_rows = load_latest_adjusted_forecast_for_day(session, day_start, panel_ids)
             # Preserve unknown future hours as NaN until the live forecast is
             # assembled below.  Filling them with zero here would make them
             # look like observed zero-PV hours.
@@ -276,29 +279,21 @@ def load_recent_daily_energy(
     return append_energy_total(ordered, "Total")
 
 
-def load_lifetime_start_date(database_path: str, fallback: date) -> date:
+def load_lifetime_start_date(database_path: str, fallback: date, timezone_name: str = "Europe/Dublin") -> date:
     engine = create_engine_for_database(database_path)
     try:
         with Session(engine) as session:
             actual_start = session.scalar(
-                select(func.min(func.substr(
-                    SigenStorModbusSample.collected_at_local,
-                    1,
-                    10,
-                )))
+                select(func.min(SigenStorModbusSample.collected_at_utc))
             )
             forecast_start = session.scalar(
-                select(func.min(func.substr(
-                    ForecastSolarSample.collected_at_local,
-                    1,
-                    10,
-                )))
+                select(func.min(ForecastSolarSample.collected_at_utc))
             )
     finally:
         engine.dispose()
 
     starts = [
-        date.fromisoformat(str(value))
+        parse_time(str(value), ZoneInfo(timezone_name)).date()
         for value in (actual_start, forecast_start)
         if value is not None
     ]
@@ -349,7 +344,7 @@ def load_recent_monthly_energy(
             )
         rows.append(row)
     recent = append_energy_total(pd.DataFrame(rows), "Total")
-    lifetime_start = load_lifetime_start_date(database_path, end_date)
+    lifetime_start = load_lifetime_start_date(database_path, end_date, timezone_name)
     lifetime = load_daily_energy_totals(
         database_path,
         timezone_name,
@@ -418,26 +413,17 @@ def load_daily_energy_totals(
                 for actual_date, totals in actual_totals.items()
             ]
 
-            forecast_date = func.substr(
-                ForecastSolarSample.collected_at_local,
-                1,
-                10,
-            ).label("date")
-            collections = session.execute(
-                select(
-                    forecast_date,
-                    ForecastSolarSample.collected_at_utc,
-                    ForecastSolarSample.collected_at_utc,
-                )
-                .where(ForecastSolarSample.collected_at_utc.is_not(None))
-                .where(forecast_date >= start_text)
-                .where(forecast_date <= end_text)
+            collections = session.scalars(
+                select(ForecastSolarSample.collected_at_utc)
+                .where(ForecastSolarSample.collected_at_utc >= actual_start.isoformat())
+                .where(ForecastSolarSample.collected_at_utc < actual_end.isoformat())
                 .distinct()
-                .order_by(forecast_date, ForecastSolarSample.collected_at_utc)
+                .order_by(ForecastSolarSample.collected_at_utc)
             ).all()
             first_guid_by_date: dict[str, str] = {}
-            for collection_date, collection_timestamp, _ in collections:
+            for collection_timestamp in collections:
                 if collection_timestamp is not None:
+                    collection_date = parse_time(collection_timestamp, timezone).date().isoformat()
                     first_guid_by_date.setdefault(
                         str(collection_date),
                         str(collection_timestamp),
@@ -729,8 +715,8 @@ def load_analysis_source_data(
             samples = (
                 load_minute_samples(session,
                     select(SigenStorModbusSample)
-                    .where(SigenStorModbusSample.collected_at_utc >= bounds.start_at.isoformat())
-                    .where(SigenStorModbusSample.collected_at_utc <= bounds.end_at.isoformat())
+                    .where(SigenStorModbusSample.collected_at_utc >= ceil(bounds.start_at.timestamp()))
+                    .where(SigenStorModbusSample.collected_at_utc <= floor(bounds.end_at.timestamp()))
                     .order_by(SigenStorModbusSample.collected_at_utc),
                     f"Analysis {bounds.start_at.isoformat()} to {bounds.end_at.isoformat()}",
                     timings=timings,
@@ -740,8 +726,8 @@ def load_analysis_source_data(
             )
             forecast_rows = _load_chart_rows(session,
                 select(ForecastSolarSample)
-                .where(ForecastSolarSample.collected_at_utc >= bounds.start_at.isoformat())
-                .where(ForecastSolarSample.collected_at_utc <= bounds.end_at.isoformat())
+                .where(ForecastSolarSample.collected_at_utc >= ceil(bounds.start_at.timestamp()))
+                .where(ForecastSolarSample.collected_at_utc <= floor(bounds.end_at.timestamp()))
                 .order_by(ForecastSolarSample.collected_at_utc, ForecastSolarSample.forecast_time),
                 timings, "Forecast data",
             )
@@ -1644,6 +1630,19 @@ def hourly_period_range(
     return end_date - timedelta(days=days - 1), end_date
 
 
+def shift_analysis_date(value: date, count: int, unit: str, direction: int) -> date:
+    """Navigate the date anchor; hour ranges move one calendar day per click."""
+    if unit == "hours":
+        return value + timedelta(days=direction)
+    if unit == "days":
+        return value + timedelta(days=direction * count)
+    if unit == "weeks":
+        return value + timedelta(weeks=direction * count)
+    if unit in {"months", "years"}:
+        return shift_date_by_months(value, direction * count * (12 if unit == "years" else 1))
+    raise ValueError("Select a valid period")
+
+
 def shift_date_by_months(value: date, months: int) -> date:
     month_index = value.year * 12 + value.month - 1 + months
     year, zero_based_month = divmod(month_index, 12)
@@ -1920,7 +1919,12 @@ def average_hourly_rollup_telemetry(
         timestamp = parse_time(sample.hour_start_utc, timezone)
         day = timestamp.date().isoformat()
         bucket = timestamp.strftime("%H:%M")
-        sample_count = sample.sample_count
+        value_columns = {
+            "solar": "plant_pv_power_kw", "load": "plant_load_power_kw",
+            "battery": "plant_battery_power_kw", "inverter": "inverter_power_kw",
+            "available_energy_kwh": "plant_battery_available_discharge_kwh",
+            "soc_percent": "plant_battery_soc_percent",
+        }
         values: dict[str, float | None] = {
             "solar": sample.plant_pv_power_kw,
             "load": sample.plant_load_power_kw,
@@ -1935,12 +1939,14 @@ def average_hourly_rollup_telemetry(
             values[actual_column_name(panel_id)] = getattr(
                 sample, PV_STRING_POWER_COLUMNS[pv_string]
             )
+            value_columns[actual_column_name(panel_id)] = PV_STRING_POWER_COLUMNS[pv_string]
         for name, value in values.items():
             if value is None:
                 continue
             key = (day, bucket, name)
             totals[key] = totals.get(key, 0.0) + value
-            count = (sample.grid_power_sample_count or 0) if name in {"grid_import", "grid_export"} else sample_count
+            count_column = "grid_power_sample_count" if name in {"grid_import", "grid_export"} else HOURLY_VALID_COUNT_COLUMNS[value_columns[name]]
+            count = getattr(sample, count_column) or 0
             counts[key] = counts.get(key, 0) + count
 
     def frame(names: tuple[str, ...]) -> pd.DataFrame:
@@ -1997,14 +2003,16 @@ def load_forecast_for_day(session: Session, day_start: datetime) -> list[Forecas
     ).all())
 
 
-def load_latest_adjusted_forecast_for_day(session: Session, day_start: datetime) -> list[ForecastSolarSample]:
+def load_latest_adjusted_forecast_for_day(session: Session, day_start: datetime, panel_ids: tuple[int, ...] = (1, 2, 3, 4)) -> list[ForecastSolarSample]:
     """Return the newest collection snapshot holding adjusted day values."""
     next_day = day_start + timedelta(days=1)
     snapshot = session.scalar(
         select(ForecastSolarSample.collected_at_utc)
         .where(ForecastSolarSample.collected_at_utc >= day_start.isoformat())
         .where(ForecastSolarSample.collected_at_utc < next_day.isoformat())
-        .where(ForecastSolarSample.panel_1_adj_watts.is_not(None))
+        .where(ForecastSolarSample.forecast_time >= day_start.isoformat())
+        .where(ForecastSolarSample.forecast_time < next_day.isoformat())
+        .where(or_(*(getattr(ForecastSolarSample, f"panel_{panel}_adj_watts").is_not(None) for panel in panel_ids)) if panel_ids else False)
         .order_by(ForecastSolarSample.collected_at_utc.desc())
         .limit(1)
     )
@@ -2017,14 +2025,16 @@ def load_latest_adjusted_forecast_for_day(session: Session, day_start: datetime)
     ).all())
 
 
-def load_bod_adjusted_forecast_for_day(session: Session, day_start: datetime) -> list[ForecastSolarSample]:
+def load_bod_adjusted_forecast_for_day(session: Session, day_start: datetime, panel_ids: tuple[int, ...] = (1, 2, 3, 4)) -> list[ForecastSolarSample]:
     """Return the first adjusted forecast collected during the local day."""
     next_day = day_start + timedelta(days=1)
     snapshot = session.scalar(
         select(ForecastSolarSample.collected_at_utc)
         .where(ForecastSolarSample.collected_at_utc >= day_start.isoformat())
         .where(ForecastSolarSample.collected_at_utc < next_day.isoformat())
-        .where(ForecastSolarSample.panel_1_adj_watt_hours.is_not(None))
+        .where(ForecastSolarSample.forecast_time >= day_start.isoformat())
+        .where(ForecastSolarSample.forecast_time < next_day.isoformat())
+        .where(or_(*(getattr(ForecastSolarSample, f"panel_{panel}_adj_watt_hours").is_not(None) for panel in panel_ids)) if panel_ids else False)
         .order_by(ForecastSolarSample.collected_at_utc.asc())
         .limit(1)
     )
@@ -2185,7 +2195,7 @@ def actual_hourly_from_rollup_samples(
             if value is not None:
                 key = (hour, name)
                 rate_totals[key] = rate_totals.get(key, 0.0) + value
-                rate_counts[key] = rate_counts.get(key, 0) + sample.sample_count
+                rate_counts[key] = rate_counts.get(key, 0) + (getattr(sample, HOURLY_VALID_COUNT_COLUMNS[name]) or 0)
 
     rows: list[dict[str, float | str]] = []
     for hour in dataframe_column(hours, "hour"):

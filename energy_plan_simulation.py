@@ -8,6 +8,7 @@ from typing import cast
 import cvxpy as cp
 import pandas as pd
 from config import Config
+from common import add_elapsed, utc_instant
 from economics import tariff_rule, tariff_rule_rate, tariff_rules_for_timestamp
 
 @dataclass
@@ -59,8 +60,8 @@ class ForecastData:
         self.load = self._validate_intervals(load, "load")
 
     def sum(self, start_time: datetime, end_time: datetime) -> ForecastPoint:
-        start = start_time
-        end = end_time
+        start = utc_instant(start_time)
+        end = utc_instant(end_time)
         if end <= start:
             raise ValueError("forecast end_time must be after start_time")
 
@@ -68,31 +69,33 @@ class ForecastData:
 
     @staticmethod
     def _validate_intervals(intervals: Iterable[ForecastInterval], name: str) -> tuple[ForecastInterval, ...]:
-        ordered = tuple(sorted(intervals, key=lambda interval: interval.starts_at))
+        ordered = tuple(sorted(intervals, key=lambda interval: utc_instant(interval.starts_at)))
         if not ordered:
             raise ValueError(f"{name} forecast must contain at least one interval")
         for previous, current in zip(ordered, ordered[1:]):
-            if current.starts_at < previous.ends_at:
+            if utc_instant(current.starts_at) < utc_instant(previous.ends_at):
                 raise ValueError(f"{name} forecast intervals must not overlap")
-            if current.starts_at > previous.ends_at:
+            if utc_instant(current.starts_at) > utc_instant(previous.ends_at):
                 raise ValueError(f"{name} forecast intervals contain a gap")
-        if any(interval.ends_at <= interval.starts_at for interval in ordered):
+        if any(utc_instant(interval.ends_at) <= utc_instant(interval.starts_at) for interval in ordered):
             raise ValueError(f"{name} forecast intervals must end after they start")
         return ordered
 
     @staticmethod
     def _sum_intervals(intervals: tuple[ForecastInterval, ...], start: datetime, end: datetime) -> float:
+        start, end = utc_instant(start), utc_instant(end)
         cursor = start
         total_kwh = 0.0
         for interval in intervals:
-            if interval.ends_at <= cursor:
+            interval_start, interval_end = utc_instant(interval.starts_at), utc_instant(interval.ends_at)
+            if interval_end <= cursor:
                 continue
-            if interval.starts_at > cursor:
+            if interval_start > cursor:
                 break
-            overlap_start = max(cursor, interval.starts_at)
-            overlap_end = min(end, interval.ends_at)
+            overlap_start = max(cursor, interval_start)
+            overlap_end = min(end, interval_end)
             if overlap_end > overlap_start:
-                interval_seconds = (interval.ends_at - interval.starts_at).total_seconds()
+                interval_seconds = (interval_end - interval_start).total_seconds()
                 overlap_seconds = (overlap_end - overlap_start).total_seconds()
                 total_kwh += interval.kwh * overlap_seconds / interval_seconds
                 cursor = overlap_end
@@ -158,8 +161,8 @@ def simulate_energy_plan(device_info: DeviceInfo, device_state: DeviceState, for
 
     # Set up the LP problem for each time period
     for t in range(num_time_periods):
-        starts_at = projection_starts_at + timedelta(minutes=t * config.energy_plan.projection_resolution_mins)
-        ends_at = starts_at + timedelta(minutes=config.energy_plan.projection_resolution_mins)
+        starts_at = add_elapsed(projection_starts_at, timedelta(minutes=t * config.energy_plan.projection_resolution_mins))
+        ends_at = add_elapsed(starts_at, timedelta(minutes=config.energy_plan.projection_resolution_mins))
         import_rules, export_rules = tariff_rules_for_timestamp(config.tariffs, starts_at)
         import_rule = tariff_rule(import_rules, starts_at)
         limit_battery_export_rate_to_grid_kw = tariff_rule_rate(config.energy_plan.limit_battery_export_rate_to_grid_kw, starts_at,9999)

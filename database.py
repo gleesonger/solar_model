@@ -12,7 +12,7 @@ from zoneinfo import ZoneInfo
 
 from sqlalchemy import Column, Index, Integer, String, Table, Text, case, cast as sql_cast, create_engine, event, func, inspect, literal, or_, select
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
-from sqlalchemy.engine import Engine
+from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.ext.hybrid import hybrid_property
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
 from sqlalchemy.types import TypeDecorator
@@ -234,6 +234,11 @@ HOURLY_MEASUREMENT_COLUMNS = tuple(
 )
 
 HOURLY_GRID_POWER_COLUMNS = ("plant_grid_import_power_kw", "plant_grid_export_power_kw")
+HOURLY_VALID_COUNT_COLUMNS = {
+    name: f"{name}_sample_count" for name in HOURLY_MEASUREMENT_COLUMNS
+    if name not in CUMULATIVE_COLUMNS and not name.endswith("_period") and name != "plant_grid_power_kw"
+}
+HOURLY_ROLLUP_MARKER = "hourly_rollup_initialized_v3"
 
 
 class SigenStorHourlySample(Base):
@@ -247,6 +252,7 @@ class SigenStorHourlySample(Base):
         Column("sample_count", Integer, nullable=False),
         Column("grid_power_sample_count", Integer, nullable=True),
         *(Column(name, Float, nullable=True) for name in HOURLY_GRID_POWER_COLUMNS),
+        *(Column(name, Integer, nullable=True) for name in HOURLY_VALID_COUNT_COLUMNS.values()),
         *(
             Column(column.name, column.type, nullable=True)
             for column in SigenStorModbusSample.__table__.columns
@@ -520,12 +526,14 @@ class SolarDatabase:
             "plant_grid_import_power_kw": max(grid_power, 0.0) if grid_power is not None else None,
             "plant_grid_export_power_kw": max(-grid_power, 0.0) if grid_power is not None else None,
         })
+        hourly_values.update({count: int(row.get(name) is not None) for name, count in HOURLY_VALID_COUNT_COLUMNS.items()})
 
         statement = sqlite_insert(hourly_table).values(hourly_values)
         update_values: dict[str, Any] = {
             "sample_count": hourly_table.c.sample_count + statement.excluded.sample_count,
             "grid_power_sample_count": func.coalesce(hourly_table.c.grid_power_sample_count, 0) + statement.excluded.grid_power_sample_count,
         }
+        update_values.update({count: func.coalesce(hourly_table.c[count], 0) + statement.excluded[count] for count in HOURLY_VALID_COUNT_COLUMNS.values()})
         for name in (*HOURLY_MEASUREMENT_COLUMNS, *HOURLY_GRID_POWER_COLUMNS):
             current = hourly_table.c[name]
             incoming = statement.excluded[name]
@@ -555,7 +563,7 @@ class SolarDatabase:
 
     def initialize_hourly_rollup(self) -> None:
         """Publish initial rollup readiness only with a complete raw-data rebuild."""
-        marker = "hourly_rollup_initialized_v2"
+        marker = HOURLY_ROLLUP_MARKER
         with self.engine.begin() as connection:
             # Serialize the completion check and rebuild with collector writes.
             connection.exec_driver_sql("BEGIN IMMEDIATE")
@@ -577,7 +585,7 @@ class SolarDatabase:
         LOGGER.info("Hourly rollup initialization completed (%s groups)", result.rowcount)
 
     @heavy_work("hourly rollup range rebuild")
-    def rebuild_hourly_rollup(self, start: date, end: date, timezone: ZoneInfo) -> None:
+    def rebuild_hourly_rollup(self, start: date, end: date, timezone: ZoneInfo, *, connection: Connection | None = None) -> None:
         """Replace hourly aggregates for an inclusive local-date range.
 
         Tariff backdating changes minute-level costs and rates.  Rebuilding
@@ -590,14 +598,24 @@ class SolarDatabase:
         end_epoch = int(datetime.combine(
             date.fromordinal(end.toordinal() + 1), time.min, timezone,
         ).timestamp())
+        # A local midnight can fall within a UTC bucket. Replace every whole
+        # overlapping bucket, including its observations outside the local day.
+        start_epoch = start_epoch // 3600 * 3600
+        end_epoch = -(-end_epoch // 3600) * 3600
+        if connection is None:
+            with self.engine.begin() as owned_connection:
+                self._rebuild_hourly_rollup(owned_connection, start_epoch, end_epoch)
+        else:
+            self._rebuild_hourly_rollup(connection, start_epoch, end_epoch)
+        LOGGER.info("Hourly rollup rebuilt from %s through %s", start, end)
+
+    def _rebuild_hourly_rollup(self, connection: Connection, start_epoch: int, end_epoch: int) -> None:
         target = SigenStorHourlySample.__table__
-        with self.engine.begin() as connection:
-            connection.execute(target.delete().where(
-                target.c.hour_start_utc >= start_epoch,
-                target.c.hour_start_utc < end_epoch,
-            ))
-            result = self._insert_hourly_rollup(connection, start_epoch, end_epoch)
-        LOGGER.info("Hourly rollup rebuild inserted %s rows from %s through %s", result.rowcount, start, end)
+        connection.execute(target.delete().where(
+            target.c.hour_start_utc >= start_epoch,
+            target.c.hour_start_utc < end_epoch,
+        ))
+        self._insert_hourly_rollup(connection, start_epoch, end_epoch)
 
     @staticmethod
     def _insert_hourly_rollup(connection, start_epoch: int | None = None, end_epoch: int | None = None):
@@ -621,6 +639,7 @@ class SolarDatabase:
             func.count(source.c.plant_grid_power_kw).label("grid_power_sample_count"),
             func.sum(func.max(source.c.plant_grid_power_kw, 0)).label("plant_grid_import_power_kw"),
             func.sum(func.max(-source.c.plant_grid_power_kw, 0)).label("plant_grid_export_power_kw"),
+            *(func.count(source.c[name]).label(count) for name, count in HOURLY_VALID_COUNT_COLUMNS.items()),
             *aggregate_values,
         )
         if start_epoch is not None:
@@ -630,7 +649,7 @@ class SolarDatabase:
         source_query = source_query.group_by(hour_start, tariff_band)
         statement = sqlite_insert(target).from_select(
             ("hour_start_utc", "import_tariff_band", "sample_count", "grid_power_sample_count",
-             *HOURLY_GRID_POWER_COLUMNS, *HOURLY_MEASUREMENT_COLUMNS),
+             *HOURLY_GRID_POWER_COLUMNS, *HOURLY_VALID_COUNT_COLUMNS.values(), *HOURLY_MEASUREMENT_COLUMNS),
             source_query,
         ).prefix_with("OR IGNORE")
         return connection.execute(statement)

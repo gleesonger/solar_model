@@ -88,6 +88,34 @@ Primary key: `hour_start_utc`, `import_tariff_band`.
 | `grid_power_sample_count` | `INTEGER` | integer (non-null grid readings) | yes |
 | `plant_grid_import_power_kw` | `INTEGER` | scaled positive-power sum | yes |
 | `plant_grid_export_power_kw` | `INTEGER` | scaled negative-power magnitude sum | yes |
+| `plant_pv_power_kw_sample_count` | `INTEGER` | integer (non-null field readings) | yes |
+| `plant_battery_power_kw_sample_count` | `INTEGER` | integer (non-null field readings) | yes |
+| `plant_battery_soc_percent_sample_count` | `INTEGER` | integer (non-null field readings) | yes |
+| `plant_battery_available_discharge_kwh_sample_count` | `INTEGER` | integer (non-null field readings) | yes |
+| `plant_load_power_kw_sample_count` | `INTEGER` | integer (non-null field readings) | yes |
+| `import_rate_sample_count` | `INTEGER` | integer (non-null field readings) | yes |
+| `export_rate_sample_count` | `INTEGER` | integer (non-null field readings) | yes |
+| `inverter_power_kw_sample_count` | `INTEGER` | integer (non-null field readings) | yes |
+| `inverter_battery_avg_cell_voltage_volts_sample_count` | `INTEGER` | integer (non-null field readings) | yes |
+| `inverter_pv1_voltage_volts_sample_count` | `INTEGER` | integer (non-null field readings) | yes |
+| `inverter_pv1_current_amps_sample_count` | `INTEGER` | integer (non-null field readings) | yes |
+| `inverter_pv2_voltage_volts_sample_count` | `INTEGER` | integer (non-null field readings) | yes |
+| `inverter_pv2_current_amps_sample_count` | `INTEGER` | integer (non-null field readings) | yes |
+| `inverter_pv3_voltage_volts_sample_count` | `INTEGER` | integer (non-null field readings) | yes |
+| `inverter_pv3_current_amps_sample_count` | `INTEGER` | integer (non-null field readings) | yes |
+| `inverter_pv4_voltage_volts_sample_count` | `INTEGER` | integer (non-null field readings) | yes |
+| `inverter_pv4_current_amps_sample_count` | `INTEGER` | integer (non-null field readings) | yes |
+| `inverter_pv1_power_kw_sample_count` | `INTEGER` | integer (non-null field readings) | yes |
+| `inverter_pv2_power_kw_sample_count` | `INTEGER` | integer (non-null field readings) | yes |
+| `inverter_pv3_power_kw_sample_count` | `INTEGER` | integer (non-null field readings) | yes |
+| `inverter_pv4_power_kw_sample_count` | `INTEGER` | integer (non-null field readings) | yes |
+| `inverter_grid_frequency_hz_sample_count` | `INTEGER` | integer (non-null field readings) | yes |
+| `inverter_phase_a_voltage_volts_sample_count` | `INTEGER` | integer (non-null field readings) | yes |
+| `inverter_phase_b_voltage_volts_sample_count` | `INTEGER` | integer (non-null field readings) | yes |
+| `inverter_phase_c_voltage_volts_sample_count` | `INTEGER` | integer (non-null field readings) | yes |
+| `inverter_phase_a_current_amps_sample_count` | `INTEGER` | integer (non-null field readings) | yes |
+| `inverter_phase_b_current_amps_sample_count` | `INTEGER` | integer (non-null field readings) | yes |
+| `inverter_phase_c_current_amps_sample_count` | `INTEGER` | integer (non-null field readings) | yes |
 | `plant_grid_power_kw` | `INTEGER` | scaled number | yes |
 | `plant_pv_power_kw` | `INTEGER` | scaled number | yes |
 | `plant_battery_power_kw` | `INTEGER` | scaled number | yes |

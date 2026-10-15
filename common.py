@@ -4,7 +4,7 @@ import logging
 from pathlib import Path
 import time
 from functools import wraps
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Callable, ParamSpec, TypeVar
 from zoneinfo import ZoneInfo
 
@@ -63,6 +63,17 @@ def configure_logging(level: str) -> None:
 
 def utc_now() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def utc_instant(value: datetime) -> datetime:
+    """Normalize an aware time for elapsed arithmetic, including repeated hours."""
+    if value.tzinfo is None or value.utcoffset() is None:
+        raise ValueError("an aware datetime is required")
+    return value.astimezone(timezone.utc)
+
+
+def add_elapsed(value: datetime, delta: timedelta) -> datetime:
+    return (utc_instant(value) + delta).astimezone(value.tzinfo)
 
 
 def timestamps(now: datetime | None = None, timezone_name: str = "Europe/Dublin") -> tuple[str, str]:

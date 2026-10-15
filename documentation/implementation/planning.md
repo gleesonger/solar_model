@@ -53,10 +53,12 @@ Database observations and forecast vintages use the cutoff. Efficiencies/tariffs
 Each panel's sorted cumulative Wh resets by local target date. First value becomes initial energy; later differences clip decreases to zero; divide by 1000; sum panel contributions into:
 
 ```python
-dict[datetime, float]  # aware local target timestamp -> site interval kWh
+dict[datetime, float]  # aware UTC target timestamp -> site interval kWh
 ```
 
 The planner treats those timestamps as interval **ends**. For retained targets ≥ as-of, first start is target minus `config.forecast.interval_seconds`, then subsequent starts are the preceding retained end. This uses provider collection interval as an initial width; it differs from the dashboard's start-hour interpretation.
+
+UTC dictionary keys preserve distinct autumn fold targets; cumulative resets still use the configured local date. Projection/scenario/load steps use `common.add_elapsed`, so each hour has 3600 elapsed seconds across DST. Local labels and tariff lookup remain local.
 
 Leading/trailing missing projection coverage is padded with zero solar. This is a caller policy: `ForecastData` itself rejects extrapolation or gaps.
 
@@ -87,7 +89,7 @@ solar: tuple[ForecastInterval, ...]
 load: tuple[ForecastInterval, ...]
 ```
 
-Construction sorts each stream and requires non-empty positive-duration contiguous intervals without overlap. `sum(start,end)` returns `ForecastPoint(solar_kwh,load_kwh)` by proportional interval overlap, assuming uniform power within an input interval. It raises if the requested range is not covered.
+Construction sorts each stream and requires non-empty positive-duration contiguous intervals without overlap. All comparisons, overlap fractions and durations use UTC instants through `common.utc_instant`; inputs must be aware. `sum(start,end)` returns proportional interval energy, assuming uniform power. It raises if coverage is missing. Repeated local hours remain separate: fold=0 to fold=1 is one elapsed hour.
 
 `create_scenarios()` resamples each stream to half-hours, requiring aligned endpoints and whole-hour paired coverage. It creates nine combinations of load/solar 0.5×, 1×, 1.5×. Base/base is named `base`; others are named `loadcase_solarcase`. High solar redistributes each paired hour 25%/75%; high load uses 80%/20%. Other cases preserve base half-hour timing with the multiplier.
 
@@ -153,7 +155,7 @@ Solar/load conservation is checked within 0.001 kWh after extracting values. Onl
 
 ## 8. Grouping and Excel output
 
-`group_plan()` floors starts to clock-aligned output buckets. Energy/cost flows sum; opening/closing battery values take first/last; minimum reserve takes maximum, maximum ceiling takes minimum, export limit takes minimum. Band names join in encounter order. Import/export rates are energy-volume weighted, falling back to the first rate for zero volume. Other untouched columns use the first row.
+`group_plan()` floors starts to local clock-aligned output buckets, preserving each repeated hour's offset/fold. Energy/cost flows sum; opening/closing battery values take first/last; minimum reserve takes maximum, maximum ceiling takes minimum, export limit takes minimum. Band names join in encounter order. Import/export rates are energy-volume weighted, falling back to the first rate for zero volume. Other untouched columns use the first row.
 
 `write_workbook()` writes Summary plus one sheet per scenario, removing datetime timezone metadata for Excel while retaining local time. Summary contains as-of text, period count and cost/revenue totals. Formatting/tables do not alter calculated results.
 

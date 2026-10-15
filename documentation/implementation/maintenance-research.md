@@ -18,8 +18,8 @@ ControlTab recalculate callback
         register configured_localtime(epoch) SQLite callback
         BEGIN IMMEDIATE + temporary tariff_intervals table
         join raw samples to interval rows -> UPDATE rates/band/costs
-        commit raw update
-        rebuild_hourly_rollup(start,end,zone)
+        rebuild_hourly_rollup(start,end,zone,connection=same_transaction)
+        commit raw update and hourly rebuild together
   request supervisor restart after success
 ```
 
@@ -37,7 +37,7 @@ Rates here are already ×10,000 integers. Weekday is SQLite `%w` convention (Sun
 
 The temporary table is connection-local, not a persisted schedule history. `configured_localtime` uses YAML timezone to match sample epoch to effective date, weekday and clock-time interval. The update joins `sigenstor` by sample key, replaces selected rates/band, and calculates raw integer costs using fixed-point energy/rate arithmetic. Dates not covered by an effective period stay unchanged.
 
-Inclusive date bounds become `[local start midnight, midnight after end)` UTC epochs. Without an end bound, raw update covers all later matching rows; rollup rebuilding ends at today's configured-local date. Raw update and rollup rebuild are separate commits, so they are not one all-or-nothing maintenance transaction. The CLI's rollback wording is stronger than that actual boundary.
+Inclusive date bounds become `[local start midnight, midnight after end)` UTC epochs. Without an end bound, updates/rebuilds cover all available later dates. Raw updates and rollup replacement share one connection and `BEGIN IMMEDIATE` transaction; rebuild failure rolls both back. Whole overlapping UTC hours are rebuilt from all their raw samples, preserving neighboring dates in non-hour-offset zones. Initial schema opening is a separate initialization transaction.
 
 ## 2. Chronological operational forecast rebuild
 
@@ -83,13 +83,13 @@ main()
     query actual non-null PV sample powers
     normalise powers; aggregate actuals to UTC target hours
     inner join forecast vintage/target rows with actual hours
-    retain snapshot <= target; optional local target-date filter
+    retain snapshot <= target and completed target hours; optional local date filter
   performance_report()
     metric_row(All) + metric_row(each nonempty lead band)
   print; optionally write CSV
 ```
 
-Paired frame contains `snapshot`, `target` (floored UTC hour), `raw_kw`, `adjusted_kw`, `actual_kw`, `lead_hours`, alongside original queried fields. Site powers sum panels with null values replaced by zero; a row with every adjusted panel missing is excluded. Actual power is sample mean, not meter energy, and partial observed hours are not explicitly removed.
+Paired frame contains `snapshot`, `target` (floored UTC hour), `raw_kw`, `adjusted_kw`, `actual_kw`, `lead_hours`, alongside original queried fields. Site powers sum panels with null values replaced by zero; a row with every adjusted panel missing is excluded. Actual samples and targets must precede the UTC hour floor of `as_of` (default now). CLI `--as-of` freezes this cutoff; naive values use UTC. Actual power is sample mean, not meter energy. A completed historical hour can still have sparse coverage; no minimum sample threshold is imposed. Freezing the cutoff does not prevent later edits to historical records/configuration.
 
 Report columns are lead label, sample count, raw/adjusted MAE kW, RMSE kW, signed bias kW, and MAE improvement %. Bands are 0–1h, 1–3h, 3–6h, 6–24h, and 24h+. Each forecast vintage/target pair is an observation; the same actual hour may participate in several vintages. This is not one prediction per target day or a comparison restricted to the midnight source.
 

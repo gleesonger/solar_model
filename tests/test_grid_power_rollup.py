@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 
 from config import TariffPeriod, TariffRule, TariffsConfig
 from dashboard import data
-from database import Base, DatabaseMetadata, SigenStorHourlySample, SigenStorModbusSample, SolarDatabase, open_database
+from database import HOURLY_ROLLUP_MARKER, Base, DatabaseMetadata, SigenStorHourlySample, SigenStorModbusSample, SolarDatabase, open_database
 
 
 def tariffs(split=False):
@@ -97,7 +97,7 @@ def test_existing_v1_database_gets_atomic_v2_rebuild_once(tmp_path, monkeypatch,
                 open_database(path)
         engine = create_engine(f"sqlite:///{path}")
         with engine.connect() as connection:
-            assert connection.exec_driver_sql("SELECT value FROM database_metadata WHERE key='hourly_rollup_initialized_v2'").scalar_one_or_none() is None
+            assert connection.exec_driver_sql("SELECT value FROM database_metadata WHERE key=?", (HOURLY_ROLLUP_MARKER,)).scalar_one_or_none() is None
             assert connection.exec_driver_sql("SELECT sample_count, plant_grid_import_power_kw FROM sigenstor_hourly").one() == (2, None)
         engine.dispose()
     database = open_database(path)

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone as utc_timezone, tzinfo
+from math import ceil, floor
 from time import perf_counter
 from typing import TYPE_CHECKING
 
@@ -67,8 +68,8 @@ def load_analysis_export_dataframe(
 
     analysis_interval_start(bounds.start_at, timestep)
     parameters = {
-        "start": round(bounds.start_at.timestamp()),
-        "end": round(bounds.end_at.timestamp()),
+        "start": ceil(bounds.start_at.timestamp()),
+        "end": floor(bounds.end_at.timestamp()),
         "target_start": bounds.start_at.timestamp(),
         "target_end": bounds.end_at.timestamp(),
     }

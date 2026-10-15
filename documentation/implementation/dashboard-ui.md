@@ -112,7 +112,7 @@ PV integration state consists of:
 - `_previous_pv_power` and `_previous_pv_timestamp`: integration endpoints.
 - `_last_pv_shares`: most recent positive total-power proportions keyed by `pvN`.
 
-At day change, the base is loaded once from `sigenstor`, live integrals reset, and previous/shares clear. Each live reading computes `max(V*A,0)/1000`. If total raw string power is positive, proportions refresh; otherwise prior positive proportions are retained. Displayed string kW is plant solar × share. Displayed string daily kWh is plant daily solar × `(persisted integral + live integral)` proportion. No share yields missing unless plant total is explicitly zero.
+At day change, the base is loaded from `sigenstor`, live integrals reset, and previous/shares clear. Grid/PV baselines and date markers are published only after successful computation. A failed baseline read leaves the prior day/state intact and is retried on the next poll; failed later string processing does not partially advance integration or double-count a retry. Each live reading computes `max(V*A,0)/1000`. If total raw string power is positive, proportions refresh; otherwise prior positive proportions are retained. Displayed string kW is plant solar × share. Displayed string daily kWh is plant daily solar × `(persisted integral + live integral)` proportion. No share yields missing unless plant total is explicitly zero.
 
 These values are in-memory allocations and never write to SQLite. Polling pauses/failures can leave elapsed gaps between integration endpoints; no separate continuous background energy estimator runs while inactive.
 

@@ -1,5 +1,7 @@
 # Review findings
 
+The **2026-10-15 deep review** is recorded in the [system review report](system-review-report.md), with a [coverage matrix](system-review-coverage.md) and [recommended work](system-review-recommendations.md). It confirms several findings below and adds independently reproduced data, recovery and browser issues. Its explicit verification limits apply; no implementation fixes were made by that review.
+
 Reviewed 2026-10-14 against the working tree described in the [documentation index](../index.md). Findings below were documented; application fixes are outside this documentation change.
 
 ## Confirmed defects and inconsistencies
@@ -45,6 +47,10 @@ Reviewed 2026-10-14 against the working tree described in the [documentation ind
 4. Reconcile dependency declaration, port metadata, and retained legacy paths.
 
 ## Application fixes completed
+
+- **2026-10-15, R04:** hourly import/export power now accumulates signs separately and counts valid grid observations; chart SQL and retained hourly readers use the corrected means. V2 initialization atomically rebuilds historical rollups once. Added 18 regression cases; documented broader subset 178 passed/1 skipped. Other nullable telemetry counts (R06) remain open.
+
+- **2026-10-15, R01-R03:** missing/non-finite observed hours are excluded from residual inference; live daily baseline failures retry without publishing partial state; hourly initialization/recovery is transactional and completion-marked. Legacy unmarked databases rebuild once on next open; raw history is retained. Regression checks: 23 new cases, broader documented subset 160 passed/1 skipped. See the [review report](system-review-report.md) and [runbook](../operations/runbook.md).
 
 - **2026-10-15:** Analysis downloads now aggregate text tariff bands as distinct labels instead of attempting a numeric average. The dialog imports the shared error notifier and logs the underlying failure before restoring the form. Regression checks cover CSV/Excel output, optional forecasts, numeric aggregation, mixed/repeated bands, and missing labels in temporary databases.
 

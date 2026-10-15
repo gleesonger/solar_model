@@ -233,6 +233,8 @@ HOURLY_MEASUREMENT_COLUMNS = tuple(
     if column.name not in {"collected_at_utc", "import_tariff_band"}
 )
 
+HOURLY_GRID_POWER_COLUMNS = ("plant_grid_import_power_kw", "plant_grid_export_power_kw")
+
 
 class SigenStorHourlySample(Base):
     __table__ = Table(
@@ -243,6 +245,8 @@ class SigenStorHourlySample(Base):
         # missing its tariff band, and keeps the composite key unambiguous.
         Column("import_tariff_band", Text, primary_key=True, nullable=False),
         Column("sample_count", Integer, nullable=False),
+        Column("grid_power_sample_count", Integer, nullable=True),
+        *(Column(name, Float, nullable=True) for name in HOURLY_GRID_POWER_COLUMNS),
         *(
             Column(column.name, column.type, nullable=True)
             for column in SigenStorModbusSample.__table__.columns
@@ -510,12 +514,19 @@ class SolarDatabase:
             "sample_count": 1,
         }
         hourly_values.update({name: row.get(name) for name in HOURLY_MEASUREMENT_COLUMNS})
+        grid_power = row.get("plant_grid_power_kw")
+        hourly_values.update({
+            "grid_power_sample_count": int(grid_power is not None),
+            "plant_grid_import_power_kw": max(grid_power, 0.0) if grid_power is not None else None,
+            "plant_grid_export_power_kw": max(-grid_power, 0.0) if grid_power is not None else None,
+        })
 
         statement = sqlite_insert(hourly_table).values(hourly_values)
         update_values: dict[str, Any] = {
             "sample_count": hourly_table.c.sample_count + statement.excluded.sample_count,
+            "grid_power_sample_count": func.coalesce(hourly_table.c.grid_power_sample_count, 0) + statement.excluded.grid_power_sample_count,
         }
-        for name in HOURLY_MEASUREMENT_COLUMNS:
+        for name in (*HOURLY_MEASUREMENT_COLUMNS, *HOURLY_GRID_POWER_COLUMNS):
             current = hourly_table.c[name]
             incoming = statement.excluded[name]
             if name in CUMULATIVE_COLUMNS:
@@ -541,6 +552,29 @@ class SolarDatabase:
         with self.engine.begin() as connection:
             result = self._insert_hourly_rollup(connection)
         LOGGER.info("Hourly rollup historical backfill inserted %s rows", result.rowcount)
+
+    def initialize_hourly_rollup(self) -> None:
+        """Publish initial rollup readiness only with a complete raw-data rebuild."""
+        marker = "hourly_rollup_initialized_v2"
+        with self.engine.begin() as connection:
+            # Serialize the completion check and rebuild with collector writes.
+            connection.exec_driver_sql("BEGIN IMMEDIATE")
+            table_missing = not inspect(connection).has_table(SigenStorHourlySample.__table__.name)
+            if table_missing:
+                SigenStorHourlySample.__table__.create(connection)
+            initialized = connection.execute(
+                select(DatabaseMetadata.value).where(DatabaseMetadata.key == marker)
+            ).scalar_one_or_none()
+            if initialized == "1" and not table_missing:
+                return
+            # Older openers could leave a present but incomplete table. Rebuild
+            # once rather than trusting existence or ignoring stale groups.
+            LOGGER.info("Initializing/recovering hourly rollup from raw history")
+            connection.execute(SigenStorHourlySample.__table__.delete())
+            result = self._insert_hourly_rollup(connection)
+            statement = sqlite_insert(DatabaseMetadata.__table__).values(key=marker, value="1")
+            connection.execute(statement.on_conflict_do_update(index_elements=["key"], set_={"value": "1"}))
+        LOGGER.info("Hourly rollup initialization completed (%s groups)", result.rowcount)
 
     @heavy_work("hourly rollup range rebuild")
     def rebuild_hourly_rollup(self, start: date, end: date, timezone: ZoneInfo) -> None:
@@ -584,6 +618,9 @@ class SolarDatabase:
             hour_start.label("hour_start_utc"),
             tariff_band.label("import_tariff_band"),
             func.count().label("sample_count"),
+            func.count(source.c.plant_grid_power_kw).label("grid_power_sample_count"),
+            func.sum(func.max(source.c.plant_grid_power_kw, 0)).label("plant_grid_import_power_kw"),
+            func.sum(func.max(-source.c.plant_grid_power_kw, 0)).label("plant_grid_export_power_kw"),
             *aggregate_values,
         )
         if start_epoch is not None:
@@ -592,7 +629,8 @@ class SolarDatabase:
             source_query = source_query.where(source.c.collected_at_utc < end_epoch)
         source_query = source_query.group_by(hour_start, tariff_band)
         statement = sqlite_insert(target).from_select(
-            ("hour_start_utc", "import_tariff_band", "sample_count", *HOURLY_MEASUREMENT_COLUMNS),
+            ("hour_start_utc", "import_tariff_band", "sample_count", "grid_power_sample_count",
+             *HOURLY_GRID_POWER_COLUMNS, *HOURLY_MEASUREMENT_COLUMNS),
             source_query,
         ).prefix_with("OR IGNORE")
         return connection.execute(statement)
@@ -686,11 +724,9 @@ def open_database(path: str | Path) -> SolarDatabase:
     _drop_columns(engine, SigenStorModbusSample, ("raw_registers_json",))
     _drop_columns(engine, ForecastSolarSample, ("raw_json",))
     database = SolarDatabase(engine)
-    if hourly_table_missing:
-        SigenStorHourlySample.__table__.create(engine)
-        database.backfill_hourly_rollup()
-    else:
+    if not hourly_table_missing:
         _add_missing_columns(engine, SigenStorHourlySample)
+    database.initialize_hourly_rollup()
     return database
 
 

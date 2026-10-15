@@ -227,20 +227,23 @@ class LivePowerCollector:
         }
         day = collected_at_local[:10]
         if self._grid_energy_day != day:
-            self._grid_energy_day = day
-            self._grid_energy_start = data.load_grid_energy_day_start(
+            grid_energy_start = data.load_grid_energy_day_start(
                 self._database_path,
                 day,
                 self._timezone_name,
             )
+        else:
+            grid_energy_start = self._grid_energy_start.copy()
         for key, metric in grid_totals.items():
             value, _, _ = readings[metric]
             if isinstance(value, str):
                 raise ValueError(f"live grid energy metric {metric!r} returned text")
-            baseline = self._grid_energy_start.setdefault(key, value)
+            baseline = grid_energy_start.setdefault(key, value)
             values[key] = max(value - baseline, 0.0)
 
         self._add_live_pv_array_values(values, readings, collected_at_local)
+        self._grid_energy_start = grid_energy_start
+        self._grid_energy_day = day
 
         return values
 
@@ -253,18 +256,23 @@ class LivePowerCollector:
         collected_at = datetime.fromisoformat(collected_at_local)
         day = collected_at.date().isoformat()
         if self._pv_energy_day != day:
-            self._pv_energy_day = day
-            self._pv_energy_base = data.load_pv_array_energy_day_totals(
+            energy_base = data.load_pv_array_energy_day_totals(
                 self._database_path, day, self._timezone_name,
             )
-            self._pv_energy_live = {self._pv_panel_id(pv_string): 0.0 for pv_string in self._pv_strings}
-            self._previous_pv_power = {}
-            self._previous_pv_timestamp = None
-            self._last_pv_shares = {}
+            energy_live = {self._pv_panel_id(pv_string): 0.0 for pv_string in self._pv_strings}
+            previous_power_by_panel = {}
+            previous_timestamp = None
+            shares = {}
+        else:
+            energy_base = self._pv_energy_base
+            energy_live = self._pv_energy_live.copy()
+            previous_power_by_panel = self._previous_pv_power.copy()
+            previous_timestamp = self._previous_pv_timestamp
+            shares = self._last_pv_shares.copy()
 
         elapsed_hours = (
-            (collected_at - self._previous_pv_timestamp).total_seconds() / 3_600
-            if self._previous_pv_timestamp is not None
+            (collected_at - previous_timestamp).total_seconds() / 3_600
+            if previous_timestamp is not None
             else None
         )
         raw_powers: dict[str, float] = {}
@@ -275,30 +283,29 @@ class LivePowerCollector:
             if isinstance(voltage, str) or isinstance(current, str):
                 raise ValueError(f"live {pv_string} reading returned text")
             power = max(voltage * current, 0.0) / 1_000
-            previous_power = self._previous_pv_power.get(panel_id)
+            previous_power = previous_power_by_panel.get(panel_id)
             if previous_power is not None and elapsed_hours is not None and elapsed_hours > 0:
-                self._pv_energy_live[panel_id] += (previous_power + power) / 2 * elapsed_hours
+                energy_live[panel_id] += (previous_power + power) / 2 * elapsed_hours
             raw_powers[pv_string] = power
-            self._previous_pv_power[panel_id] = power
-        self._previous_pv_timestamp = collected_at
+            previous_power_by_panel[panel_id] = power
 
         raw_power_total = sum(raw_powers.values())
         if raw_power_total > 0:
-            self._last_pv_shares = {
+            shares = {
                 pv_string: power / raw_power_total
                 for pv_string, power in raw_powers.items()
             }
         total_pv_power = values["solar"]
         for pv_string in self._pv_strings:
             values[pv_string] = (
-                total_pv_power * self._last_pv_shares[pv_string]
-                if total_pv_power is not None and pv_string in self._last_pv_shares
+                total_pv_power * shares[pv_string]
+                if total_pv_power is not None and pv_string in shares
                 else (0.0 if total_pv_power == 0 else None)
             )
 
         raw_energy = {
-            pv_string: self._pv_energy_base.get(self._pv_panel_id(pv_string), 0.0)
-            + self._pv_energy_live[self._pv_panel_id(pv_string)]
+            pv_string: energy_base.get(self._pv_panel_id(pv_string), 0.0)
+            + energy_live[self._pv_panel_id(pv_string)]
             for pv_string in self._pv_strings
         }
         raw_energy_total = sum(raw_energy.values())
@@ -309,6 +316,12 @@ class LivePowerCollector:
                 if total_pv_energy is not None and raw_energy_total > 0
                 else (0.0 if total_pv_energy == 0 else None)
             )
+        self._pv_energy_base = energy_base
+        self._pv_energy_live = energy_live
+        self._previous_pv_power = previous_power_by_panel
+        self._previous_pv_timestamp = collected_at
+        self._last_pv_shares = shares
+        self._pv_energy_day = day
 
     @staticmethod
     def _pv_panel_id(pv_string: str) -> int:

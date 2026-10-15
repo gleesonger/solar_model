@@ -1,3 +1,5 @@
+documentation/reviews/system-review-evidence/**
+
 *.xlsx
 *.csv
 *.db
@@ -47,6 +49,4 @@ htmlcov/
 
 # OS files
 .DS_Store
-
-
 

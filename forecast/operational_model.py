@@ -92,11 +92,18 @@ def _today_residual(issued: pd.DataFrame, distributions: dict[int, tuple[float, 
     scores, weights = [], []
     for row in issued.itertuples():
         distribution = distributions.get(row.target_hour.hour)
-        if distribution is None or row.raw_total_kw <= 0:
+        if distribution is None:
             continue
-        mean, sigma = distribution
-        scores.append((row.plant_pv_power_kw - row.baseline_kw) / sigma)
-        weights.append(np.exp(-np.log(2) * max((as_of - row.target_hour).total_seconds() / 3_600, 0) / RESIDUAL_HALF_LIFE_HOURS))
+        _, sigma = distribution
+        inputs = (row.raw_total_kw, row.plant_pv_power_kw, row.baseline_kw, sigma)
+        if any(value is None or not np.isfinite(value) for value in inputs) or row.raw_total_kw <= 0 or sigma <= 0:
+            continue
+        score = (row.plant_pv_power_kw - row.baseline_kw) / sigma
+        weight = np.exp(-np.log(2) * max((as_of - row.target_hour).total_seconds() / 3_600, 0) / RESIDUAL_HALF_LIFE_HOURS)
+        if not np.isfinite(score) or not np.isfinite(weight) or weight <= 0:
+            continue
+        scores.append(score)
+        weights.append(weight)
     if not scores:
         return 0.0, 0.0, 0
     weights = np.asarray(weights)

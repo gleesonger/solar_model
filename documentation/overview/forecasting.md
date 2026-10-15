@@ -10,6 +10,7 @@ The live hook is [forecast.operational_model.refresh_adjusted_forecast](../../fo
 - For each local target day, correction uses the latest provider snapshot at/before midnight. A new installation without one uses its first same-day snapshot.
 - Scalar calibration uses previous target days: 24 UTC-hour factors, 56-day lookback, 21-day recency half-life, weighted least squares through zero. Missing training yields scalar 1.
 - Factors interpolate around hourly centres. Historical actuals are mean plant PV kW per UTC hour.
+- Missing/non-finite observations do not contribute residuals; if none are usable, correction uses a neutral residual and retains the calibrated forecast.
 - Completed current-day hours supply standardised residuals against hourly historical distributions. Residual half-life is 1 hour; effective sample strength is shrunk using a 2-hour constant.
 - Only targets at/after the current UTC hour floor are updated. The open hour uses earlier completed observations; its actual is excluded from residual inference.
 - Future target days receive calibrated forecasts without today's residual.

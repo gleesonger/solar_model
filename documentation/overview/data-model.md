@@ -12,7 +12,7 @@ Source: [database.py](../../database.py), especially `ScaledInteger`, `EpochSeco
 | `sigenstor_hourly` | `hour_start_utc`, `import_tariff_band` | UTC-hour aggregates, split by import tariff band; missing band becomes `Unknown` |
 | `forecast_solar` | `collected_at_utc`, `forecast_time` | One collection vintage and target time; up to four panels' raw/adjusted W and Wh fields |
 | `sigenstor_devices` | integer `id` | Append-only valid device-value changes, with variable/name/value/unit and ISO UTC/local timestamps |
-| `database_metadata` | `key` | Metadata key/value storage; current opener does not set a database version |
+| `database_metadata` | `key` | Key/value storage including hourly-initialization completion; no global database version |
 
 ## Units and time
 
@@ -31,7 +31,8 @@ Source: [database.py](../../database.py), especially `ScaledInteger`, `EpochSeco
 - PV-string power is `max(voltage × current, 0) / 1000`; interval energy uses the trapezoidal average of previous/current power and elapsed UTC hours.
 - Costs use the tariff at the collection timestamp for the whole measured interval. Gaps and tariff boundaries are not split into smaller billing intervals.
 - Electrical rows and hourly updates commit together. Previous in-memory readings advance only after success. Device history is saved separately.
-- Hourly cumulative meters use maxima; other numeric fields use sums. Power/rate/level averages must divide by `sample_count`; summed power is not an hourly power reading.
+- Hourly grid import/export power stores separate sign magnitudes and a valid grid observation count, preserving activity even when net power is zero. These are distinct from cumulative meter energy.
+- Hourly cumulative meters use maxima; other numeric fields use sums. Grid power uses `grid_power_sample_count`; other power/rate/level averages divide by `sample_count`; summed power is not an hourly power reading.
 - Missing measurements remain nullable. Some display paths substitute zeros; this must not be mistaken for observed zero generation.
 - Raw and adjusted forecast fields stay separate. Adjusted writers accept only `_adj_` fields; raw collection can update its own panel fields at the same composite key.
 
@@ -39,5 +40,5 @@ Source: [database.py](../../database.py), especially `ScaledInteger`, `EpochSeco
 
 - `open_database()` renames legacy forecast fields to `_raw_`, renames battery availability to the plant-level name, creates tables, adds missing columns, and drops legacy JSON columns.
 - Conflicting duplicate raw/legacy forecast values cause migration refusal rather than silent data loss.
-- A newly created hourly table is backfilled; an existing hourly table receives added columns without historical recomputation.
+- Initial hourly creation/rebuild and the `hourly_rollup_initialized_v2` marker commit together. Missing/unmarked hourly history is rebuilt from raw samples once; interrupted initialization retries on next open. Later marked opens skip the historical scan. Adding columns alone does not trigger another rebuild.
 - Schema opening can write substantial data. Back up before deployment; additive schema changes do not automatically derive historical values for new metrics.

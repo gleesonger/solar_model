@@ -38,6 +38,10 @@ Keep concise explanations in `overview/`, detailed code/data contracts in `imple
 | [Development and testing](operations/development-and-testing.md) | Setup, checks, coverage, verification limits |
 | [Operations](operations/runbook.md) | Launch, Docker, restart, maintenance, troubleshooting |
 | [Review findings](reviews/findings.md) | Confirmed defects and open questions |
+| [System review plan](reviews/system-review-plan.md) | Approved deep review scope, independent reviewers, browser/output checks, and consolidation assessment |
+| [System review report](reviews/system-review-report.md) | Validated correctness/recovery findings, independent assessments, and explicit limitations |
+| [System review coverage](reviews/system-review-coverage.md) | Website interactions/output checks and server/data verification statuses |
+| [System review recommendations](reviews/system-review-recommendations.md) | Prioritized fixes, acceptance criteria, policy decisions, and consolidation work |
 | [Documentation development trial](reviews/documentation-development-trial.md) | Fresh-agent proposals tested against source, and resulting documentation gaps |
 | [Download performance](reviews/download-performance.md) | Profiling findings, SQL/Excel optimisations, measured timings, and regression coverage |
 | [Schema reference](reference/schema.md) | Every declared database column, key, type, and index |

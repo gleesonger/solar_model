@@ -11,7 +11,11 @@ open_database(path)
   create raw/device/metadata/forecast tables if absent
   add missing columns; drop legacy JSON columns
   SolarDatabase(engine) -> engine + sessionmaker
-  create/backfill hourly table if absent, otherwise add missing columns
+  add missing columns if the hourly table exists
+  initialize_hourly_rollup(): BEGIN IMMEDIATE
+    create hourly table if absent
+    check database_metadata completion marker
+    rebuild uninitialized hourly history and commit marker atomically
 ```
 
 `SolarDatabase.sessions()` creates a session; `sessions.begin()` owns a committing transaction. `close()` disposes the engine's pooled connections. Cached Engine identity is reused by path, but disposed engines can reconnect; a `SolarDatabase` is not a permanently open cursor.
@@ -89,7 +93,7 @@ All measurement/economics fields are nullable. Only `collected_at_utc` identifie
 
 ## 3. Hourly rollup structure
 
-`SigenStorHourlySample.__table__` dynamically mirrors electrical numeric columns, replacing its timestamp with `hour_start_utc`, adding `sample_count`, and making tariff band part of the key.
+`SigenStorHourlySample.__table__` dynamically mirrors electrical numeric columns, replacing its timestamp with `hour_start_utc`, adding `sample_count`, sign-separated grid-power sums and their valid observation count, and making tariff band part of the key.
 
 ```python
 # Physical-unit ORM representation, synthetic three samples
@@ -111,11 +115,16 @@ All measurement/economics fields are nullable. Only `collected_at_utc` identifie
 - Fields in `CUMULATIVE_COLUMNS` merge by maximum.
 - All other numeric fields merge by addition.
 - A null incoming/current side preserves the non-null side; both missing remain null.
+- Grid import/export sums add `max(grid_kw, 0)` / `max(-grid_kw, 0)` per raw sample, before opposite signs can cancel. `grid_power_sample_count` counts non-null grid observations, including zero; absent grid observations leave both sums null and count zero.
 - This upsert shares the raw-sample transaction.
+
+Grid import/export power means use `plant_grid_import_power_kw` / `plant_grid_export_power_kw` divided by `grid_power_sample_count`, combined across tariff bands. The signed `plant_grid_power_kw` sum is retained separately and must not be split after summation. These fields are power statistics, not imported/exported meter energy.
 
 Hourly **energy/cost** is already an aggregate. Hourly **power/rate/SOC/available energy** must divide sums by count; different readers handle per-field missingness slightly differently. Tariff transitions create multiple rows for an hour; readers must combine them.
 
-`_insert_hourly_rollup()` reproduces sums/maxima using SQL grouped by hour and band. `backfill_hourly_rollup()` fills a newly created table; `rebuild_hourly_rollup(start,end,zone)` deletes/replaces an inclusive local-date range in one rollup transaction. Adding columns to an existing table does not backfill derived historical data.
+`_insert_hourly_rollup()` reproduces sums/maxima using SQL grouped by hour and band. Startup `initialize_hourly_rollup()` uses an explicit SQLite `BEGIN IMMEDIATE` transaction: table creation (if needed), full replacement from raw samples and metadata key `hourly_rollup_initialized_v2 = "1"` commit together. Interrupted work rolls back; the next open retries. The v2 marker requires the sign-separated grid statistics; earlier v1 markers do not bypass this upgrade. Older databases without the v2 marker receive a one-time full rebuild even if an hourly table already exists, repairing incomplete initialization. A present marked table skips reaggregation; a missing table is rebuilt even if an old marker survives. The write lock serializes this rebuild with collector transactions. This marker is not a database schema version.
+
+Manual `backfill_hourly_rollup()` still inserts missing groups with `OR IGNORE`; it does not repair stale existing groups. `rebuild_hourly_rollup(start,end,zone)` deletes/replaces an inclusive local-date range in one rollup transaction. Adding columns to an existing table does not backfill derived historical data.
 
 ## 4. Forecast persistence and adjusted writers
 

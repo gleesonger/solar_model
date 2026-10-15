@@ -230,15 +230,23 @@ def _build_plan(
         averaged_fields = []
         for metric in requested_telemetry:
             if metric in {"power_grid_import", "power_grid_export"}:
-                sign = "-" if metric == "power_grid_export" else ""
-                raw = f"MAX({sign}plant_grid_power_kw, 0) / 10000.0"
+                if sample_resolution == "minute":
+                    sign = "-" if metric == "power_grid_export" else ""
+                    raw = f"MAX({sign}plant_grid_power_kw, 0) / 10000.0"
+                else:
+                    column = "plant_grid_import_power_kw" if metric == "power_grid_import" else "plant_grid_export_power_kw"
+                    raw = f"{column} / 10000.0"
             else:
                 raw = f"{telemetry_columns[metric]} / 10000.0"
             count = f"COUNT({metric})" if sample_resolution == "minute" else f"SUM(CASE WHEN {metric} IS NOT NULL THEN samples END)"
+            if sample_resolution == "hour" and metric in {"power_grid_import", "power_grid_export"}:
+                count = "SUM(grid_samples)"
             # Each day's interval contributes equally, matching the Analysis views.
             source_fields.append(f"{raw} AS {metric}")
             averaged_fields.append(f"SUM({metric}) / NULLIF({count}, 0) AS {metric}")
             expressions[metric] = f"t.{metric}"
+        if sample_resolution == "hour" and any(metric in {"power_grid_import", "power_grid_export"} for metric in requested_telemetry):
+            source_fields.append("grid_power_sample_count AS grid_samples")
         ctes.append(
             f"telemetry_source AS (SELECT chart_local_day({stamp}) AS day, chart_local_interval({stamp}) AS hour, "
             f"{'1' if sample_resolution == 'minute' else 'sample_count'} AS samples, " + ", ".join(source_fields) +

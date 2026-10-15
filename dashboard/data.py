@@ -1921,14 +1921,13 @@ def average_hourly_rollup_telemetry(
         day = timestamp.date().isoformat()
         bucket = timestamp.strftime("%H:%M")
         sample_count = sample.sample_count
-        grid_sum = sample.plant_grid_power_kw
         values: dict[str, float | None] = {
             "solar": sample.plant_pv_power_kw,
             "load": sample.plant_load_power_kw,
             "battery": sample.plant_battery_power_kw,
             "inverter": sample.inverter_power_kw,
-            "grid_import": max(grid_sum, 0.0) if grid_sum is not None else None,
-            "grid_export": max(-grid_sum, 0.0) if grid_sum is not None else None,
+            "grid_import": sample.plant_grid_import_power_kw,
+            "grid_export": sample.plant_grid_export_power_kw,
             "available_energy_kwh": sample.plant_battery_available_discharge_kwh,
             "soc_percent": sample.plant_battery_soc_percent,
         }
@@ -1941,7 +1940,8 @@ def average_hourly_rollup_telemetry(
                 continue
             key = (day, bucket, name)
             totals[key] = totals.get(key, 0.0) + value
-            counts[key] = counts.get(key, 0) + sample_count
+            count = (sample.grid_power_sample_count or 0) if name in {"grid_import", "grid_export"} else sample_count
+            counts[key] = counts.get(key, 0) + count
 
     def frame(names: tuple[str, ...]) -> pd.DataFrame:
         rows: list[dict[str, float | str | None]] = []

@@ -112,7 +112,7 @@ It uses 21-day age weights but does not apply the scalar's explicit 56-day cutof
 
 `cutoff = as_of.floor('h')`. `past` contains official-day rows strictly before that cutoff, with `baseline_kw = interpolated_scalar × raw_total_kw`.
 
-`_today_residual()` constructs score/weight arrays for usable positive-raw rows:
+`_today_residual()` constructs score/weight arrays only for rows with finite observed power, baseline power and raw power, positive raw power, and a finite positive distribution sigma. Missing observations are excluded, never treated as zero. Non-finite scores/weights and zero weights are also excluded:
 
 ```text
 score = (actual_kw - baseline_kw) / sigma_for_target_UTC_hour

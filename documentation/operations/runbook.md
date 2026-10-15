@@ -55,6 +55,8 @@ python test_energy_plan_as_of.py --database solar.db --as-of "2026-09-15T00:00:0
 
 ## Backups and troubleshooting
 
+The first startup after the R04 grid-statistics upgrade rebuilds hourly history once for databases lacking `hourly_rollup_initialized_v2`, (including databases with only the earlier v1 marker), inside a write transaction. This populates the new split grid-power sums/count without changing raw data. Large histories may take longer and temporarily block other writers. Use the managed launcher so this completes before its children start; later opens only check readiness. A failed/interrupted initialization rolls back and retries on the next open; raw samples remain unchanged.
+
 - Make a consistent SQLite backup (SQLite backup API or copy while writers are stopped); retain the matching configuration and register maps.
 - Invalid config: inspect startup `ValueError`, field spelling, complete rule coverage, effective dates, and YAML types.
 - Missing readings: check device/network/map IDs, server logs, and warning timestamp age. Failed reads retain old live values.

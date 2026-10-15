@@ -162,6 +162,8 @@ data.load_chart_data_batch()
 | Grid/values-by-hour | Fill calendar bucket scaffolding, join datasets, apply range filters |
 | Final aggregation | Sum or mean by requested group and optional split |
 
+Grid power signs are split per observation: minute queries use positive/negative magnitudes directly; hourly queries use the stored `plant_grid_import_power_kw` / `plant_grid_export_power_kw` sums and `grid_power_sample_count`. Both yield import/export means 1/1 kW for observations +2/-2 kW. Missing grid observations are excluded, zero is counted, and all-null stays missing. Other nullable rollup telemetry retains the separate R06 valid-count limitation.
+
 SQL averages are mandatory for battery levels/rates/telemetry even when energy aggregation is `sum`. Telemetry computes per-day interval means before aggregating across dates, so it is not necessarily the mean of every raw sample across the whole selection. Hour-grouped multi-day data is a clock-hour profile rather than chronological timestamps.
 
 `_compose_batch()` projects only referenced table columns, materialises shared bounded sources, interns common CTEs, namespaces request-specific parameters/functions, and combines outputs with `UNION ALL`. The single statement gives the batch one database read view; this guarantee applies to batched Analysis queries, not the broader Recent snapshot.

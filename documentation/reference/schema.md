@@ -85,6 +85,9 @@ Primary key: `hour_start_utc`, `import_tariff_band`.
 | `hour_start_utc` | `INTEGER` | epoch/ISO | no |
 | `import_tariff_band` | `TEXT` | string | no |
 | `sample_count` | `INTEGER` | integer | no |
+| `grid_power_sample_count` | `INTEGER` | integer (non-null grid readings) | yes |
+| `plant_grid_import_power_kw` | `INTEGER` | scaled positive-power sum | yes |
+| `plant_grid_export_power_kw` | `INTEGER` | scaled negative-power magnitude sum | yes |
 | `plant_grid_power_kw` | `INTEGER` | scaled number | yes |
 | `plant_pv_power_kw` | `INTEGER` | scaled number | yes |
 | `plant_battery_power_kw` | `INTEGER` | scaled number | yes |
@@ -210,4 +213,5 @@ Primary key: `key`.
 - Supported forecast panels and PV strings are fixed at IDs 1-4 in model declarations; configuration selects the active subset.
 - No inter-table foreign keys are declared. Consumers relate records by time, panel/string mapping, or device variable identity.
 - The metadata table is declared, but the current opener does not write a database-version record.
+- It records `hourly_rollup_initialized_v2 = "1"` atomically with completed initial hourly creation/recovery; this readiness marker is not a schema-version record.
 - Column inventory is generated from `Base.metadata.tables`; it describes the current declared schema, not every possible legacy column remaining in a user database.

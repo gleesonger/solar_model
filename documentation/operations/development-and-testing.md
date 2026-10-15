@@ -23,6 +23,8 @@ python -m venv .venv
 | --- | --- |
 | [test_custom_chart_sql.py](../../tests/test_custom_chart_sql.py) | SQL/pandas parity, batching, selected-field reads, grouping/splits, timezone/DST, minute telemetry, tariff quoting |
 | [test_dashboard_forecasts.py](../../tests/test_dashboard_forecasts.py) | Raw/adjusted selection, summary semantics, battery-level custom charts, stable colours/dashes/markers |
+| [test_grid_power_rollup.py](../../tests/test_grid_power_rollup.py) | R04 sign-separated import/export means, zeros/nulls, tariff-split hours, raw/hourly parity, incremental/rebuild statistics and interrupted v1-to-v2 upgrade |
+| [test_review_recovery.py](../../tests/test_review_recovery.py) | R01 finite/neutral residuals and real adjusted writes; R02 startup/midnight baseline retry and partial PV rollback; R03 transactional creation/rebuild, interruption/retry and no repeated history scan |
 | [test_analysis_download.py](../../tests/test_analysis_download.py) | CSV/Excel downloads, SQL/pandas parity across every timestep and DST, optional/empty forecasts, single-query execution/forecast skipping, tariff labels, XlsxTurbo Excel values/dates/blanks |
 | [test_solar_adjustment.py](../../tests/test_solar_adjustment.py) | Older tree model's rolling windows, as-of features, cumulative/day Wh |
 | [test_forecast_schema_migration.py](../../tests/test_forecast_schema_migration.py) | Legacy forecast renaming and repeat-open preservation |

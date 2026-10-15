@@ -83,9 +83,9 @@ Validation checks complete weekday/minute tariff coverage, effective-date orderi
 | `client` | Connected `ModbusTcpClient` or `None`; replaced after failures |
 | `previous` | Mutable mixed-value dictionary of prior cumulative values, PV powers, and timestamp |
 | `session` | Reused HTTP `requests.Session` |
-| `last_forecast_scan` | Monotonic float or `None`; scan eligibility |
+| Forecast eligibility | Persisted `database_metadata.forecast_last_attempt_utc`, with latest saved collection as fallback |
 
-The full interval aligns to wall-clock multiples through `sleep_until_next_interval`. Forecast due time uses monotonic elapsed seconds. The scheduler is sequential, and the two clocks serve different purposes; neither is a stored forecast timestamp.
+The full interval aligns to wall-clock multiples through `sleep_until_next_interval`. Each cycle calls the forecast collector, whose database due check uses UTC elapsed seconds and survives process restart. No in-memory forecast timer remains. The scheduler is sequential; a forecast scan occurs only when the configured interval has elapsed since the latest attempt/saved collection.
 
 ## 4. Dashboard startup and browser hierarchy
 

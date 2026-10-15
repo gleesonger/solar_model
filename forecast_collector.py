@@ -1,8 +1,12 @@
 from __future__ import annotations
 
-import requests
+from datetime import timedelta
+from zoneinfo import ZoneInfo
 
-from common import LOGGER, heavy_work, timestamps
+import requests
+from sqlalchemy.exc import SQLAlchemyError
+
+from common import LOGGER, heavy_work, timestamps, utc_now
 from config import SolarArrayConfig
 from forecast.operational_model import refresh_adjusted_forecast
 
@@ -21,8 +25,23 @@ def fetch_array(session: requests.Session, array: SolarArrayConfig, endpoint: st
 
 
 @heavy_work("solar forecast collection update")
-def collect_once(session: requests.Session, database, arrays: tuple[SolarArrayConfig, ...], endpoint: str, timeout_seconds: float, timezone_name: str) -> None:
-    collected = timestamps(timezone_name=timezone_name)
+def collect_once(session: requests.Session, database, arrays: tuple[SolarArrayConfig, ...], endpoint: str, timeout_seconds: float, timezone_name: str, interval_seconds: int) -> None:
+    now = utc_now()
+    try:
+        due, last_attempt = database.claim_forecast_collection(now, interval_seconds)
+    except SQLAlchemyError:
+        LOGGER.exception("Unable to check solar forecast schedule; external request skipped")
+        return
+    if not due:
+        zone = ZoneInfo(timezone_name)
+        LOGGER.info(
+            "Skipping external solar forecast request: last collection attempt %s; next due %s (interval %ss)",
+            last_attempt.astimezone(zone).isoformat(timespec="seconds"),
+            (last_attempt + timedelta(seconds=interval_seconds)).astimezone(zone).isoformat(timespec="seconds"),
+            interval_seconds,
+        )
+        return
+    collected = timestamps(now, timezone_name=timezone_name)
     for array in arrays:
         try:
             count = database.save_forecast(array, fetch_array(session, array, endpoint, timeout_seconds), collected)

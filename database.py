@@ -20,7 +20,7 @@ from sqlalchemy.types import TypeDecorator
 from config import SolarArrayConfig, TariffsConfig
 from datasheets import SIGENSTOR_MODEL_SPECIFICATIONS
 from economics import economic_period_values
-from common import LOGGER, heavy_work
+from common import LOGGER, heavy_work, utc_instant
 
 
 def column_name(metric: str, unit: str) -> str:
@@ -280,6 +280,26 @@ class SolarDatabase:
             previous["_collected_at_utc"] = row.collected_at_utc
             previous.update({column: getattr(row, column) for column in PV_ARRAY_POWER_COLUMNS})
         return previous
+
+    def claim_forecast_collection(self, now: datetime, interval_seconds: int) -> tuple[bool, datetime | None]:
+        """Reserve a due external scan, retaining its attempt time across restarts."""
+        now = utc_instant(now)
+        key = "forecast_last_attempt_utc"
+        metadata = DatabaseMetadata.__table__
+        with self.engine.begin() as connection:
+            # Serialize the due check/reservation, then release before HTTP work.
+            connection.exec_driver_sql("BEGIN IMMEDIATE")
+            attempted = connection.scalar(select(metadata.c.value).where(metadata.c.key == key))
+            # Existing installations have snapshots but no attempt marker yet.
+            saved = connection.scalar(select(ForecastSolarSample.collected_at_utc)
+                                      .order_by(ForecastSolarSample.collected_at_utc.desc()).limit(1))
+            previous = [utc_instant(datetime.fromisoformat(value)) for value in (attempted, saved) if value is not None]
+            last = max(previous) if previous else None
+            if last is not None and (now - last).total_seconds() < interval_seconds:
+                return False, last
+            statement = sqlite_insert(metadata).values(key=key, value=now.isoformat())
+            connection.execute(statement.on_conflict_do_update(index_elements=[metadata.c.key], set_={"value": now.isoformat()}))
+        return True, last
 
     def save_forecast(
         self,

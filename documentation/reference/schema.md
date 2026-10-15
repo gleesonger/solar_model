@@ -241,5 +241,6 @@ Primary key: `key`.
 - Supported forecast panels and PV strings are fixed at IDs 1-4 in model declarations; configuration selects the active subset.
 - No inter-table foreign keys are declared. Consumers relate records by time, panel/string mapping, or device variable identity.
 - The metadata table is declared, but the current opener does not write a database-version record.
-- It records `hourly_rollup_initialized_v2 = "1"` atomically with completed initial hourly creation/recovery; this readiness marker is not a schema-version record.
+- It records `hourly_rollup_initialized_v3 = "1"` atomically with completed hourly creation/recovery; this readiness marker is not a schema-version record.
+- `forecast_last_attempt_utc` stores an aware UTC ISO timestamp reserved before a due external forecast scan. The scheduler also checks the latest saved collection for compatibility with databases lacking this key. Failed attempts retain the marker.
 - Column inventory is generated from `Base.metadata.tables`; it describes the current declared schema, not every possible legacy column remaining in a user database.

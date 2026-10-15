@@ -20,8 +20,10 @@ main_data_collection.main()
       database.save_modbus_sample(...)
       read_registers(device blocks)
       database.save_device_info(...)
-    if forecast due:
-      forecast_collector.collect_once(...)
+    forecast_collector.collect_once(..., interval_seconds)
+      database.claim_forecast_collection(now, interval_seconds)
+      if recent: log last attempt/next due; return without HTTP or adjustment
+      if due:
         timestamps() once for all arrays
         each array: fetch_array() -> database.save_forecast()
         refresh_adjusted_forecast()
@@ -29,6 +31,8 @@ main_data_collection.main()
 ```
 
 Collectors receive the database abstraction; they do not define table layouts. Electrical persistence and derived interval calculations are explained in [storage.md](storage.md), correction in [forecasting.md](forecasting.md).
+
+The due check atomically reserves `database_metadata.forecast_last_attempt_utc` before network work, using UTC elapsed seconds. It also considers the latest saved forecast collection for compatibility with installations lacking that key. The most recent time wins. Reservation commits before HTTP, so failures, partial scans and process restarts cannot trigger another attempt within the configured interval. Concurrent claimants serialize under `BEGIN IMMEDIATE`; database-check failure logs and skips the request until another cycle. Skip logs include last attempt and next due in the configured timezone. There is no catch-up replay or immediate retry for failed arrays.
 
 ## 2. Register definitions become read plans
 

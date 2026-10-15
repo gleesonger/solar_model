@@ -129,6 +129,8 @@ Manual `backfill_hourly_rollup()` still inserts missing groups with `OR IGNORE`;
 
 ## 4. Forecast persistence and adjusted writers
 
+`claim_forecast_collection(now, interval_seconds)` returns `(due, previous_attempt_or_collection)` using aware UTC datetimes. It checks `database_metadata.forecast_last_attempt_utc` and the latest saved collection, reserves a due attempt in one short `BEGIN IMMEDIATE` transaction, and releases the lock before HTTP. The ISO-text attempt marker persists even if requests fail or the process stops. It is separate from forecast rows and hourly readiness; no schema change is required.
+
 Raw writes merge a panel's three fields into existing wide rows. Adjusted writes accept dictionaries of **physical values**, never pre-scaled integers:
 
 ```python

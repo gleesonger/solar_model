@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import time
-
 import requests
 from pymodbus.client import ModbusTcpClient
 
@@ -32,7 +30,6 @@ def main() -> None:
         with requests.Session() as session:
             LOGGER.info("Waiting for next interval before starting collectors")
             sleep_until_next_interval(data_retrival_schedule.full_updated_interval_seconds)
-            last_forecast_scan: float | None = None
             while True:
                 if client is None:
                     try:
@@ -56,11 +53,10 @@ def main() -> None:
                     client.close()
                     client = None
 
-                now = time.monotonic()
-
-                if last_forecast_scan is None or now - last_forecast_scan >= config.forecast.interval_seconds:
-                    collect_forecast_once(session, database, config.forecast.arrays, config.forecast.endpoint, config.forecast.timeout_seconds, config.timezone)
-                    last_forecast_scan = now
+                collect_forecast_once(
+                    session, database, config.forecast.arrays, config.forecast.endpoint,
+                    config.forecast.timeout_seconds, config.timezone, config.forecast.interval_seconds,
+                )
                 sleep_until_next_interval(data_retrival_schedule.full_updated_interval_seconds)
     finally:
         if client is not None:

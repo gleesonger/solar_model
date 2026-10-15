@@ -106,7 +106,7 @@ date, solar_actual, solar_forecast, load, grid_import, grid_export,
 grid_import_cost, grid_export_revenue, net_cost, no_solar_battery_import_cost
 ```
 
-Actual fields map to the same energy/economics storage fields above. Forecast selection differs from the current-day table: it finds the **first collection on each date** using the forecast model's local-time hybrid expression, reads those collections, and aggregates adjusted energy. That hybrid uses host timezone. Today's summary forecast is scaled to elapsed hours/current-hour fraction, so it compares production-to-date rather than full-day production.
+Actual fields map to the same energy/economics storage fields above. Forecast selection differs from the current-day table: it finds the **first collection on each configured-local date**, converting bounded UTC collection epochs in Python, reads those collections, and aggregates adjusted energy. Today's summary forecast is scaled to elapsed hours/current-hour fraction, so it compares production-to-date rather than full-day production.
 
 Daily wrappers add `period`, sort newest first, and append Total. Monthly wrappers group daily values into `YYYY-MM` rows, use labels like `Sep 2026`, fill absent months with missing values, append Total, then load lifetime daily history for a separate Lifetime row. `load_lifetime_start_date()` also uses local-time hybrids; this is a broader historical scan than twelve displayed months suggest.
 

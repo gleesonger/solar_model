@@ -1,5 +1,7 @@
 # Solar model collectors
 
+Start with the [project documentation](documentation/index.md) for architecture, code structure, storage, forecasting, planning, styling, and review findings. Future agents should also read [AGENTS.md](AGENTS.md).
+
 The managed application launcher starts the minute-resolution electrical and forecast collector and dashboard:
 
 ```powershell
@@ -8,36 +10,39 @@ python docker_start.py
 
 Use this launcher when using the dashboard Control tab: it is what allows tariff recalculation to restart the entire application and reload `config.yaml` for both processes. `main_data_collection.py` and `main_dashboard.py` may still be launched independently for development, but the Control tab cannot restart an independently launched collector.
 
-`main_data_collection.py` synchronizes to the next wall-clock minute, runs Modbus first every minute, and runs Forecast.Solar at its configured interval when due. A failed interval is logged and skipped. The collector modules expose one-pass functions and are not standalone schedulers.
+`main_data_collection.py` synchronizes to the next configured full interval (shipped as 60 seconds), runs Modbus first, and runs Forecast.Solar at its configured interval when due. A failed interval is logged and skipped. The collector modules expose one-pass functions and are not standalone schedulers.
 
 The dashboard runs a lightweight background collector for the `Latest (kW)` column. It reads the configured plant power values and mapped PV-string power values at the live interval, retaining only the newest successful result in memory.
 
-Set `actuals.data_retrival_schedule.full_updated_interval_seconds` in `config.yaml` to change the full data-refresh interval; it defaults to `60` seconds.
+Set `actuals.data_retrival_schedule.full_updated_interval_seconds` in `config.yaml` to change the full data-refresh interval; the shipped value is `60` seconds.
 
-Set `actuals.data_retrival_schedule.live_update_interval_seconds` to change the live Modbus polling and browser refresh interval; it defaults to `1` second.
+Set `actuals.data_retrival_schedule.live_update_interval_seconds` to change the live Modbus polling and browser refresh interval; the shipped value is `1` second.
 The dashboard polls live power once per second only while at least one browser is connected.
 Set `forecast.interval_seconds` in `config.yaml` to change the minimum elapsed time between forecast scans; it is configured for `3600` seconds.
 
-Configuration loading is strict: every documented field must be present, unknown fields and incorrect types are rejected, and invalid values cause the process to exit during startup.
+Configuration loading checks required fields, types, and supported values during startup. Unknown YAML keys are currently ignored. See [configuration](documentation/overview/configuration.md) for validation and optional fields.
 
-SQLite schema creation and all database writes are handled by `database.py`. The collectors only fetch, decode, and pass records to that module.
+SQLite schema creation and collector writes are handled by `database.py`. Maintenance scripts also issue direct SQL updates. See [data model](documentation/overview/data-model.md) for storage units and migration effects.
 
 ## Tariffs and economics
 
-Configure one or more time-of-use rules for both directions under `tariffs`. `start_time` and `end_time` use strict 24-hour `HH:MM` format. `end_time` may also be `24:00` for midnight at the end of that day; `start_time` must be from `00:00` through `23:59`. A rule applies from its start time inclusive until its end time exclusive, using the local configured timezone. A rule may cross midnight; its `days` names the day on which it starts. Equal start and end times describe a full 24-hour day. Every weekday/minute must be covered by exactly one import rule and one export rule.
+Configure effective-dated periods under `tariffs.periods`, each containing import/export time-of-use rules. `start_time` and `end_time` use strict 24-hour `HH:MM` format. `end_time` may also be `24:00` for midnight at the end of that day; `start_time` must be from `00:00` through `23:59`. A rule applies from its start time inclusive until its end time exclusive, using the local configured timezone. A rule may cross midnight; its `days` names the day on which it starts. Equal start and end times describe a full 24-hour day. Every weekday/minute must be covered by exactly one import rule and one export rule per period; import rules require a band name.
 
 ```yaml
 tariffs:
-  import:
-    - days: [Mon, Tue, Wed, Thu, Fri]
-      start_time: "07:00"
-      end_time: "23:00"
-      rate: 0.35
-  export:
-    - days: [Mon, Tue, Wed, Thu, Fri, Sat, Sun]
-      start_time: "00:00"
-      end_time: "00:00"
-      rate: 0.10
+  periods:
+    - effective_from: "2000-01-01"
+      import:
+        - days: [Mon, Tue, Wed, Thu, Fri, Sat, Sun]
+          name: flat
+          start_time: "00:00"
+          end_time: "24:00"
+          rate: 0.35
+      export:
+        - days: [Mon, Tue, Wed, Thu, Fri, Sat, Sun]
+          start_time: "00:00"
+          end_time: "24:00"
+          rate: 0.10
 ```
 
 For each new actual sample, the collector stores the selected import and export rates, import cost, export revenue, net cost (`import - export`), and the positive import cost that would have applied without solar or battery (`load × import rate`). These values are not retroactively recalculated when rates change; the Recent tables aggregate the values stored with each sample.
@@ -92,7 +97,7 @@ Use `input` or `holding` for `kind`. Addresses are passed to pymodbus as zero-ba
 
 The requested device defaults are Modbus TCP host `192.168.1.130` and port `502`. The supplied maps use the Sigenergy plant unit ID `247` and inverter unit ID `1`; set explicit `device_id` values in the register maps when your topology differs. Set `database.path` in `config.yaml` to change the SQLite path.
 
-The database uses explicit SQLAlchemy models. `sigenstor_samples` has one row per Modbus electrical sample with one column per metric, and `sigenstor_devices` records valid device-information values only when a variable changes. The inverter model is matched against the official SigenStor model catalogue to add its nameplate maximum PV input power. `forecast_solar` has one row per forecast timestamp, keyed by collection and forecast time, with raw Forecast.Solar values named `panel_n_raw_*` and model-adjusted values named `panel_n_adj_*`. Opening the database automatically performs the additive/rename SQLite migration; existing unqualified forecast columns are renamed to their `_raw_` names without changing their stored values. Modbus column names include their units, for example `plant_pv_power_kw` and `inverter_battery_soc_percent`; cumulative metrics also have a `_period` column. All tables store UTC/local timestamps.
+The database uses explicit SQLAlchemy models. `sigenstor` has one row per electrical sample; `sigenstor_hourly` stores UTC-hour/tariff-band aggregates; `sigenstor_devices` records valid device-information changes. Known inverter models add nameplate maximum PV input power. `forecast_solar` is keyed by collection and target time, with `panel_n_raw_*` provider values and `panel_n_adj_*` model output. Opening the database performs automatic schema migration and may backfill hourly data. Measurements are integers scaled by 10,000; ORM reads convert to physical units. Measurement timestamps are UTC epoch seconds, while device-history timestamps are ISO text. Metric names include units, such as `plant_pv_power_kw` and `plant_battery_soc_percent`; cumulative metrics also have `_period` columns. See [data model](documentation/overview/data-model.md) for details.
 
 ## Dashboard
 
@@ -104,6 +109,10 @@ python main_dashboard.py
 
 For normal operation, use `python docker_start.py` above so that the Control tab can restart both this process and the data collector.
 
-It listens on `dashboard.port` from `config.yaml`. The dashboard updates the `Latest (kW)` cells in place from its background Modbus collector every five seconds. The cells remain blank until its first successful reading. The remaining current-day, forecast, chart, and device data stays on the minute refresh; table rows and chart options are updated in place without recreating the tabs or their contents. Mapped PV-string voltage and current readings provide the per-panel actual energy and power values. The battery chart uses the inverter's Modbus reading for available discharge energy; battery energy is not calculated from state of charge.
+It listens on `dashboard.port` from `config.yaml`. Live cells update in place at the configured live interval (shipped as one second) and remain blank until the first successful reading. Shared Recent/System Info data refreshes at the full interval; Analysis loads on demand and when its controls are applied. Mapped PV-string voltage/current readings provide proportions for allocating plant solar energy and power. The battery chart uses plant available-discharge telemetry; it does not derive available energy from state of charge. See [dashboard](documentation/overview/dashboard.md) and [styling](documentation/overview/styling.md).
 
 The Docker image starts the minute collector and dashboard. Publish the configured dashboard port when running the container, for example `docker run -p 8090:8090 -v solar-config:/config solar-model`.
+
+The dashboard shows a persistent warning across all tabs when the browser is offline, the server connection stops updating, or the readings become stale. Returning to a suspended phone tab requires a fresh server heartbeat before the connection warning clears. NiceGUI reconnects automatically; a Reload button is also available. Live readings are marked stale after the greater of 15 seconds or three live polling intervals. Missing or stale readings wait for new data without repeatedly reloading the page. Reconnecting also reapplies the latest shared snapshot.
+
+Warning policy is centralised in `dashboard/warnings.py` and `dashboard/assets/warnings.js`. Connection and data-freshness problems share one persistent banner across all tabs, in priority order: offline, disconnected, missing server heartbeat, missing/stale collected data, then missing/stale live readings. The banner clears automatically only after recovery. Tabs publish timestamps without creating their own warning labels or refresh loops. Validation, load, and action failures use the shared red notification at the top, with a Dismiss button and a 10-second timeout; informational and success notifications use the same placement with a 5-second timeout. Progress labels remain local to the action without duplicating its error details.

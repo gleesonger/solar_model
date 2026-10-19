@@ -41,7 +41,9 @@ Source: [main_dashboard.py](../../main_dashboard.py), [dashboard/layout.py](../.
 - [warnings.py](../../dashboard/warnings.py) publishes hidden timestamp metadata and sends a heartbeat every 5 seconds; [warnings.js](../../dashboard/assets/warnings.js) owns one persistent bottom banner.
 - Priority: offline → socket disconnected → heartbeat absent/older than 20 seconds → persisted data stale → live data stale.
 - Persisted threshold = 3 × full interval. Live threshold = max(15 seconds, 3 × live interval). Missing timestamps count as stale.
-- Phone resume, reconnect, and online events invalidate the heartbeat; only a fresh server heartbeat restores confidence. Reconnection may explicitly reconnect the socket; no repeated page reload loop is used.
+- Brief tab switches retain a heartbeat within its 20-second timeout. Long suspension is detected from wall-clock age; disconnect/reconnect and offline/online events invalidate the heartbeat until a fresh one arrives. No repeated page reload loop is used.
+- The hidden-by-default three-dot indicator pulses in repeating cycles for three seconds after a new live reading, using finite CSS animations. It clears on unhealthy connection/heartbeat/live readings, backgrounding, or suspension and checks its absolute expiry on resume. It indicates receipt of a live update, not continued connectivity; a stale persisted-data warning does not suppress healthy live activity.
+- Below Live / Today, a small light-grey Last reading label always shows the reading date and time in the browser's local timezone, without a timezone suffix (or awaiting live data). Chrome saved offline pages may not execute dashboard scripts; the recorded timestamp remains useful, but the in-page banner/animation cannot guarantee current status in such a copy.
 - Action errors use dismissible top notifications (10 seconds); info/success use 5 seconds. The banner remains until healthy, with a manual Reload action.
 
 See [styling.md](styling.md) for visual conventions and [review findings](../reviews/findings.md) for limitations.

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from datetime import datetime
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -59,12 +58,12 @@ class RecentTab:
 
         with ui.row().classes("items-center gap-1"):
             ui.label("Live / Today").classes("text-base font-semibold")
-            self.elements.live_update_indicator = ui.spinner("dots", size="0.8rem").classes(
-                "live-update-indicator text-slate-400"
-            ).style("display: none").tooltip("Live table updated")
-            self.elements.live_update_message = ui.label("Waiting for live update…").classes(
-                "live-update-message text-xs text-slate-400"
-            )
+            self.elements.live_update_indicator = ui.element("span").props('aria-hidden="true"').classes(
+                "live-update-indicator text-slate-500"
+            ).tooltip("New live reading received")
+            with self.elements.live_update_indicator:
+                for _ in range(3):
+                    ui.element("span").classes("live-update-dot")
 
         self.elements.battery_status_label = ui.label(
             self._battery_status_text(live_power)
@@ -80,6 +79,10 @@ class RecentTab:
             self._summary_latest_keys,
         )
         self._update_live_table_rows(live_power)
+
+        self.elements.live_update_message = ui.label("Last reading: awaiting live data").classes(
+            "live-update-message text-xs text-slate-400"
+        )
 
         self.elements.recent_daily_table = render_energy_summary_table(
             recent_daily, "Past 7 days (kWh)", "Date"

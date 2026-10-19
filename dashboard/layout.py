@@ -202,5 +202,7 @@ def render_dashboard_styles() -> None:
             font-weight: 700;
         }
     """)
-    script = Path(__file__).with_name("assets").joinpath("live_updates.js").read_text(encoding="utf-8")
+    assets = Path(__file__).with_name("assets")
+    ui.add_css(assets.joinpath("live_updates.css").read_text(encoding="utf-8"))
+    script = assets.joinpath("live_updates.js").read_text(encoding="utf-8")
     ui.add_head_html(f"<script>{script}</script>")

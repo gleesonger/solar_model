@@ -49,6 +49,12 @@
             text.textContent = message;
             banner.hidden = !message;
         }
+        // The dots acknowledge live readings, independently of persisted DB
+        // freshness. A collection warning must not hide ongoing live activity.
+        const liveHealthy = navigator.onLine && socket?.connected
+            && lastHeartbeat && now - lastHeartbeat <= heartbeatTimeout
+            && !isStale(metadata, 'lastLiveUpdate', 'liveStaleAfterSeconds');
+        window.setLiveUpdateHealth?.(Boolean(liveHealthy));
     }
 
     window.dashboardHeartbeat = () => {
@@ -59,12 +65,15 @@
     };
 
     function resume() {
-        invalidateConnection();
+        // Keep a fresh heartbeat across brief tab switches. Wall-clock ages
+        // in updateDashboardFreshness detect long suspension instead.
+        updateDashboardFreshness();
     }
 
     window.addEventListener('offline', invalidateConnection);
-    window.addEventListener('online', resume);
+    window.addEventListener('online', invalidateConnection);
     window.addEventListener('pageshow', resume);
+    document.addEventListener('resume', resume);
     document.addEventListener('visibilitychange', () => {
         if (document.visibilityState === 'visible') resume();
     });

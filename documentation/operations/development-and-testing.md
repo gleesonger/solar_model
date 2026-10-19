@@ -36,7 +36,11 @@ Use the [isolated development walkthrough](isolated-development.md) for syntheti
 | [test_database_0_1_0_migration.py](../../tests/test_database_0_1_0_migration.py) | Current opener preserves legacy readings/primary keys, renames availability, publishes rollup readiness and tolerates repeat opens; historical filename retained |
 | [test_config.py](../../tests/test_config.py), [test_common.py](../../tests/test_common.py), [test_control.py](../../tests/test_control.py) | Backup-rule parsing, exception helper, recalculation command, restart marker |
 | [test_live_grid_energy_day_start.py](../../tests/test_live_grid_energy_day_start.py) | Configured-timezone meter baseline |
-| [test_dashboard_freshness_browser.py](../../tests/test_dashboard_freshness_browser.py) | Offline/socket/server-silence/resume/stale behavior; isolated NiceGUI test server |
+| [test_dashboard_freshness_browser.py](../../tests/test_dashboard_freshness_browser.py) | Offline/socket/server-silence/resume/stale behavior; CSS expiry without JS timeouts, reduced motion, indicator health gating, timestamp placement/style on phone/desktop widths; isolated NiceGUI test server |
+
+## Browser freshness follow-up: 2026-10-19
+
+`.venv/Scripts/python.exe -m pytest -q --disable-warnings` completed with **264 passed** (2,130 dependency/deprecation warnings). Playwright and Chromium were installed separately for local verification. Browser regressions exercised the real assets and a synthetic NiceGUI Recent table at 390px/1280px widths, including timestamp refresh/placement, light-grey 12px styling, CSS animation expiry without a JavaScript timeout, reduced motion, brief/long resume, offline/reconnect and stale-data suppression. No production database/hardware was used. Chrome Android saved offline archives still require actual-device verification.
 
 ## Current follow-up verification: 2026-10-15
 

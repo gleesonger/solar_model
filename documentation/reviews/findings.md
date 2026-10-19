@@ -28,6 +28,8 @@ Original documentation review: 2026-10-14. The lists below reflect remaining ite
 
 ## Coverage and maintenance gaps
 
+- Chrome Android saved offline pages can preserve dashboard visuals while in-page scripts are inactive. Finite CSS activity indication and an absolute Last reading timestamp reduce ambiguity, but actual saved-page/freeze behaviour still needs verification on Android hardware; desktop Chromium regression checks do not establish it.
+
 - Runtime dependencies are ranged, with no lockfile; test/browser/extraction dependencies and explicit HiGHS installation are not declared together.
 - Tariff helper logic is duplicated between config validation and economics; changes must preserve matching parity.
 - `dashboard/data.py` retains old aggregation paths beside the active SQL adapters; `HourlyTab` is unmounted. Clarify their retained compatibility purpose before removal.
@@ -40,6 +42,8 @@ Original documentation review: 2026-10-14. The lists below reflect remaining ite
 3. Reconcile dependency declaration, port metadata, and retained legacy paths.
 
 ## Application fixes completed
+
+- **2026-10-19, browser freshness:** short tab switches keep a fresh heartbeat. The three-dot live-update indicator expires through finite CSS with wall-clock/lifecycle checks, clears on unhealthy status, and has a reduced-motion variant. A small light-grey collection timestamp remains below Live / Today, including in static copies.
 
 - **2026-10-15, Recent summary performance:** daily/monthly/lifetime tables now share one native SQL aggregation, replacing overlapping ORM/pandas history processing. Full twelve-month presentation and previous numeric results are preserved; see [measurements and validation](recent-summary-performance.md).
 

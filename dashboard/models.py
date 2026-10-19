@@ -5,7 +5,7 @@ from datetime import date
 import pandas as pd
 from nicegui.elements.echart import EChart
 from nicegui.elements.label import Label
-from nicegui.elements.spinner import Spinner
+from nicegui.element import Element
 from nicegui.elements.table import Table
 
 from .chart_display import ChartDataDisplay
@@ -82,7 +82,7 @@ class DashboardElements:
     battery_status_label: Label | None = None
     recent_daily_table: Table | None = None
     recent_monthly_table: Table | None = None
-    live_update_indicator: Spinner | None = None
+    live_update_indicator: Element | None = None
     live_update_message: Label | None = None
     live_timestamp: str | None = None
     hourly_range_label: Label | None = None

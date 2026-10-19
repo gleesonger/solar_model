@@ -10,7 +10,8 @@
 | [models.py](../../dashboard/models.py), `PANEL_COLORS` | Array colour sequence |
 | [chart_display.py](../../dashboard/chart_display.py), [tables.py](../../dashboard/tables.py) | Chart headers/actions, table presentation, total-row class |
 | [warnings.py](../../dashboard/warnings.py) | Inline persistent-banner appearance; shared notification settings |
-| [live_updates.js](../../dashboard/assets/live_updates.js) | Live-indicator visibility and 3-second idle timeout |
+| [live_updates.css](../../dashboard/assets/live_updates.css) | Hidden-by-default three-dot indicator, repeating pulse cycles, three-second expiry and reduced-motion variant |
+| [live_updates.js](../../dashboard/assets/live_updates.js) | Three-dot indicator wall-clock expiry and lifecycle/health handling |
 
 There is no standalone theme stylesheet or central typography/token system. Current appearance combines shared CSS and local classes.
 
@@ -45,7 +46,7 @@ There is no standalone theme stylesheet or central typography/token system. Curr
 - At widths ≤767px, desktop Analysis controls hide and a drawer/trigger appears; drawer width is min(22rem, 90vw).
 - The mobile custom builder uses two control columns, full-width Variables, an 18rem full-width chart, and a stacked legend capped at 12rem. Shared `.custom-chart-*` rules live in `layout.py`.
 - Live/Today table switches to 0.7rem text, tight padding, wrapping headers, non-wrapping values, and full width. Solar-orientation subrows become muted `#64748b`.
-- Loading uses spinners/progress labels; repeated live updates flash a small indicator. Do not infer freshness from the spinner alone.
+- Loading uses spinners/progress labels; new live readings restart three slate-grey dots (5.6px diameter, at least 70% opacity, pulsing between 80% and 115% scale) with a cyclic pulse and three-second expiry whose final CSS state is hidden. Reduced-motion mode keeps static dots until expiry. The persistent Last reading timestamp sits below Live / Today with `text-xs text-slate-400` (12px, light grey). Do not infer freshness from animation alone.
 - Persistent stale/connection banner uses dark red `#991b1b`, white text, `z-index:1999` below modal dialogs, and safe-area bottom padding.
 
 ## Guidance for future changes

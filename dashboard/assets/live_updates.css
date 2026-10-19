@@ -1,0 +1,43 @@
+.live-update-indicator {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.15rem;
+    width: 1.5rem;
+    height: 1rem;
+    opacity: 0;
+    visibility: hidden;
+}
+.live-update-indicator.is-updating {
+    animation: live-update-still 3s linear forwards;
+}
+.live-update-dot {
+    display: block;
+    width: 0.35rem;
+    height: 0.35rem;
+    border-radius: 50%;
+    background: currentColor;
+    opacity: 0.7;
+    transform: scale(0.8);
+}
+.is-updating .live-update-dot {
+    animation: live-update-dot 0.9s ease-in-out 3 backwards;
+}
+.is-updating .live-update-dot:nth-child(2) {
+    animation-delay: 0.1s;
+}
+.is-updating .live-update-dot:nth-child(3) {
+    animation-delay: 0.2s;
+}
+@keyframes live-update-dot {
+    0%, 100% { opacity: 0.7; transform: scale(0.8); }
+    50% { opacity: 1; transform: scale(1.15); }
+}
+@media (prefers-reduced-motion: reduce) {
+    .is-updating .live-update-dot {
+        animation: none;
+    }
+}
+@keyframes live-update-still {
+    0%, 99.999% { opacity: 1; visibility: visible; }
+    100% { opacity: 0; visibility: hidden; }
+}

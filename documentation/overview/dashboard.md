@@ -4,7 +4,7 @@ For exact loaders, filters, intermediate frames, and batched SQL, see [dashboard
 
 Source: [main_dashboard.py](../../main_dashboard.py), [dashboard/layout.py](../../dashboard/layout.py).
 
-The favicon is the amber sun/panel in `dashboard/assets/solar_power.svg`. Startup passes its SVG content to NiceGUI, which embeds a data URL in the page's icon link. Changing the SVG changes that URL rather than reusing the browser's cached `/favicon.ico`; restart the dashboard and reload the page to pick up changes.
+The favicon is the amber sun/panel in `dashboard/assets/solar_power.svg`. Startup passes the source-relative file path to NiceGUI, which serves the SVG at `/favicon.ico` and references that URL in the page's icon link. The asset must be valid SVG; restart and reload after deployment. Browsers may cache the fixed icon URL.
 
 ## Current tabs
 

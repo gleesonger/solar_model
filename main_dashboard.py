@@ -99,7 +99,7 @@ def main() -> None:
         host=config.dashboard.host,
         port=config.dashboard.port,
         title="Solar dashboard",
-        favicon=source_path("dashboard/assets/solar_power.svg").read_text(encoding="utf-8"),
+        favicon=source_path("dashboard/assets/solar_power.svg"),
         reload=False,
     )
 

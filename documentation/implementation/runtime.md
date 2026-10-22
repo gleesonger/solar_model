@@ -96,7 +96,7 @@ main_dashboard.main()
   DashboardSnapshotStore(config, live_collector, full_interval)
   register app startup/shutdown callbacks
   ui.page('/') -> render_dashboard_page()
-  ui.run(..., reload=False)
+  ui.run(..., favicon=SVG contents, reload=False)
 
 app startup
   await snapshots.refresh()
@@ -114,6 +114,8 @@ each browser page
 ```
 
 One server-wide live collector and snapshot store serve all pages. `DashboardState`, `DashboardElements`, tab instances, warnings metadata and subscriptions belong to individual pages. The persisted collector runs in another process and does not share these Python objects.
+
+At startup, `main_dashboard` reads `dashboard/assets/solar_power.svg` as UTF-8 and passes its contents to `ui.run(favicon=...)`. NiceGUI emits an SVG data URL in the page icon link, so changed icon contents have a different URL instead of sharing the fixed `/favicon.ico` file URL. The SVG is read at startup; restart and reload to apply edits. Source-relative resolution is retained.
 
 `apply_snapshot` uses `client.safe_invoke` to update that client's UI context. Reconnect replaces the subscription and reapplies the current snapshot. Disconnect unsubscribes and reevaluates whether live polling should pause. The server snapshot worker continues refreshing without a connected browser; live Modbus polling does not.
 

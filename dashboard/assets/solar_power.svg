@@ -1,3 +1,14 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
-  <path fill="#f59e0b" d="M6.05 7.05 7.46 5.64 4.64 2.81 3.22 4.22l2.83 2.83ZM1 13h2v-2H1v2Zm10-10h2V1h-2v2Zm9.78 1.22-1.41-1.41-2.83 2.83 1.41 1.41 2.83-2.83ZM17 13h2v-2h-2v2Zm-5 2c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4Zm0-6c1.1 0 2 .9 2 2s-.9 2-2 2-2-.9-2-2 .9-2 2-2ZM3.22 17.78l1.41 1.41 2.83-2.83-1.41-1.41-2.83 2.83ZM11 23h2v-2h-2v2Zm6.36-3.81 1.41-1.41-2.83-2.83-1.41 1.41 2.83 2.83ZM3 23h18v-6H3v6Zm2-4h14v2H5v-2Z"/>
+  <!-- Transparent background; bottom box uses the shared stroke thickness. -->
+  <rect x="3.875" y="17.375" width="16.25" height="3.25" fill="none" stroke="#f59e0b" stroke-width="1.75"/>
+  <!-- Sun centre=(12, 10); ring stroke and ray strokes all 1.75. -->
+  <circle cx="12" cy="10" r="3" fill="none" stroke="#f59e0b" stroke-width="1.75"/>
+  <line x1="17.00000000" y1="10.00000000" x2="19.00000000" y2="10.00000000" stroke="#f59e0b" stroke-width="1.75" stroke-linecap="butt"/>
+  <line x1="15.53553391" y1="13.53553391" x2="17.83363094" y2="15.83363094" stroke="#f59e0b" stroke-width="1.75" stroke-linecap="butt"/>
+  <line x1="12.00000000" y1="15.00000000" x2="12.00000000" y2="17.00000000" stroke="#f59e0b" stroke-width="1.75" stroke-linecap="butt"/>
+  <line x1="8.46446609" y1="13.53553391" x2="6.16636906" y2="15.83363094" stroke="#f59e0b" stroke-width="1.75" stroke-linecap="butt"/>
+  <line x1="7.00000000" y1="10.00000000" x2="5.00000000" y2="10.00000000" stroke="#f59e0b" stroke-width="1.75" stroke-linecap="butt"/>
+  <line x1="8.46446609" y1="6.46446609" x2="6.16636906" y2="4.16636906" stroke="#f59e0b" stroke-width="1.75" stroke-linecap="butt"/>
+  <line x1="12.00000000" y1="5.00000000" x2="12.00000000" y2="3.00000000" stroke="#f59e0b" stroke-width="1.75" stroke-linecap="butt"/>
+  <line x1="15.53553391" y1="6.46446609" x2="17.83363094" y2="4.16636906" stroke="#f59e0b" stroke-width="1.75" stroke-linecap="butt"/>
 </svg>

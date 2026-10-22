@@ -15,6 +15,8 @@
 
 There is no standalone theme stylesheet or central typography/token system. Current appearance combines shared CSS and local classes.
 
+[create_solar_icon.py](../../dashboard/assets/create_solar_icon.py) writes `solar_power.svg` beside the generator script, regardless of the current working directory.
+
 ## Existing layout conventions
 
 - Page uses a centred `max-w-7xl` container, full-width sections, `p-2 md:p-4` spacing, white background, and a sticky topbar (`z-index: 30`).

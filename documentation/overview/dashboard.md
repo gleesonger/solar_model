@@ -4,6 +4,8 @@ For exact loaders, filters, intermediate frames, and batched SQL, see [dashboard
 
 Source: [main_dashboard.py](../../main_dashboard.py), [dashboard/layout.py](../../dashboard/layout.py).
 
+The favicon is the amber sun/panel in `dashboard/assets/solar_power.svg`. Startup passes its SVG content to NiceGUI, which embeds a data URL in the page's icon link. Changing the SVG changes that URL rather than reusing the browser's cached `/favicon.ico`; restart the dashboard and reload the page to pick up changes.
+
 ## Current tabs
 
 - **Recent:** Live/Today table; latest kW, daily meters, latest/BoD/raw forecast totals; past 7 days and past 12 months energy/economics.

@@ -17,6 +17,8 @@ There is no standalone theme stylesheet or central typography/token system. Curr
 
 [create_solar_icon.py](../../dashboard/assets/create_solar_icon.py) writes `solar_power.svg` beside the generator script, regardless of the current working directory.
 
+Regenerate it from the repository root with `python dashboard/assets/create_solar_icon.py`. The asset must be valid SVG without Git conflict markers. On 2026-10-22, committed conflict markers caused NiceGUI to emit `/favicon.ico` instead of an embedded SVG and return HTTP 500 for the icon; regenerating the asset restored valid XML, an embedded favicon URL and browser image decoding.
+
 ## Existing layout conventions
 
 - Page uses a centred `max-w-7xl` container, full-width sections, `p-2 md:p-4` spacing, white background, and a sticky topbar (`z-index: 30`).

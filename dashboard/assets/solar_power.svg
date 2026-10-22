@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
   <!-- Transparent background; bottom box uses the shared stroke thickness. -->
   <rect x="3.875" y="17.375" width="16.25" height="3.25" fill="none" stroke="#f59e0b" stroke-width="1.75"/>
@@ -12,15 +11,4 @@
   <line x1="8.46446609" y1="6.46446609" x2="6.16636906" y2="4.16636906" stroke="#f59e0b" stroke-width="1.75" stroke-linecap="butt"/>
   <line x1="12.00000000" y1="5.00000000" x2="12.00000000" y2="3.00000000" stroke="#f59e0b" stroke-width="1.75" stroke-linecap="butt"/>
   <line x1="15.53553391" y1="6.46446609" x2="17.83363094" y2="4.16636906" stroke="#f59e0b" stroke-width="1.75" stroke-linecap="butt"/>
-=======
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round">
-  <!-- Symmetric sun -->
-  <circle cx="12" cy="7" r="2.15"/>
-  <path d="M12 1.5v1.4 M8.11 3.11l-.99-.99 M15.89 3.11l.99-.99 M6.5 7H5.1 M17.5 7h1.4 M8.11 10.89l-.99.99 M15.89 10.89l.99.99"/>
-  <!-- Trapezoidal panel, mirrored about x=12 -->
-  <path d="M7.75 13.25H16.25L20 19.75H4L7.75 13.25Z"/>
-  <path d="M10.58 13.25 9.45 19.75 M13.42 13.25 14.55 19.75 M5.88 16.5h12.24"/>
-  <!-- Centred stand -->
-  <path d="M12 19.75v2.1 M9.75 21.85h4.5"/>
->>>>>>> b36350e9a76a46a525cd15d71d605b876aea4c1a
 </svg>

@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 import math
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
 from urllib.parse import urlparse
@@ -40,11 +40,50 @@ class SolarArrayConfig:
 
 
 @dataclass(frozen=True)
+class ForecastModelConfig:
+    lookback: float | None
+    halflife: float
+    # Decimal influence after one unit of weighted/effective evidence (0.2 = 20%).
+    prior_effective_observations: float | None
+
+    def __post_init__(self) -> None:
+        if self.lookback is not None and (not math.isfinite(self.lookback) or self.lookback <= 0):
+            raise ValueError("forecast model lookback must be finite and greater than zero, or null")
+        if not math.isfinite(self.halflife) or self.halflife <= 0:
+            raise ValueError("forecast model halflife must be finite and greater than zero")
+        fraction = self.prior_effective_observations
+        if fraction is not None and (not math.isfinite(fraction) or not 0 < fraction <= 1):
+            raise ValueError("prior_effective_observations must be a finite decimal fraction greater than 0 and at most 1, or null")
+
+    @property
+    def prior_strength(self) -> float:
+        if self.prior_effective_observations is None:
+            raise ValueError("this forecast model has no prior influence")
+        return 1.0 / self.prior_effective_observations - 1.0
+
+
+@dataclass(frozen=True)
+class ForecastModelsConfig:
+    solar_day_ahead: ForecastModelConfig = field(default_factory=lambda: ForecastModelConfig(56., 21., None))
+    solar_intraday: ForecastModelConfig = field(default_factory=lambda: ForecastModelConfig(None, 1., 1.0 / 3.0))
+    load: ForecastModelConfig = field(default_factory=lambda: ForecastModelConfig(42., 14., 0.2))
+
+    def __post_init__(self) -> None:
+        if self.solar_day_ahead.lookback is None or self.solar_day_ahead.prior_effective_observations is not None:
+            raise ValueError("forecast.model_calibration_parameters.solar_day_ahead requires lookback and a null prior_effective_observations")
+        if self.load.lookback is None or self.load.prior_effective_observations is None:
+            raise ValueError("forecast.model_calibration_parameters.load requires lookback and prior_effective_observations")
+        if self.solar_intraday.prior_effective_observations is None:
+            raise ValueError("forecast.model_calibration_parameters.solar_intraday requires prior_effective_observations")
+
+
+@dataclass(frozen=True)
 class ForecastConfig:
     interval_seconds: int
     timeout_seconds: float
     endpoint: str
     arrays: tuple[SolarArrayConfig, ...]
+    model_calibration_parameters: ForecastModelsConfig = field(default_factory=ForecastModelsConfig)
 
 
 @dataclass(frozen=True)

@@ -35,10 +35,10 @@ Use a verified backup and preferably stop persisted collection before bulk rewri
 python -m forecast.evaluate_forecasts --database solar.db
 
 # Report-only load experiment; choose dates with existing history
-python -m forecast.evaluate_load_profile --database solar.db --start 2026-09-01 --end 2026-09-30
+python -m forecast.evaluate_load_profile --config config.yaml --database solar.db --start 2026-09-01 --end 2026-09-30
 
 # Forecast rebuild preview; add --apply to clear/replace adjusted fields
-python -m forecast.rebuild_operational_adjusted_forecasts --database solar.db --start 2026-09-01 --end 2026-09-30
+python -m forecast.rebuild_operational_adjusted_forecasts --config config.yaml --database solar.db --start 2026-09-01 --end 2026-09-30
 
 # Immediately overwrites rates/costs, then rebuilds affected hourly rows
 python recalculate_economics.py --config config.yaml --from 2026-09-01 --to 2026-09-30
@@ -49,9 +49,8 @@ python test_energy_plan_as_of.py --database solar.db --as-of "2026-09-15T00:00:0
 
 - Recalculation date bounds are inclusive; omitted `--to` updates all later matching raw rows. CLI alone does not restart the application; Control does.
 - Raw tariff updates and rollup rebuild share one transaction; either both commit or both roll back. Without `--to`, rebuilding extends through the latest available raw date. Neighboring samples in overlapping UTC hours are retained.
+- The load-profile and operational-rebuild CLIs read `forecast.model_calibration_parameters` from `--config` (default `config.yaml`); database and timezone default to that configuration and can be overridden by their CLI flags. Live solar correction receives the same settings from the collector startup configuration.
 - Forecast rebuild infers missing date bounds from earliest forecast/latest hourly actual. It commits clearing first and results by day, so interruption can leave a partial rebuild. It preserves raw fields.
-- `python -m forecast.solar_adjustment --database solar.db` writes pending adjusted fields using the older tree model. It is not the operational rebuild; avoid mixing outputs unintentionally.
-- Training/backtest tools default to `forecast/solar.db`; pass `--database solar.db` explicitly when using the root database.
 
 ## Backup, restore and recovery
 

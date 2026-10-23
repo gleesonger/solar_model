@@ -84,6 +84,20 @@ tariffs:
           rate: 0.1716
 
 forecast:
+  model_calibration_parameters:
+    solar_day_ahead:
+      lookback: 42                          # How many previous days data is used in the solar model
+      halflife: 14                          # how recent data is weighted
+      prior_effective_observations: null    # no prior in this model
+    solar_intraday:
+      lookback: null                        # all earlier completed hours today; optional limit in hours
+      halflife: 1                           # hours
+      prior_effective_observations: 0.3333  # Controls how strongly today’s completed hours adjust the solar forecast - 1 hour weights 33%
+    load:
+      lookback: 42                          # days
+      halflife: 14                          # days
+      prior_effective_observations: 0.2     # influence after one day of weekend evidence (blending from all days to seperate weekend experiance)
+
   interval_seconds: 3600
   timeout_seconds: 10
   endpoint: https://api.forecast.solar/estimate
@@ -110,7 +124,7 @@ energy_plan:
 
   load_forecast_historical_lookback_window_days: 42
   load_forecast_historical_lookback_halflife_days: 21
-  
+
   optimisation_weights:
     maximise_profit: 0.95
     maximise_battery: 0.05

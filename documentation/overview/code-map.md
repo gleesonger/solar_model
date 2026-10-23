@@ -44,8 +44,6 @@ For call hierarchies and structures crossing module boundaries, see the [detaile
 - [operational_model.py](../../forecast/operational_model.py): production scalar/residual correction.
 - [rebuild_operational_adjusted_forecasts.py](../../forecast/rebuild_operational_adjusted_forecasts.py): chronological replacement of stored adjusted values.
 - [evaluate_forecasts.py](../../forecast/evaluate_forecasts.py): raw/adjusted performance report.
-- [solar_adjustment.py](../../forecast/solar_adjustment.py): separate tree-based correction/backfill; not the live hook.
-- [train_models.py](../../forecast/train_models.py), [intraday_backtest.py](../../forecast/intraday_backtest.py): tree-model research, metrics, pickle/workbook outputs.
 - [evaluate_load_profile.py](../../forecast/evaluate_load_profile.py): report-only hierarchical weekday/weekend load experiment.
 - [check-tariffs/](../../check-tariffs): independent minute-data extraction and tariff simulations using `hardware.json`, `energy_plan.json`, and the intentionally named `tarrifs.json`.
 

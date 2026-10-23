@@ -15,13 +15,11 @@ from zoneinfo import ZoneInfo
 import numpy as np
 import pandas as pd
 
+from config import ForecastModelConfig, ForecastModelsConfig
+
 
 PANEL_IDS = (1, 2, 3, 4)
 SCALE = 10_000
-SCALAR_HALF_LIFE_DAYS = 21
-SCALAR_LOOKBACK_DAYS = 56
-RESIDUAL_HALF_LIFE_HOURS = 1.0
-RESIDUAL_STRENGTH_HOURS = 2.0
 
 
 def _day_bounds(local_day: date, timezone: ZoneInfo) -> tuple[pd.Timestamp, pd.Timestamp]:
@@ -34,18 +32,19 @@ def _interpolate(values: np.ndarray, target: pd.Series) -> np.ndarray:
     return np.interp(target.dt.hour + target.dt.minute / 60, np.r_[centres[-1] - 24, centres, centres[0] + 24], np.r_[values[-1], values, values[0]])
 
 
-def _fit_scalars(training: pd.DataFrame, as_of: pd.Timestamp) -> np.ndarray:
+def _fit_scalars(training: pd.DataFrame, as_of: pd.Timestamp, settings: ForecastModelConfig | None = None) -> np.ndarray:
+    settings = settings or ForecastModelsConfig().solar_day_ahead
     scalars = np.ones(24)
     if training.empty:
         return scalars
     usable = training[["raw_total_kw", "plant_pv_power_kw", "target"]].dropna()
-    usable = usable[usable.target >= as_of - pd.Timedelta(days=SCALAR_LOOKBACK_DAYS)]
+    usable = usable[usable.target >= as_of - pd.Timedelta(days=settings.lookback)]
     for hour in range(24):
         rows = usable[usable.target.dt.hour == hour]
         if rows.empty:
             continue
         age = (as_of - rows.target).dt.total_seconds().to_numpy() / 86_400
-        weights = np.exp(-np.log(2) * np.maximum(age, 0) / SCALAR_HALF_LIFE_DAYS)
+        weights = np.exp(-np.log(2) * np.maximum(age, 0) / settings.halflife)
         raw, actual = rows.raw_total_kw.to_numpy(), rows.plant_pv_power_kw.to_numpy()
         denominator = np.sum(weights * np.square(raw))
         if denominator:
@@ -76,14 +75,15 @@ def _load_inputs(database_path: str | Path) -> tuple[pd.DataFrame, pd.DataFrame]
     return forecasts, actuals
 
 
-def _hour_distributions(actuals: pd.DataFrame, before: pd.Timestamp) -> dict[int, tuple[float, float]]:
+def _hour_distributions(actuals: pd.DataFrame, before: pd.Timestamp, settings: ForecastModelConfig | None = None) -> dict[int, tuple[float, float]]:
+    settings = settings or ForecastModelsConfig().solar_day_ahead
     prior = actuals[actuals.target_hour < before]
     result = {}
     for hour, rows in prior.groupby(prior.target_hour.dt.hour):
         if len(rows) < 3:
             continue
         age = (before - rows.target_hour).dt.total_seconds().to_numpy() / 86_400
-        weights = np.exp(-np.log(2) * np.maximum(age, 0) / SCALAR_HALF_LIFE_DAYS)
+        weights = np.exp(-np.log(2) * np.maximum(age, 0) / settings.halflife)
         mean = float(np.average(rows.plant_pv_power_kw, weights=weights))
         sigma = float(np.average(np.square(rows.plant_pv_power_kw - mean), weights=weights) ** .5)
         if sigma > 1e-6:
@@ -91,7 +91,11 @@ def _hour_distributions(actuals: pd.DataFrame, before: pd.Timestamp) -> dict[int
     return result
 
 
-def _today_residual(issued: pd.DataFrame, distributions: dict[int, tuple[float, float]], as_of: pd.Timestamp) -> tuple[float, float, int]:
+def _today_residual(issued: pd.DataFrame, distributions: dict[int, tuple[float, float]], as_of: pd.Timestamp, settings: ForecastModelConfig | None = None) -> tuple[float, float, int]:
+    settings = settings or ForecastModelsConfig().solar_intraday
+    prior_strength = settings.prior_strength
+    if settings.lookback is not None:
+        issued = issued[issued.target_hour >= as_of - pd.Timedelta(hours=settings.lookback)]
     scores, weights = [], []
     for row in issued.itertuples():
         distribution = distributions.get(row.target_hour.hour)
@@ -102,7 +106,7 @@ def _today_residual(issued: pd.DataFrame, distributions: dict[int, tuple[float, 
         if any(value is None or not np.isfinite(value) for value in inputs) or row.raw_total_kw <= 0 or sigma <= 0:
             continue
         score = (row.plant_pv_power_kw - row.baseline_kw) / sigma
-        weight = np.exp(-np.log(2) * max((as_of - row.target_hour).total_seconds() / 3_600, 0) / RESIDUAL_HALF_LIFE_HOURS)
+        weight = np.exp(-np.log(2) * max((as_of - row.target_hour).total_seconds() / 3_600, 0) / settings.halflife)
         if not np.isfinite(score) or not np.isfinite(weight) or weight <= 0:
             continue
         scores.append(score)
@@ -111,7 +115,7 @@ def _today_residual(issued: pd.DataFrame, distributions: dict[int, tuple[float, 
         return 0.0, 0.0, 0
     weights = np.asarray(weights)
     effective = float(weights.sum() ** 2 / np.square(weights).sum())
-    return float(np.average(scores, weights=weights)), effective / (effective + RESIDUAL_STRENGTH_HOURS), len(scores)
+    return float(np.average(scores, weights=weights)), effective / (effective + prior_strength), len(scores)
 
 
 def _official_day_frame(forecasts: pd.DataFrame, actuals: pd.DataFrame, day, timezone: ZoneInfo) -> tuple[pd.Timestamp, pd.DataFrame] | None:
@@ -131,12 +135,13 @@ def _official_day_frame(forecasts: pd.DataFrame, actuals: pd.DataFrame, day, tim
     return snapshot, frame
 
 
-def _training_frames(forecasts: pd.DataFrame, actuals: pd.DataFrame, day, timezone: ZoneInfo, as_of: pd.Timestamp) -> pd.DataFrame:
+def _training_frames(forecasts: pd.DataFrame, actuals: pd.DataFrame, day, timezone: ZoneInfo, as_of: pd.Timestamp, settings: ForecastModelConfig | None = None) -> pd.DataFrame:
     """Select official vintages only within the scalar lookback, before merging."""
+    settings = settings or ForecastModelsConfig().solar_day_ahead
     start, _ = _day_bounds(day, timezone)
     candidates = forecasts[
         (forecasts.target_hour < start)
-        & (forecasts.target >= as_of - pd.Timedelta(days=SCALAR_LOOKBACK_DAYS))
+        & (forecasts.target >= as_of - pd.Timedelta(days=settings.lookback))
     ].copy()
     if candidates.empty:
         return candidates.merge(actuals, on="target_hour", how="left")
@@ -184,8 +189,11 @@ def calculate_adjusted_forecast(
     as_of: datetime | str | pd.Timestamp,
     timezone_name: str = "Europe/Dublin",
     target_day: date | None = None,
+    *,
+    models: ForecastModelsConfig | None = None,
 ) -> tuple[pd.Timestamp, dict[str, dict[str, float]]] | None:
     """Calculate one provider snapshot's adjusted values without writing them."""
+    models = models or ForecastModelsConfig()
     as_of = pd.Timestamp(as_of)
     as_of = as_of.tz_localize("UTC") if as_of.tzinfo is None else as_of.tz_convert("UTC")
     timezone = ZoneInfo(timezone_name)
@@ -198,10 +206,10 @@ def calculate_adjusted_forecast(
     if current_available.empty:
         return None
     current_snapshot = current_available.snapshot.max()
-    training = _training_frames(forecasts, actuals, day, timezone, as_of)
-    scalars = _fit_scalars(training, as_of)
+    training = _training_frames(forecasts, actuals, day, timezone, as_of, models.solar_day_ahead)
+    scalars = _fit_scalars(training, as_of, models.solar_day_ahead)
     day_start, day_end = _day_bounds(day, timezone)
-    distributions = _hour_distributions(actuals, day_start)
+    distributions = _hour_distributions(actuals, day_start, models.solar_day_ahead)
     cutoff = as_of.floor("h")
     past = frame[(frame.target_hour >= day_start) & (frame.target_hour < cutoff)].copy()
     past["baseline_kw"] = _interpolate(scalars, past.target) * past.raw_total_kw
@@ -210,7 +218,7 @@ def calculate_adjusted_forecast(
         # intraday residual alter its calibrated raw forecast.
         residual, strength = 0.0, 0.0
     else:
-        residual, strength, _ = _today_residual(past, distributions, as_of)
+        residual, strength, _ = _today_residual(past, distributions, as_of, models.solar_intraday)
     first_target = max(cutoff, day_start)
     source_future = frame[frame.target_hour >= first_target]
     source_values = _prediction_fields(source_future, scalars, distributions, residual, strength)
@@ -304,7 +312,7 @@ def add_adjusted_energy_values(
     return output
 
 
-def refresh_adjusted_forecast(database, as_of: datetime | str | pd.Timestamp, timezone_name: str = "Europe/Dublin") -> int:
+def refresh_adjusted_forecast(database, as_of: datetime | str | pd.Timestamp, timezone_name: str = "Europe/Dublin", *, models: ForecastModelsConfig | None = None) -> int:
     """Write a fresh adjusted forecast to the current raw-collection snapshot.
 
     The calculation always starts from the official pre-midnight raw snapshot,
@@ -322,7 +330,7 @@ def refresh_adjusted_forecast(database, as_of: datetime | str | pd.Timestamp, ti
     values: dict[str, dict[str, float]] = {}
     for target_day in sorted(rows.target_hour.dt.tz_convert(timezone).dt.date.unique()):
         calculated = calculate_adjusted_forecast(
-            forecasts, actuals, timestamp, timezone_name, target_day=target_day,
+            forecasts, actuals, timestamp, timezone_name, target_day=target_day, models=models,
         )
         if calculated is not None:
             _, target_values = calculated

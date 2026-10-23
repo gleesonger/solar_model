@@ -23,6 +23,8 @@ Use the [isolated development walkthrough](isolated-development.md) for syntheti
 
 | Tests | What they cover |
 | --- | --- |
+| [test_forecast_model_config.py](../../tests/test_forecast_model_config.py) | YAML model parsing/defaults/validation, lookback and half-life effects, and model settings passed through collection, refresh and CLI entry points |
+| [test_forecast_influence.py](../../tests/test_forecast_influence.py) | Decimal-fraction load/intraday influence, sparse day-type fallback, 100% influence and invalid fractions and old percentage inputs |
 | [test_forecast_schedule.py](../../tests/test_forecast_schedule.py) | Persistent external-request cadence, restart/history fallback, exact due boundary, failed attempts, duplicate claims, UTC DST duration and schedule-database failure recovery |
 | [test_custom_chart_sql.py](../../tests/test_custom_chart_sql.py) | SQL/pandas parity, batching, selected-field reads, grouping/splits, timezone/DST, minute telemetry, tariff quoting |
 | [test_recent_summary_sql.py](../../tests/test_recent_summary_sql.py) | Native summary/Python parity, DST/timezone boundaries, nulls/resets/vintages, empty months, leap-day/lifetime totals and shared single-aggregation refresh |
@@ -30,7 +32,6 @@ Use the [isolated development walkthrough](isolated-development.md) for syntheti
 | [test_grid_power_rollup.py](../../tests/test_grid_power_rollup.py) | R04 sign-separated import/export means, zeros/nulls, tariff-split hours, raw/hourly parity, incremental/rebuild statistics and interrupted legacy-to-current upgrade |
 | [test_review_recovery.py](../../tests/test_review_recovery.py) | R01 finite/neutral residuals and real adjusted writes; R02 startup/midnight baseline retry and partial PV rollback; R03 transactional creation/rebuild, interruption/retry and no repeated history scan |
 | [test_analysis_download.py](../../tests/test_analysis_download.py) | CSV/Excel downloads, SQL/pandas parity across every timestep and DST, optional/empty forecasts, single-query execution/forecast skipping, tariff labels, XlsxTurbo Excel values/dates/blanks |
-| [test_solar_adjustment.py](../../tests/test_solar_adjustment.py) | Older tree model's rolling windows, as-of features, cumulative/day Wh |
 | [test_forecast_schema_migration.py](../../tests/test_forecast_schema_migration.py) | Legacy forecast renaming and repeat-open preservation |
 | [test_sigenstor_schema_migration.py](../../tests/test_sigenstor_schema_migration.py) | Battery-availability rename preserves values |
 | [test_database_0_1_0_migration.py](../../tests/test_database_0_1_0_migration.py) | Current opener preserves legacy readings/primary keys, renames availability, publishes rollup readiness and tolerates repeat opens; historical filename retained |
@@ -57,6 +58,6 @@ Full collection is restored (R18). [test_remaining_review_fixes.py](../../tests/
 ## Appropriate verification
 
 - Storage changes: use temporary SQLite fixtures; check physical/raw units, repeat opening, existing values, resets, and rollup consistency.
-- Forecast changes: exercise the operational model and chronological replay, including cold start, missing panels, future-data exclusion, and DST boundaries. Existing tree-model tests do not establish production-model correctness.
+- Forecast changes: exercise the operational model and chronological replay, including cold start, missing panels, future-data exclusion, and DST boundaries.
 - Planning changes: test energy conservation, efficiency losses, feasible/infeasible limits, scenario independence, and interval coverage. The root `test_energy_plan_as_of.py` is a report tool, not automated coverage.
 - UI changes: check actual desktop/mobile rendering, live updates, preserved selections, reconnect/resume, missing data, and export failures. Unit tests alone do not establish visual correctness.

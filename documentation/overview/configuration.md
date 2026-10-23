@@ -13,13 +13,23 @@ Source: [config.yaml](../../config.yaml), [config.py](../../config.py). Configur
 | `database.path` | `solar.db`, relative to process working directory |
 | `actuals.modbus` | Host/port/timeout/default device ID; shipped port 502, default ID 247 |
 | `actuals.data_retrival_schedule` | Live 1 second; full persisted/shared refresh 60 seconds |
-| `forecast` | Endpoint, timeout, collection interval 3600 seconds, array definitions |
+| `forecast` | Endpoint, timeout, collection interval 3600 seconds, array definitions and model tuning under `model_calibration_parameters` |
 | `dashboard` | Host `0.0.0.0`, port 8090, PV-string-to-panel mapping |
 | `tariffs.periods` | Effective-dated import/export schedules |
 | `energy_plan` | 24-hour projection, 15-minute resolution, load-history settings, objective weights, scheduled battery limits |
 | `additional_device_info` | Charge/discharge efficiencies, both shipped as 0.95 |
 
 These are current file values, not universal defaults. Preserve exact configuration spellings, including `data_retrival_schedule` and `full_updated_interval_seconds`.
+
+## Forecast model calibration parameters
+
+`forecast.model_calibration_parameters` contains `solar_day_ahead`, `solar_intraday`, and `load`. Each uses `lookback`, `halflife`, and `prior_effective_observations`; see the [forecasting defaults table](forecasting.md). `lookback`/`halflife` use days for day-ahead/load and hours for intraday. Intraday `lookback: null` preserves all earlier completed hours today. Day-ahead `prior_effective_observations: null` reflects that model's absence of prior shrinkage; a numeric value is rejected rather than ignored.
+
+`prior_effective_observations` is a decimal fraction, not a count: load defaults to `0.2` (20%) and intraday to one-third. The shipped YAML uses `0.3333` for intraday. The derived strength is `1 / prior_effective_observations - 1` (4 for load and approximately 2 for intraday). Values must be finite and in `(0, 1]`; old percentage values such as `20` are rejected. Lookback/halflife values must be finite and positive, except the permitted intraday null lookback. Load lookback and both load/intraday fractions are required. Older YAML files without `model_calibration_parameters`, or with omitted model blocks, inherit defaults; a supplied model block must provide its three fields.
+
+Rename the former `forecast.models` key to `forecast.model_calibration_parameters` in separately deployed configuration files.
+
+The live collector passes these settings to solar correction. `python -m forecast.evaluate_load_profile --config config.yaml ...` and `python -m forecast.rebuild_operational_adjusted_forecasts --config config.yaml ...` load the same settings. Both CLIs use the configured database/timezone unless overridden by `--database`/`--timezone`. Existing `energy_plan` load-history fields belong to the separate temporary planning profile.
 
 ## Validation and parsing
 

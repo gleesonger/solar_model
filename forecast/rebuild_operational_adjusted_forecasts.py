@@ -15,6 +15,7 @@ from zoneinfo import ZoneInfo
 import pandas as pd
 
 from database import open_database
+from config import load_config
 from forecast.operational_model import (
     PANEL_IDS,
     add_adjusted_energy_values,
@@ -64,14 +65,16 @@ def _print_progress(completed: int, total: int, local_day: date, updates: int) -
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Rebuild adjusted forecasts with the operational model")
-    parser.add_argument("--database", default="solar.db")
+    parser.add_argument("--config", default="config.yaml", help="YAML configuration file")
+    parser.add_argument("--database", help="Override the configured database")
     parser.add_argument("--start", type=_parse_date, help="First local day, inclusive (default: earliest forecast)")
     parser.add_argument("--end", type=_parse_date, help="Last local day, inclusive (default: latest actual)")
-    parser.add_argument("--timezone", default="Europe/Dublin")
+    parser.add_argument("--timezone", help="Override the configured timezone")
     parser.add_argument("--apply", action="store_true", help="Required to change the database")
     args = parser.parse_args()
-    database = open_database(args.database)
-    timezone = ZoneInfo(args.timezone)
+    config = load_config(args.config)
+    database = open_database(args.database or config.database.path)
+    timezone = ZoneInfo(args.timezone or config.timezone)
     try:
         inferred_start, inferred_end = _inferred_bounds(database, timezone)
         start = args.start or inferred_start
@@ -119,7 +122,7 @@ def main() -> None:
             snapshots: dict[str, pd.Timestamp] = {}
             for as_of in snapshots_by_day[local_day]:
                 calculated = calculate_adjusted_forecast(
-                    forecasts, actuals, as_of, args.timezone,
+                    forecasts, actuals, as_of, timezone.key, models=config.forecast.model_calibration_parameters,
                 )
                 if calculated is not None:
                     snapshot, values = calculated

@@ -8,5 +8,4 @@ pandas>=2.2,<3
 dacite>=1.9,<2
 XlsxWriter>=3.2,<4
 xlsxturbo>=1.11,<2
-scikit-learn>=1.5,<2
 cvxpy>=1.6,<2

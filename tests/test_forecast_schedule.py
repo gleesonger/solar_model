@@ -6,7 +6,7 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 
-from config import SolarArrayConfig
+from config import ForecastModelConfig, ForecastModelsConfig, SolarArrayConfig
 from database import DatabaseMetadata, ForecastSolarSample, open_database
 import forecast_collector as collector
 
@@ -36,6 +36,13 @@ def requests(monkeypatch):
 def run(database, monkeypatch, now=NOW):
     monkeypatch.setattr(collector, "utc_now", lambda: now)
     collector.collect_once(Mock(), database, ARRAYS, "https://example.test/estimate", 10., "Europe/Dublin", INTERVAL)
+
+
+def test_collection_passes_yaml_model_settings_to_adjustment(database, requests, monkeypatch):
+    models = ForecastModelsConfig(solar_intraday=ForecastModelConfig(2., 0.5, 0.5))
+    monkeypatch.setattr(collector, "utc_now", lambda: NOW)
+    collector.collect_once(Mock(), database, ARRAYS, "https://example.test/estimate", 10., "Europe/Dublin", INTERVAL, models)
+    assert requests[1].call_args.kwargs["models"] is models
 
 
 def test_first_scan_fetches_arrays_then_restart_skips_until_due(database, requests, monkeypatch, caplog):

@@ -45,14 +45,14 @@ Source: [forecast/rebuild_operational_adjusted_forecasts.py](../../forecast/rebu
 
 ```text
 main()
-  open_database(), infer date bounds
+  load_config(--config), open_database(), infer date bounds
   return preview unless --apply
   load_operational_inputs() once
   clear selected target range's adjusted fields; commit
   group collection timestamps by local collection date
   for each replay local day:
     for each recorded collection timestamp that day:
-      calculate_adjusted_forecast(frames, as_of)
+      calculate_adjusted_forecast(frames, as_of, models=config.forecast.model_calibration_parameters)
       accumulate target watt fields by destination snapshot
     add_adjusted_energy_values() per destination snapshot
     save_adjusted_forecasts_bulk() once for that day's outputs
@@ -95,74 +95,15 @@ Report columns are lead label, sample count, raw/adjusted MAE kW, RMSE kW, signe
 
 No model fitting or adjusted writes occur. Optional CSV stores the report, not the entire pair frame.
 
-## 4. Separate tree correction and retrospective backfill
+## 4. Hierarchical load-profile report
 
-Source: [forecast/solar_adjustment.py](../../forecast/solar_adjustment.py). This is not imported as the production collector's correction model.
+Source: [forecast/evaluate_load_profile.py](../../forecast/evaluate_load_profile.py), a report-only experiment.
 
-```text
-training_frame(connection, as_of, timezone)
-  read bounded raw forecast history before current local-day target cutoff
-  join completed target-hour PV power
-  read_actual_interval_energy()
-  rolling_energy_features() at each historical snapshot
-  calendar/lead features + target_factor
-fit_model() -> AdjustmentModel(model, features) or None
-adjusted_values(raw_rows, model, energy_series, snapshot)
-  inference factor × raw panel watts
-  forward cumulative/day integration
-backfill_adjusted_forecasts(database, as_of)
-  fit one model at supplied/current as_of
-  iterate oldest pending snapshots in batches of 24
-  calculate features at each historical snapshot
-  save adjusted target dictionaries
-```
-
-`read_actual_interval_energy()` sums available string `_energy_kwh_period` raw columns `/10000` and returns a UTC DatetimeIndex Series of interval kWh, excluding samples at/after cutoff. Rolling 1h/3h features require about 90% minute coverage plus observations near each boundary; otherwise each feature is `NaN`.
-
-Training output columns:
-
-```text
-raw_solar_kw, forecast_lead_hours, hour_sin, hour_cos, day_sin, day_cos,
-actual_solar_rolling_1h_kwh, actual_solar_rolling_3h_kwh,
-target_factor, snapshot
-```
-
-`target_factor` is observed/raw site kW clipped to 0–3. The HistGradientBoosting model uses recency-weighted fitting with 21-day half-life, two-month snapshot window, and minimum 40 rows. `AdjustmentModel` holds the estimator and ordered feature tuple.
-
-Inference accepts **ORM-decoded raw-row dictionaries**; it must not divide physical raw watts by storage scale again. No model means factor 1; non-positive raw means factor 1; predicted factors and resulting watts are clipped non-negative. Outputs are target-epoch dictionaries later converted to ISO-keyed writer dictionaries.
-
-Backfill fits one model at its overall as-of time and applies it to older snapshots. Historical rolling features remain cutoff-filtered, but the model itself is retrospective. It is not the chronological operational replay and can mix tree-model output into pending operational history.
-
-## 5. General load/solar model training
-
-Source: [forecast/train_models.py](../../forecast/train_models.py).
-
-- `read_actuals()` projects collection epoch, load power, PV power from `sigenstor`, requires both non-null, divides by 10,000, converts to configured-local index, and resamples hourly means into `load_kw/pv_kw`.
-- `calendar_features()` creates local-hour and cyclic hour/day fields; optional weekday cyclic/weekend features distinguish load patterns.
-- `load_features()` adds 1/2/24/48/168-hour load lags, optional 336h lag after sufficient history, and shifted rolling mean/std windows 1/3/6/24h. Target is `target_load_kw`; separate baseline is preceding 14 calendar days' same-hour mean when all 14 exist.
-- `solar_features()` reads panels 1/2 raw power/day Wh, normalises to kW/kWh, selects latest eligible pre-local-midnight vintage per target, joins PV actuals, and adds lagged PV/residual plus calendar/lead fields. Target is a solar correction factor clipped 0–3.
-- `split_days()` requires at least 12 feature days and returns chronological train/validation/test frames, about 70/15/15, preserving date boundaries.
-- `evaluate()` excludes target/leaking/evaluation fields, selects numeric features, fits a tree estimator, and compares predictions with baseline on validation/test.
-
-Artifacts are `<name>_model.pkl` containing `{model,features}` and `metrics.json` containing feature names and model/baseline scores (`rows`, `mae_kw`, `rmse_kw`, `energy_bias_kwh`). These artifacts are not loaded by the live application. Default database is `forecast/solar.db`, not the repository-root database.
-
-## 6. Intraday recursive backtest
-
-Source: [forecast/intraday_backtest.py](../../forecast/intraday_backtest.py). It imports `train_models` as a sibling module; invoke it by script path (`python forecast/intraday_backtest.py`), rather than assuming package-module execution works.
-
-For test days, `fit()` trains using prior feature rows at midnight. `predict_load_day()` and `predict_solar_day()` expose actuals strictly before each chosen cutoff and recursively feed predicted values into later lag/rolling histories. Results are 24-element lists; positions before cutoff are `None`.
-
-Solar `forecast_source()` retains `(snapshot,target,raw site kW,raw day kWh)` for panels 1/2. `raw_at()` chooses latest vintage ≤ cutoff for each target. Missing raw solar targets are assigned zero in this experiment. Predicted factor is clipped non-negative and multiplied by raw power. Workbook blocks compare hourly actuals with forecasts issued at different cutoffs, separated by day. This is an offline research model, not production scalar/residual logic.
-
-## 7. Hierarchical load-profile report
-
-Source: [forecast/evaluate_load_profile.py](../../forecast/evaluate_load_profile.py), currently a local untracked experiment.
-
-`load_hourly_load()` queries hourly load `_period` sums grouped by UTC hour, divides by storage scale, and adds local `day`, `hour`, and weekday/weekend `day_type`. `predict_day()` uses only prior history in a 42-day window, with 14-day half-life; it blends type-specific hourly mean with an all-days hourly mean using `type_weight/(type_weight+4)`.
+The CLI loads `--config` (default `config.yaml`) and uses `forecast.model_calibration_parameters.load`; configured database/timezone are defaults, overridable by CLI flags. `load_hourly_load()` queries hourly load period sums grouped by UTC hour, divides by storage scale, and adds local `day`, `hour`, and weekday/weekend `day_type`. `predict_day()` uses only prior history within `settings.lookback` days (default 42), weighted by `settings.halflife` days (default 14). It blends type-specific and all-days hourly means with `type_weight/(type_weight+settings.prior_strength)`. The shared field `prior_effective_observations` is a decimal influence fraction after one unit of weighted evidence, default `0.2` (20%); its derived strength is `1 / prior_effective_observations - 1` (default 4). Without matching day-type observations the all-days hourly mean is used, including at fraction `1` (100% influence); hours with no observations remain missing. Pure helper calls may receive settings explicitly or use the original configuration defaults.
 
 Predicted frame: `hour`, `prediction_kwh`, `type_weight` (24 rows). `evaluate()` joins observed target-day hours and appends day/type. Report adds absolute/signed kWh errors, prints overall/type MAE/bias, and daily total comparisons. It does not write the DB or replace the planner's exact-weekday profile.
 
-## 8. Independent tariff simulation
+## 5. Independent tariff simulation
 
 Sources: [check-tariffs/extract_minute_data.py](../../check-tariffs/extract_minute_data.py), [model_tariffs.py](../../check-tariffs/model_tariffs.py), [hardware.json](../../check-tariffs/hardware.json), [energy_plan.json](../../check-tariffs/energy_plan.json), [tarrifs.json](../../check-tariffs/tarrifs.json).
 

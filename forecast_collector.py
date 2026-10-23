@@ -7,7 +7,7 @@ import requests
 from sqlalchemy.exc import SQLAlchemyError
 
 from common import LOGGER, heavy_work, timestamps, utc_now
-from config import SolarArrayConfig
+from config import ForecastModelsConfig, SolarArrayConfig
 from forecast.operational_model import refresh_adjusted_forecast
 
 
@@ -25,7 +25,7 @@ def fetch_array(session: requests.Session, array: SolarArrayConfig, endpoint: st
 
 
 @heavy_work("solar forecast collection update")
-def collect_once(session: requests.Session, database, arrays: tuple[SolarArrayConfig, ...], endpoint: str, timeout_seconds: float, timezone_name: str, interval_seconds: int) -> None:
+def collect_once(session: requests.Session, database, arrays: tuple[SolarArrayConfig, ...], endpoint: str, timeout_seconds: float, timezone_name: str, interval_seconds: int, models: ForecastModelsConfig | None = None) -> None:
     now = utc_now()
     try:
         due, last_attempt = database.claim_forecast_collection(now, interval_seconds)
@@ -51,7 +51,7 @@ def collect_once(session: requests.Session, database, arrays: tuple[SolarArrayCo
     # Adjust only after every array has contributed to the same wide snapshot;
     # the model learns and corrects the combined site PV output.
     try:
-        adjusted = refresh_adjusted_forecast(database, collected[0], timezone_name)
+        adjusted = refresh_adjusted_forecast(database, collected[0], timezone_name, models=models)
         LOGGER.info("saved %s adjusted solar forecast rows", adjusted)
     except Exception:
         # Raw API data is the important first-class record. A failed model fit

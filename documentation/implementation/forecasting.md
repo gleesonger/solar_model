@@ -1,6 +1,6 @@
 # Operational forecast correction: frames, calculations, and writes
 
-Source: [forecast/operational_model.py](../../forecast/operational_model.py). The [forecasting overview](../overview/forecasting.md) explains model intent and displayed forecast meanings. This guide traces the production implementation; tree-model tools are in [maintenance-research.md](maintenance-research.md).
+Source: [forecast/operational_model.py](../../forecast/operational_model.py). The [forecasting overview](../overview/forecasting.md) explains model intent and displayed forecast meanings. This guide traces the production implementation; evaluation and maintenance tools are in [maintenance-research.md](maintenance-research.md).
 
 ## 1. Function hierarchy
 
@@ -91,14 +91,16 @@ tuple[pd.Timestamp, dict[str, dict[str, float]]] | None
 # inner mapping: adjusted-field names in physical units
 ```
 
+Model settings are passed as `ForecastModelsConfig` from `config.forecast.model_calibration_parameters`; its three `ForecastModelConfig` children share `lookback`, `halflife`, and `prior_effective_observations`. The collector passes the startup configuration through `refresh_adjusted_forecast()` into `calculate_adjusted_forecast()`. The rebuild CLI also loads and passes YAML settings. Direct pure-helper calls without settings retain the original defaults, defined in `config.py`.
+
 ## 4. Calibration structures
 
-`_training_frames()` first restricts targets to the 56-day scalar window and days before the requested target day. It selects official vintages against the full collection-time list, filters matching rows, then merges actuals once. A chosen snapshot lacking that day's targets does not fall back to another vintage. `_fit_scalars()` retains its complete-row/window checks and weighting.
+`_training_frames()` first restricts targets to the configured day-ahead lookback window (default 56 days) and days before the requested target day. It selects official vintages against the full collection-time list, filters matching rows, then merges actuals once. A chosen snapshot lacking that day's targets does not fall back to another vintage. `_fit_scalars()` retains its complete-row/window checks and weighting.
 
 For each UTC hour 0–23:
 
 ```text
-weight = exp(-ln(2) × max(age_days, 0) / 21)
+weight = exp(-ln(2) × max(age_days, 0) / day_ahead.halflife)
 scalar = sum(weight × raw_kw × actual_kw) / sum(weight × raw_kw²)
 ```
 
@@ -110,7 +112,7 @@ Output is `numpy.ndarray`, shape `(24,)`, dimensionless. Missing usable hour/den
 dict[int, tuple[float, float]]  # UTC hour -> weighted mean kW, sigma kW
 ```
 
-It uses 21-day age weights but does not apply the scalar's explicit 56-day cutoff. The distribution mean is calculated; residual normalisation uses sigma.
+It uses the configured day-ahead half-life (default 21 days) but does not apply the scalar's explicit lookback cutoff, preserving the existing distribution policy. The distribution mean is calculated; residual normalisation uses sigma.
 
 ## 5. Intraday inference and intermediate frame
 
@@ -120,10 +122,13 @@ It uses 21-day age weights but does not apply the scalar's explicit 56-day cutof
 
 ```text
 score = (actual_kw - baseline_kw) / sigma_for_target_UTC_hour
-weight = exp(-ln(2) × elapsed_hours / 1)
+weight = exp(-ln(2) × elapsed_hours / intraday.halflife)
 effective = sum(weights)² / sum(weights²)
-strength = effective / (effective + 2)
+prior_strength = 1 / intraday.prior_effective_observations - 1
+strength = effective / (effective + prior_strength)
 ```
+
+`forecast.model_calibration_parameters.solar_intraday.prior_effective_observations` is a decimal influence fraction: `0.3333` in the shipped YAML gives derived strength about 2.0003. The code default of one-third preserves the previous strength of 2 when settings are omitted. Derived strengths are not rounded. Settings are validated when YAML is loaded. `lookback: null` retains all eligible completed observations from the current day; a positive numeric lookback adds an inclusive UTC-age limit in hours. The configured `halflife` controls residual recency in hours. The derived strength is evidence, not a time duration.
 
 It returns `(weighted residual score, strength, observation count)`, or three zeros if none qualify. Current/open-hour actuals are excluded by the strict hour cutoff. For a future local target day, residual and strength are explicitly zero.
 

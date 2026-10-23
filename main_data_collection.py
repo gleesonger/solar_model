@@ -56,6 +56,7 @@ def main() -> None:
                 collect_forecast_once(
                     session, database, config.forecast.arrays, config.forecast.endpoint,
                     config.forecast.timeout_seconds, config.timezone, config.forecast.interval_seconds,
+                    config.forecast.model_calibration_parameters,
                 )
                 sleep_until_next_interval(data_retrival_schedule.full_updated_interval_seconds)
     finally:

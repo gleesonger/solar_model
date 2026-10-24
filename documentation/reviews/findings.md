@@ -24,6 +24,7 @@ Original documentation review: 2026-10-14. The lists below reflect remaining ite
 - **Interval attribution:** counter gaps use the ending timestamp's tariff/hour and PV integration spans the whole gap. Decide acceptable maximum gap and whether tariff/day boundaries require interval splitting.
 - **Forecast export meaning:** export aggregation averages cumulative `*_watt_hours` while charts difference them into interval energy. Confirm whether downloads should expose stored provider fields or reproduce chart energy.
 - **Scenario interpretation:** optimiser decisions are independent across scenarios. If the goal becomes one executable plan under uncertainty, shared-decision constraints and a control integration would be required.
+- **Plan model implementation decisions:** the [proposed plan model](../overview/plan-model.md#63-assumptions-and-unresolved-decisions) specifies a shared next action and normalised cost/protection scoring. Open items include verified EMS command response and handover, consistent usable-energy/SOC conventions, future-date load coverage, input fallback, and approximation/solver tolerances. This is a target design; current planning remains report-only.
 - **Validation policy:** unknown YAML keys are ignored and some numeric/site fields lack bounds. Decide whether descriptive keys should be formal fields and other unknown keys rejected.
 
 ## Coverage and maintenance gaps

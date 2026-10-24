@@ -1,9 +1,19 @@
-"""Production solar correction and fixed daily household-load forecasting.
+"""Three production forecast models:
 
-Raw Forecast.Solar snapshots are immutable.  The adjusted fields of the one
-official snapshot for a local day (the final snapshot before midnight) are
-updated as actual PV arrives.  A target hour is updated only while it is still
-future, so a stored adjusted prediction never incorporates that hour's actual.
+- Solar day-ahead: calibrates the midnight-anchored Forecast.Solar forecast
+  using recency-weighted historical actuals to learn hourly scaling factors.
+
+  - Solar intraday: adjusts the calibrated forecast using today's completed-hour
+  errors, weighted by recency and shrunk toward no correction when evidence is
+  limited. Only the current and future hours are updated.
+
+- Daily load: predicts hourly demand from recency-weighted weekday/weekend
+  history, blending toward all-days averages when evidence is limited. It uses
+  only earlier days and is saved once per local day, with no intraday updates.
+
+Raw solar forecasts are preserved; adjusted solar predictions are saved in the
+latest collection snapshot. Model parameters are configured under
+forecast.model_calibration_parameters in config.yaml.
 """
 from __future__ import annotations
 

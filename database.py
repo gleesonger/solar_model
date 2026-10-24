@@ -166,6 +166,17 @@ class DatabaseMetadata(Base):
     value: Mapped[str] = mapped_column(String, nullable=False)
 
 
+class ForecastLoadSample(Base):
+    """One immutable, hourly load profile per configured local day."""
+
+    __tablename__ = "forecast_load"
+    __table_args__ = (Index("idx_load_forecast_time", "forecast_time"),)
+    target_day: Mapped[str] = mapped_column(String, primary_key=True)
+    forecast_time: Mapped[str] = mapped_column(EpochSeconds, primary_key=True)
+    collected_at_utc: Mapped[str] = mapped_column(EpochSeconds, nullable=False)
+    load_kwh: Mapped[float | None] = mapped_column(Float, nullable=True)
+
+
 class ForecastSolarSample(Base):
     __tablename__ = "forecast_solar"
     __table_args__ = (Index("idx_forecast_time", "forecast_time"),)
@@ -267,6 +278,25 @@ class SolarDatabase:
 
     def close(self) -> None:
         self.engine.dispose()
+
+    def has_load_forecast(self, target_day: str) -> bool:
+        with self.sessions() as session:
+            return session.scalar(select(ForecastLoadSample.target_day).where(
+                ForecastLoadSample.target_day == target_day,
+            ).limit(1)) is not None
+
+    def save_daily_load_forecast(self, target_day: str, collected_at: str, values: list[dict]) -> int:
+        # Serialize the check and entire profile write. A restart/concurrent
+        # collector must never overwrite or partially extend a frozen day.
+        with self.engine.connect() as connection:
+            connection.exec_driver_sql("BEGIN IMMEDIATE")
+            table = ForecastLoadSample.__table__
+            if connection.scalar(select(table.c.target_day).where(table.c.target_day == target_day).limit(1)) is not None:
+                connection.rollback()
+                return 0
+            connection.execute(table.insert(), [dict(target_day=target_day, collected_at_utc=collected_at, **row) for row in values])
+            connection.commit()
+            return len(values)
 
     def load_previous_cumulatives(self) -> dict[str, float]:
         with self.sessions() as session:
@@ -755,6 +785,7 @@ def open_database(path: str | Path) -> SolarDatabase:
             SigenStorDevice.__table__,
             DatabaseMetadata.__table__,
             ForecastSolarSample.__table__,
+            ForecastLoadSample.__table__,
         ),
     )
     _add_missing_columns(engine, SigenStorModbusSample)

@@ -5,7 +5,7 @@ Detailed startup/call hierarchies and object ownership are in [runtime.md](../im
 ## Runtime ownership
 
 - [docker_start.py](../../docker_start.py) supervises two Python children, initialises the database, and handles full-application restart requests.
-- [main_data_collection.py](../../main_data_collection.py) owns persisted collection: Modbus on each full interval, Forecast.Solar when due.
+- [main_data_collection.py](../../main_data_collection.py) owns persisted collection: Modbus on each full interval, Forecast.Solar when due, plus one fixed load forecast at the first scheduled forecast run of each local day.
 - [main_dashboard.py](../../main_dashboard.py) serves NiceGUI. It owns one shared snapshot worker and one browser-activated live Modbus collector.
 - [database.py](../../database.py) owns ORM schema, automatic migrations, collector persistence, derived PV measurements, and hourly rollups. Maintenance scripts also issue direct SQL updates.
 - [energy_plan_simulation.py](../../energy_plan_simulation.py) is a standalone optimiser called by the as-of workbook script, not the running dashboard.
@@ -16,7 +16,7 @@ flowchart LR
     Supervisor --> Dashboard[NiceGUI server]
     Device[Sigenergy Modbus] --> Collector
     Provider[Forecast.Solar API] --> Collector
-    Collector --> Model[Operational forecast correction]
+    Collector --> Model[Solar correction and daily load forecast]
     Collector --> DB[(SQLite)]
     Model --> DB
     DB --> Cache[Shared Recent and device snapshot]

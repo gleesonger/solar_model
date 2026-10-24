@@ -8,7 +8,7 @@ Source: [database.py](../../database.py). The [data-model overview](../overview/
 open_database(path)
   create_engine_for_database(path) -> cached SQLAlchemy Engine
   rename legacy forecast and battery columns
-  create raw/device/metadata/forecast tables if absent
+  create raw/device/metadata/solar-forecast/load-forecast tables if absent
   add missing columns; drop legacy JSON columns
   SolarDatabase(engine) -> engine + sessionmaker
   add missing columns if the hourly table exists
@@ -30,6 +30,8 @@ open_database(path)
 `ScaledInteger` binds `round(value * 10000)` and returns `value / 10000`; null stays null. The source alias `Float = ScaledInteger` means declarations that look like floats still store integers. `EpochSeconds` accepts integers directly or parses datetime/ISO values; naive values assume Europe/Dublin. It returns UTC ISO text when ORM-reading.
 
 Electrical/forecast `collected_at_local` is a hybrid expression/property, not a stored column. Its local-time conversion uses the host timezone. Device history stores both timestamp strings directly and keeps `value` as text.
+
+`ForecastLoadSample` stores `target_day` (local ISO date), `forecast_time` (UTC epoch/ISO), `collected_at_utc` (generation epoch/ISO), and nullable `load_kwh` (scaled integer/physical float). The composite key is `(target_day, forecast_time)`. `has_load_forecast()` skips fitting an existing day; `save_daily_load_forecast()` serializes a second check and all hourly inserts with `BEGIN IMMEDIATE`. Concurrent or repeated writers cannot overwrite the first committed profile. Opening an older DB creates the table without synthesizing historical predictions.
 
 ## 2. Electrical sample construction
 

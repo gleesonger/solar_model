@@ -249,6 +249,7 @@ def render_energy_summary_table(dataframe: pd.DataFrame, title: str, period_labe
         {"name": "solar_actual", "label": "Solar Actual", "field": "solar_actual", "align": "right"},
         {"name": "solar_forecast", "label": "Solar Forecast", "field": "solar_forecast", "align": "right"},
         {"name": "load", "label": "Load", "field": "load", "align": "right"},
+        {"name": "load_forecast", "label": "Load (Forecast)", "field": "load_forecast", "align": "right"},
         {"name": "grid_import", "label": "Grid Import", "field": "grid_import", "align": "right"},
         {"name": "grid_export", "label": "Grid Export", "field": "grid_export", "align": "right"},
         {"name": "grid_import_cost", "label": "Import Cost", "field": "grid_import_cost", "align": "right"},

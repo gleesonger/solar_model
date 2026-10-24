@@ -171,7 +171,15 @@ Example: 2200 W followed one hour later by 2600 W yields cumulative Wh 2200 then
 
 Historical replay's `add_adjusted_energy_values()` consumes an in-memory update dictionary in physical W and must **not** divide those values by 10,000. Its structure and writer are described in [maintenance-research.md](maintenance-research.md).
 
-## 8. Later retrieval
+## 8. Fixed daily load profile
+
+`forecast_collector.collect_once()` calls `refresh_daily_load_forecast()` once a scheduled scan is due, independently of solar HTTP/adjustment success. A saved `target_day` skips both loading and fitting. For a new day, `load_hourly_load()` queries bounded `sigenstor_hourly` load-energy sums, explicitly removes the 10,000 storage scale, and adds configured-local hour/day/type. `predict_day()` implements the shared recency-weighted hierarchical profile (also called by the evaluation CLI).
+
+Training ends strictly before target-day midnight; current-day observations do not influence a late first run. The pure helper returns 24 clock-hour predictions; the orchestration maps them to the real UTC-hour targets between local midnights, preserving the 23/25-hour DST day. Unobserved hours stay null. `save_daily_load_forecast()` uses `BEGIN IMMEDIATE`, checks for existing rows, then writes the whole profile in one transaction. No existing day is overwritten, even after restart or tuning changes. `collected_at_utc` records generation time separately from `forecast_time`; `target_day` is the configured-local ISO date.
+
+The operational solar rebuild command rebuilds solar fields only. It does not create historical load profiles; the evaluation CLI remains report-only.
+
+## 9. Later retrieval
 
 - Recent/raw/BoD/latest selection returns ORM physical W/Wh and differences cumulative Wh into chart energy; see [dashboard-data.md](dashboard-data.md).
 - Performance evaluation reads raw storage, normalises W to kW, joins target-hour observations, and evaluates vintage/target pairs.

@@ -205,6 +205,10 @@ Missing data may remain `None` for means/series gaps; sum paths can coalesce to 
 
 Energy `battery_flow` is renamed `battery`; telemetry `power_*` prefixes are removed. Custom previews use the same query engine but keep dictionaries and round values through `chart_value()` to one decimal before presentation.
 
+The Recent summary SQL also joins saved `forecast_load` profiles by local `target_day`, removes fixed-point scaling, and sums hourly kWh. Today's rows weight each target by its elapsed fraction (clamped to 0..1); previous days use complete hours. Daily/monthly/total/lifetime rows include `load_forecast`. Missing forecasts stay blank. The existing shared SQL aggregation remains one statement.
+
+For standard Analysis Energy by hour only, the batch SQL requests `load_forecast`, groups saved UTC target energy by configured-local clock hour (summing repeated autumn hours), and joins it into the energy frame. Load-only dates participate without requiring solar vintages. Other standard chart datasets/groupings and the custom-variable picker do not request this metric. Missing hourly predictions remain null rather than becoming zeros.
+
 ## 7. Export and compatibility paths
 
 Exports use dedicated [export_data_sql.py](../../dashboard/export_data_sql.py) aggregation rather than loading full ORM objects or using the chart-specific SQL. The public `analysis_export_dataframe()` adapter delegates to `load_analysis_export_dataframe()`:

@@ -74,6 +74,7 @@ ENERGY_SUMMARY_COLUMNS = (
     "solar_actual",
     "solar_forecast",
     "load",
+    "load_forecast",
     "grid_import",
     "grid_export",
     "grid_import_cost",
@@ -786,6 +787,7 @@ def load_analysis_range(
         *((actual_column_name(panel), None) for panel in dict.fromkeys(actuals_to_forecast.values())),
         *((forecast_column_name(array.panel_id), None) for array in forecast_arrays),
         ("forecast_total", None), ("forecast_raw_total", None),
+        *((("load_forecast", None),) if frequency == "hour" else ()),
     )
     requires_minute_samples = bounds.start_date == bounds.end_date
     power_metrics = (

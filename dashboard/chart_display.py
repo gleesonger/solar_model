@@ -65,6 +65,7 @@ class ChartDataDisplay:
         self.chart_container = ui.column().classes("w-full")
         with self.chart_container:
             self.chart = render_chart()
+        self._known_series_names = {series.get("name") for series in self.chart.options.get("series", [])}
         self.table_container = ui.column().classes("w-full overflow-auto")
         self.table = self._render_table()
         self.table_container.set_visibility(False)
@@ -84,8 +85,12 @@ class ChartDataDisplay:
             browser_options = deepcopy(options)
             legend = browser_options.get("legend")
             if isinstance(legend, dict):
-                legend.pop("selected", None)
-            self.chart.run_chart_method("setOption", browser_options)
+                defaults = legend.pop("selected", {})
+                new_defaults = {name: selected for name, selected in defaults.items() if name not in self._known_series_names}
+                if new_defaults:
+                    legend["selected"] = new_defaults
+            self._known_series_names.update(series.get("name") for series in options.get("series", []))
+            self.chart.run_chart_method("setOption", browser_options, {"replaceMerge": ["series"]})
 
     def refresh_chart(self) -> None:
         """Re-render the chart from the current dataframe and chart options."""

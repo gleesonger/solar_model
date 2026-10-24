@@ -41,10 +41,10 @@ For call hierarchies and structures crossing module boundaries, see the [detaile
 
 ## Forecast and experimental tools
 
-- [operational_model.py](../../forecast/operational_model.py): production scalar/residual correction.
+- [operational_model.py](../../forecast/operational_model.py): production solar scalar/residual correction and fixed daily load profiles.
 - [rebuild_operational_adjusted_forecasts.py](../../forecast/rebuild_operational_adjusted_forecasts.py): chronological replacement of stored adjusted values.
 - [evaluate_forecasts.py](../../forecast/evaluate_forecasts.py): raw/adjusted performance report.
-- [evaluate_load_profile.py](../../forecast/evaluate_load_profile.py): report-only hierarchical weekday/weekend load experiment.
+- [evaluate_load_profile.py](../../forecast/evaluate_load_profile.py): report-only backtest of the shared production weekday/weekend load model.
 - [check-tariffs/](../../check-tariffs): independent minute-data extraction and tariff simulations using `hardware.json`, `energy_plan.json`, and the intentionally named `tarrifs.json`.
 
 ## Change routing

@@ -137,7 +137,7 @@ These values are in-memory allocations and never write to SQLite. Polling pauses
 
 Initial/full update builds rows from the DB-derived day frame, then `_update_live_table_rows()` overwrites latest/Today from live state. `_today_values` is keyed by display label. `_apply_live_today_meters()` replaces available solar/load/import/export/string daily meters and computes Battery = daily charge − discharge. The tab does not integrate power itself. Day-crossing detection resets its held daily values.
 
-Daily/monthly DataFrames use `energy_summary_rows()` to format the nine energy/economics fields and period labels. System Info binds the latest metadata list directly. Full updates replace row lists/label text while retaining the tables and tabs.
+Daily/monthly DataFrames use `energy_summary_rows()` to format the energy/economics fields including Load (Forecast) and period labels. System Info binds the latest metadata list directly. Full updates replace row lists/label text while retaining the tables and tabs.
 
 ## 6. Analysis data to ECharts and reusable controls
 
@@ -161,11 +161,13 @@ custom builder refresh_preview
 
 Typical browser options have `xAxis.data: list[str]` and `series: list[{name,type,data,itemStyle,...}]`. Custom series carry the metric/split identity in the preview; presentation translates it into display names and stable styles, applying visibility filtering after style allocation.
 
-`ChartDataDisplay` owns the DataFrame, title/hint callbacks, chart-options callback, chart element, table element, and show-table flag. It supports tab-separated clipboard, CSV download, and an optional Total row whose fields sum or mean according to configured aggregation. Normal updates retain browser legend selection by removing incoming `legend.selected`; explicit `refresh_chart()` uses `notMerge=True`.
+`ChartDataDisplay` owns the DataFrame, title/hint callbacks, chart-options callback, chart element, table element, and show-table flag. It supports tab-separated clipboard, CSV download, and an optional Total row whose fields sum or mean according to configured aggregation. Normal updates preserve browser selections for previously seen series, apply default selections only to newly introduced series, and replace the series list so removed series disappear when grouping changes; explicit `refresh_chart()` uses `notMerge=True`.
 
 Analysis power and battery/SOC tables omit Total rows because summing levels or percentages is misleading. Missing aggregate values render blank. Energy/array/money tables retain their configured totals. The custom builder uses responsive controls and a stacked plot/legend on mobile; the persistent warning sits below modal dialogs so Close remains usable.
 
 Single-day telemetry already contains minute points, so its zoom is client-side. Longer-range telemetry remains hourly. Chart/CSV values and Analysis full-data downloads follow different export routes; see below.
+
+Only the hourly Energy frame includes `load_forecast`. `energy_chart_options()` adds a Load (Forecast) bar with `forecast_item_style(LOAD_COLOR)` and defaults its legend selection to false. Switching from a non-hourly grouping applies that default on first appearance; later updates preserve the user's choice. Recent's two Past summary tables add the corresponding column; Live/Today is unchanged.
 
 ## 7. Export bytes and operator actions
 

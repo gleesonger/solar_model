@@ -57,7 +57,7 @@ def reference_daily(engine, zone, first, last, arrays, now):
         for name, field in fields.items():
             present = [getattr(row, field) for row in actual if getattr(row, field) is not None]
             values[name] = sum(present) if present else np.nan
-        rows.append({"date": day.isoformat(), **values, "solar_forecast": forecast["forecast_total"].sum(min_count=1)})
+        rows.append({"date": day.isoformat(), **values, "load_forecast": np.nan, "solar_forecast": forecast["forecast_total"].sum(min_count=1)})
     return pd.DataFrame(rows)[["date", *data.ENERGY_SUMMARY_COLUMNS]]
 
 

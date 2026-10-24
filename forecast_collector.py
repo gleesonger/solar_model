@@ -8,7 +8,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from common import LOGGER, heavy_work, timestamps, utc_now
 from config import ForecastModelsConfig, SolarArrayConfig
-from forecast.operational_model import refresh_adjusted_forecast
+from forecast.operational_model import refresh_adjusted_forecast, refresh_daily_load_forecast
 
 
 def fetch_array(session: requests.Session, array: SolarArrayConfig, endpoint: str, timeout_seconds: float) -> dict:
@@ -42,6 +42,11 @@ def collect_once(session: requests.Session, database, arrays: tuple[SolarArrayCo
         )
         return
     collected = timestamps(now, timezone_name=timezone_name)
+    try:
+        count = refresh_daily_load_forecast(database, collected[0], timezone_name, models=models)
+        LOGGER.info("saved %s daily load forecast rows", count)
+    except Exception:
+        LOGGER.exception("daily load forecast failed; will retry at the next scheduled forecast run")
     for array in arrays:
         try:
             count = database.save_forecast(array, fetch_array(session, array, endpoint, timeout_seconds), collected)

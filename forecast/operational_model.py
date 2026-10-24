@@ -1,4 +1,4 @@
-"""Production start-of-day scalar forecast with intraday normal residuals.
+"""Production solar correction and fixed daily household-load forecasting.
 
 Raw Forecast.Solar snapshots are immutable.  The adjusted fields of the one
 official snapshot for a local day (the final snapshot before midnight) are
@@ -340,3 +340,82 @@ def refresh_adjusted_forecast(database, as_of: datetime | str | pd.Timestamp, ti
     database.save_adjusted_forecasts(current_snapshot.isoformat(), values)
     _recalculate_energy(database, current_snapshot, timezone)
     return len(values)
+
+
+def load_hourly_load(database_path: str | Path, timezone: ZoneInfo, *, start: pd.Timestamp | None = None, end: pd.Timestamp | None = None) -> pd.DataFrame:
+    connection = sqlite3.connect(database_path)
+    try:
+        frame = pd.read_sql_query(
+            "SELECT hour_start_utc, SUM(plant_load_total_kwh_period) AS load_scaled "
+            "FROM sigenstor_hourly WHERE plant_load_total_kwh_period IS NOT NULL "
+            "AND hour_start_utc >= :start "
+            "AND hour_start_utc < :end "
+            "GROUP BY hour_start_utc ORDER BY hour_start_utc",
+            connection,
+            params={"start": int(start.timestamp()) if start is not None else -(2**63),
+                    "end": int(end.timestamp()) if end is not None else 2**63 - 1},
+        )
+    finally:
+        connection.close()
+    frame["timestamp"] = pd.to_datetime(frame.pop("hour_start_utc"), unit="s", utc=True)
+    frame["local"] = frame.timestamp.dt.tz_convert(timezone)
+    frame["day"] = frame.local.dt.date
+    frame["hour"] = frame.local.dt.hour
+    frame["day_type"] = np.where(frame.local.dt.weekday < 5, "weekday", "weekend")
+    frame["load_kwh"] = frame.pop("load_scaled") / SCALE
+    return frame[["timestamp", "day", "hour", "day_type", "load_kwh"]]
+
+
+def predict_day(history: pd.DataFrame, target_day: date, timezone: ZoneInfo, settings: ForecastModelConfig | None = None) -> pd.DataFrame:
+    settings = settings or ForecastModelsConfig().load
+    prior_strength = settings.prior_strength
+    target_start = pd.Timestamp(datetime.combine(target_day, datetime.min.time(), timezone)).tz_convert("UTC")
+    window_start = target_start - pd.Timedelta(days=settings.lookback)
+    training = history[(history.timestamp < target_start) & (history.timestamp >= window_start)].copy()
+    target_type = "weekday" if target_day.weekday() < 5 else "weekend"
+    hours = pd.DataFrame({"hour": range(24)})
+    if training.empty:
+        return hours.assign(prediction_kwh=np.nan, type_weight=0.0)
+    age = (target_start - training.timestamp).dt.total_seconds() / 86_400
+    training["weight"] = np.exp(-np.log(2) * age / settings.halflife)
+    all_days = training.groupby("hour").apply(
+        lambda rows: np.average(rows.load_kwh, weights=rows.weight), include_groups=False,
+    ).rename("all_days_kwh")
+    typed_training = training[training.day_type == target_type]
+    typed = typed_training.groupby("hour").apply(
+        lambda rows: np.average(rows.load_kwh, weights=rows.weight), include_groups=False,
+    ).rename("type_kwh") if not typed_training.empty else pd.Series(
+        name="type_kwh", index=pd.Index([], name="hour"), dtype=float,
+    )
+    type_weight = training[training.day_type == target_type].groupby("hour").weight.sum().rename("type_weight")
+    result = hours.merge(all_days, on="hour", how="left").merge(typed, on="hour", how="left").merge(type_weight, on="hour", how="left")
+    result["type_weight"] = result.type_weight.fillna(0.0)
+    # 20% after one unit of evidence gives the original prior strength of 4.
+    # Keep fractional strengths when tuning the decimal influence; do not round.
+    # With 100% influence, missing type evidence still uses the all-days mean.
+    blend = (result.type_weight / (result.type_weight + prior_strength)).fillna(0.0)
+    result["prediction_kwh"] = result.type_kwh.fillna(result.all_days_kwh) * blend + result.all_days_kwh * (1 - blend)
+    return result[["hour", "prediction_kwh", "type_weight"]]
+
+
+def refresh_daily_load_forecast(database, as_of: datetime | str | pd.Timestamp, timezone_name: str = "Europe/Dublin", *, models: ForecastModelsConfig | None = None) -> int:
+    """Freeze today's profile once, using history strictly before local midnight."""
+    timestamp = pd.Timestamp(as_of)
+    if timestamp.tzinfo is None:
+        timestamp = timestamp.tz_localize("UTC")
+    zone = ZoneInfo(timezone_name)
+    day = timestamp.tz_convert(zone).date()
+    if database.has_load_forecast(day.isoformat()):
+        return 0
+    settings = (models or ForecastModelsConfig()).load
+    start, end = _day_bounds(day, zone)
+    history = load_hourly_load(database.engine.url.database, zone,
+                               start=start - pd.Timedelta(days=settings.lookback), end=start)
+    prediction = predict_day(history, day, zone, settings).set_index("hour").prediction_kwh
+    # UTC targets preserve both repeated autumn hours and the missing spring hour.
+    targets = pd.date_range(start, end, freq="h", inclusive="left")
+    rows = [{"forecast_time": target.isoformat(),
+             "load_kwh": float(prediction.loc[target.tz_convert(zone).hour])
+                 if pd.notna(prediction.loc[target.tz_convert(zone).hour]) else None}
+            for target in targets]
+    return database.save_daily_load_forecast(day.isoformat(), timestamp.isoformat(), rows)

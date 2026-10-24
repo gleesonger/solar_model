@@ -18,6 +18,14 @@ The live hook is [forecast.operational_model.refresh_adjusted_forecast](../../fo
 - Adjusted Wh integrates watts forward to the next timestamp, capped at 6 hours; the final point assumes 1 hour. Totals reset by local day.
 - Model tuning lives in `forecast.model_calibration_parameters` in YAML and is loaded at startup. Current scalar/residual output is not clipped non-negative; see findings.
 
+## Daily load model
+
+The load model now lives in [operational_model.py](../../forecast/operational_model.py), alongside solar correction. At the first scheduled forecast run of each configured-local day, the collector generates and saves one fixed hourly load profile using `forecast.model_calibration_parameters.load`. It uses only hourly load energy from before that day's midnight, within the configured lookback. Recency-weighted weekday/weekend hourly means shrink toward all-days hourly means; there is no intraday load adjustment.
+
+`forecast_load` stores the generation time and each UTC target hour's kWh. The entire day is inserted atomically, and later runs/restarts/configuration changes cannot replace it. A failed write can retry on the next scheduled run. Targets follow the actual local calendar day (23/24/25 hours around DST); repeated clock hours retain distinct UTC targets. Missing historical hours remain null, including an entirely empty profile, which is still frozen for that day. No historical load forecasts are fabricated during deployment.
+
+The two Recent Past tables show Load (Forecast), prorated through the current time for today's comparison, just like their elapsed solar forecast comparison. The stored profile remains fixed. Only the hourly Energy chart includes a Load (Forecast) series, initially deselected. Live/Today, other chart types, non-hourly Energy groupings and the custom-variable picker omit it. The load backtest CLI calls the same production prediction helper without writing profiles.
+
 ## Dashboard forecast meanings
 
 Source: [dashboard/data.py](../../dashboard/data.py), `load_day` and forecast selectors.
@@ -38,7 +46,7 @@ Source: [dashboard/data.py](../../dashboard/data.py), `load_day` and forecast se
 
 - [rebuild_operational_adjusted_forecasts.py](../../forecast/rebuild_operational_adjusted_forecasts.py): `--apply` clears adjusted fields in a target-date range and replays collection times, committing by local day. It currently rebuilds same-day targets rather than every future day handled live.
 - [evaluate_forecasts.py](../../forecast/evaluate_forecasts.py): MAE/RMSE/bias and improvement, overall and by lead band; compares stored vintages with hourly actuals and excludes collections after target time and hours not completed by `--as-of` (default now). Sparse completed hours remain eligible.
-- [evaluate_load_profile.py](../../forecast/evaluate_load_profile.py): report-only 42-day/14-day-half-life weekday/weekend profile shrunk toward all-day hourly means. It differs from planning's exact weekday/hour profile.
+- [evaluate_load_profile.py](../../forecast/evaluate_load_profile.py): report-only evaluation of the production 42-day/14-day-half-life weekday/weekend profile shrunk toward all-day hourly means. It differs from planning's exact weekday/hour profile.
 
 The three model blocks use the same names: `lookback`, `halflife`, and `prior_effective_observations`. The last field is the decimal fraction of influence after one unit of evidence, despite its retained name. Defaults are:
 
@@ -52,4 +60,4 @@ A numeric intraday `lookback` imposes an additional limit in hours, within today
 
 Commands and write effects are in [operations.md](../operations/runbook.md).
 
-The general boosted load/solar training script and its dependent intraday backtest were removed on 2026-10-23. The older boosted solar-only correction/backfill script was also removed. Load-profile evaluation remains in `evaluate_load_profile.py`, and production solar correction remains in `operational_model.py`. Scikit-learn is no longer a runtime dependency.
+The general boosted load/solar training script and its dependent intraday backtest were removed on 2026-10-23. The older boosted solar-only correction/backfill script was also removed. Load-profile evaluation remains in `evaluate_load_profile.py`; production load prediction and solar correction live in `operational_model.py`. Scikit-learn is no longer a runtime dependency.

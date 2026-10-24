@@ -71,7 +71,7 @@ config.dashboard.actuals_to_forecast   # dict[str, int], e.g. {'pv1': 1}
 
 Validation checks complete weekday/minute tariff coverage, effective-date ordering, positive timing/history settings, projection divisibility, weights, efficiencies, mappings, URL shape and connection values. See [configuration overview](../overview/configuration.md) for rules and gaps; this guide does not duplicate every range check.
 
-`config.forecast.model_calibration_parameters` adds three frozen model blocks (`solar_day_ahead`, `solar_intraday`, `load`), each with `lookback`, `halflife`, and `prior_effective_observations`. Dataclass defaults preserve older YAML without these blocks; model constructors validate finite positive times and decimal fraction ranges. The collector forwards the loaded blocks to solar correction, while the load and rebuild CLIs load `--config` themselves. No forecast model reads YAML per observation. See [configuration](../overview/configuration.md) for units, null semantics and decimal fraction interpretation.
+`config.forecast.model_calibration_parameters` adds three frozen model blocks (`solar_day_ahead`, `solar_intraday`, `load`), each with `lookback`, `halflife`, and `prior_effective_observations`. Dataclass defaults preserve older YAML without these blocks; model constructors validate finite positive times and decimal fraction ranges. The collector forwards the loaded blocks to solar correction and fixed daily load forecasting, while the load and rebuild CLIs load `--config` themselves. No forecast model reads YAML per observation. See [configuration](../overview/configuration.md) for units, null semantics and decimal fraction interpretation.
 
 ## 3. Collector-owned objects
 

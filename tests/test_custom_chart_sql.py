@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from config import SolarArrayConfig
 from dashboard import data
-from database import HOURLY_VALID_COUNT_COLUMNS, ForecastSolarSample, SigenStorHourlySample, SigenStorModbusSample
+from database import HOURLY_VALID_COUNT_COLUMNS, ForecastLoadSample, ForecastSolarSample, SigenStorHourlySample, SigenStorModbusSample
 
 
 def _hourly_sample(**values):
@@ -65,6 +65,8 @@ def assert_analysis_matches(actual, expected):
     for name in ("energy", "power", "battery"):
         actual_frame = getattr(actual, name)
         expected_frame = getattr(expected, name).copy()
+        if "load_forecast" in actual_frame and "load_forecast" not in expected_frame:
+            expected_frame["load_forecast"] = float("nan")
         for column in expected_frame:
             if column not in {"period", "time"}:
                 expected_frame[column] = pd.to_numeric(expected_frame[column], errors="coerce").astype("float64")
@@ -75,7 +77,7 @@ def assert_analysis_matches(actual, expected):
 def chart_database(tmp_path, request):
     path = str(tmp_path / "chart.db")
     engine = create_engine(f"sqlite:///{path}")
-    models = (ForecastSolarSample, SigenStorHourlySample, SigenStorModbusSample)
+    models = (ForecastLoadSample, ForecastSolarSample, SigenStorHourlySample, SigenStorModbusSample)
     ForecastSolarSample.__table__.metadata.create_all(engine, tables=[model.__table__ for model in models])
     timezone_name, start = getattr(request, "param", ("Europe/Dublin", date(2026, 10, 24)))
     zone = ZoneInfo(timezone_name)

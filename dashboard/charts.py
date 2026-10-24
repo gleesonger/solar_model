@@ -124,6 +124,7 @@ def analysis_column_labels(
         "forecast_total": "Solar Forecast",
         "forecast_raw_total": "Solar (Forecast Raw)",
         "load": "Load",
+        "load_forecast": "Load (Forecast)",
         "battery": "Battery",
         "inverter": "Inverter",
         "grid_import": "Grid Imported",
@@ -457,8 +458,9 @@ def render_energy_chart(data: pd.DataFrame, category_column: str, title: str) ->
 
 
 def energy_chart_options(data: pd.DataFrame, category_column: str) -> dict[str, Any]:
-    return {
+    options = {
         "tooltip": {"trigger": "axis"},
+        "grid": {"top": 125},
         "legend": {
             "data": [
                 "Solar (Actual)",
@@ -496,6 +498,16 @@ def energy_chart_options(data: pd.DataFrame, category_column: str) -> dict[str, 
             {"name": "Grid Exported", "type": "bar", "data": chart_values(dataframe_column(data, "grid_export")), "itemStyle": {"color": GRID_EXPORT_COLOR}},
         ],
     }
+
+    if "load_forecast" in data:
+        options["legend"]["data"].insert(4, "Load (Forecast)")
+        options["legend"]["selected"]["Load (Forecast)"] = False
+        options["series"].insert(4, {
+            "name": "Load (Forecast)", "type": "bar",
+            "data": chart_values(data["load_forecast"]),
+            "itemStyle": forecast_item_style(LOAD_COLOR),
+        })
+    return options
 
 
 MONEY_SERIES = (

@@ -34,7 +34,7 @@ Use a verified backup and preferably stop persisted collection before bulk rewri
 # Read stored forecast performance; optional --date and --csv
 python -m forecast.evaluate_forecasts --database solar.db
 
-# Report-only load experiment; choose dates with existing history
+# Report-only production-load-model evaluation; choose dates with existing history
 python -m forecast.evaluate_load_profile --config config.yaml --database solar.db --start 2026-09-01 --end 2026-09-30
 
 # Forecast rebuild preview; add --apply to clear/replace adjusted fields
@@ -49,7 +49,7 @@ python test_energy_plan_as_of.py --database solar.db --as-of "2026-09-15T00:00:0
 
 - Recalculation date bounds are inclusive; omitted `--to` updates all later matching raw rows. CLI alone does not restart the application; Control does.
 - Raw tariff updates and rollup rebuild share one transaction; either both commit or both roll back. Without `--to`, rebuilding extends through the latest available raw date. Neighboring samples in overlapping UTC hours are retained.
-- The load-profile and operational-rebuild CLIs read `forecast.model_calibration_parameters` from `--config` (default `config.yaml`); database and timezone default to that configuration and can be overridden by their CLI flags. Live solar correction receives the same settings from the collector startup configuration.
+- The load-profile and operational-rebuild CLIs read `forecast.model_calibration_parameters` from `--config` (default `config.yaml`); database and timezone default to that configuration and can be overridden by their CLI flags. Live solar correction and the fixed daily load forecast receive the same settings from the collector startup configuration. The first scheduled forecast run each local day saves that day's load profile; later runs and restarts retain it. Load forecasts start accumulating on deployment; historical dates remain blank.
 - Forecast rebuild infers missing date bounds from earliest forecast/latest hourly actual. It commits clearing first and results by day, so interruption can leave a partial rebuild. It preserves raw fields.
 
 ## Backup, restore and recovery

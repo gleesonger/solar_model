@@ -76,7 +76,7 @@ observations: dict[tuple[int, int], int]       # number of contributing day/hour
 
 Weight is `0.5 ** (age_days / configured_half_life_days)`; profile is weighted mean by exact weekday/hour. Shipped window/half-life are 42/21 days. Missing slots have no all-days fallback and raise during future-load construction. Each future interval is one hour starting at the chosen as-of sequence, using that interval start's local weekday/hour.
 
-This profile is different from the report-only weekday/weekend hierarchical experiment.
+This profile is different from the production weekday/weekend hierarchical load model; planning retains this separate temporary profile.
 
 ## 5. ForecastData and scenario shapes
 

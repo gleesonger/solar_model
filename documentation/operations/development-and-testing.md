@@ -25,6 +25,8 @@ Use the [isolated development walkthrough](isolated-development.md) for syntheti
 | --- | --- |
 | [test_forecast_model_config.py](../../tests/test_forecast_model_config.py) | YAML model parsing/defaults/validation, lookback and half-life effects, and model settings passed through collection, refresh and CLI entry points |
 | [test_forecast_influence.py](../../tests/test_forecast_influence.py) | Decimal-fraction load/intraday influence, sparse day-type fallback, 100% influence and invalid fractions and old percentage inputs |
+| [test_daily_load_forecast.py](../../tests/test_daily_load_forecast.py) | Production load profile freeze/restart, midnight cutoff, DST targets, scaling, missing history, elapsed summaries and hourly-only chart styling |
+| [test_daily_load_forecast_browser.py](../../tests/test_daily_load_forecast_browser.py) | Desktop/mobile Past/Live separation, hourly legend defaults and grouping changes with synthetic data |
 | [test_forecast_schedule.py](../../tests/test_forecast_schedule.py) | Persistent external-request cadence, restart/history fallback, exact due boundary, failed attempts, duplicate claims, UTC DST duration and schedule-database failure recovery |
 | [test_custom_chart_sql.py](../../tests/test_custom_chart_sql.py) | SQL/pandas parity, batching, selected-field reads, grouping/splits, timezone/DST, minute telemetry, tariff quoting |
 | [test_recent_summary_sql.py](../../tests/test_recent_summary_sql.py) | Native summary/Python parity, DST/timezone boundaries, nulls/resets/vintages, empty months, leap-day/lifetime totals and shared single-aggregation refresh |

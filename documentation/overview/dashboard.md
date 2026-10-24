@@ -8,7 +8,7 @@ The favicon is the amber sun/panel in `dashboard/assets/solar_power.svg`. Startu
 
 ## Current tabs
 
-- **Recent:** Live/Today table; latest kW, daily meters, latest/BoD/raw forecast totals; past 7 days and past 12 months energy/economics.
+- **Recent:** Live/Today table; latest kW, daily meters, latest/BoD/raw forecast totals; past 7 days and past 12 months energy/economics, including the saved daily Load (Forecast).
 - **Analysis:** lazily loaded energy, power, battery, per-array and money charts; range/grouping/Sum–Average controls; custom chart builder and downloads.
 - **System Info:** newest valid metadata value per variable.
 - **Control:** confirmed tariff recalculation and managed restart actions.
@@ -30,6 +30,7 @@ The favicon is the amber sun/panel in `dashboard/assets/solar_power.svg`. Startu
 
 - [data.py](../../dashboard/data.py) owns summary/calendar/forecast helpers and adapters. [chart_data_sql.py](../../dashboard/chart_data_sql.py) aggregates requested chart fields in SQLite and batches shared sources.
 - Recent daily/monthly/lifetime summaries share one native SQLite aggregation of hourly actuals and selected forecasts. Python prepares calendar/timezone boundaries and formats the final small tables; it does not aggregate source measurements.
+- Only Energy by hour includes Load (Forecast), initially deselected, with the Load blue and the same hatching as Solar Forecast. Live/Today and all other chart types/groupings omit the load forecast.
 - Energy/cost charts normally use hourly rollups. Single-day telemetry retains minute points; longer ranges use hourly telemetry. Custom battery-level charts can query minute data.
 - Import/export power is averaged from separately accumulated grid sign magnitudes, so alternating import/export cannot cancel both series. Meter-energy totals remain separate.
 - Energy is summed; telemetry and rates use averages where appropriate. Custom `battery` means available energy level with a no-minute-record fallback; Analysis energy `battery_flow` means charge minus discharge.

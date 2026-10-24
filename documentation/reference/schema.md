@@ -10,6 +10,17 @@ Read [storage.md](../implementation/storage.md) for derivations, transaction bou
 - Hourly numeric columns mirror electrical fields, but store sums or cumulative maxima. ORM conversion removes fixed-point scale; it does not convert sums into means.
 - Hybrid `collected_at_local` on electrical/forecast models is not a physical column and is therefore absent here.
 
+## `forecast_load`
+
+Primary key: `target_day`, `forecast_time`; index `idx_load_forecast_time` on `forecast_time`. One immutable daily profile; new table creation does not backfill history.
+
+| Field | SQL type | ORM API | Nullable |
+| --- | --- | --- | --- |
+| `target_day` | `VARCHAR` | configured-local ISO date string | no |
+| `forecast_time` | `INTEGER` | epoch/ISO; start of predicted hour | no |
+| `collected_at_utc` | `INTEGER` | epoch/ISO; profile generation time | no |
+| `load_kwh` | `INTEGER` | scaled number; hourly kWh | yes |
+
 ## `sigenstor`
 
 Primary key: `collected_at_utc`.

@@ -13,6 +13,7 @@ For a consolidated comparison of units, signs, missing values, time attribution 
 | `sigenstor` | `collected_at_utc` | One successful electrical sample; telemetry, cumulative meters, interval energy/costs, derived PV-string values |
 | `sigenstor_hourly` | `hour_start_utc`, `import_tariff_band` | UTC-hour aggregates, split by import tariff band; missing band becomes `Unknown` |
 | `forecast_solar` | `collected_at_utc`, `forecast_time` | One collection vintage and target time; up to four panels' raw/adjusted W and Wh fields |
+| `forecast_load` | `target_day`, `forecast_time` | One fixed hourly load profile per configured-local date; generation timestamp and nullable kWh |
 | `sigenstor_devices` | integer `id` | Append-only valid device-value changes, with variable/name/value/unit and ISO UTC/local timestamps |
 | `database_metadata` | `key` | Key/value storage including hourly-initialization completion; no global database version |
 
@@ -36,6 +37,7 @@ For a consolidated comparison of units, signs, missing values, time attribution 
 - Hourly grid import/export power stores separate sign magnitudes and a valid grid observation count, preserving activity even when net power is zero. These are distinct from cumulative meter energy.
 - Hourly cumulative meters use maxima; other numeric fields use sums. Means divide by each field's non-null count (`<field>_sample_count`; grid uses `grid_power_sample_count`). Zeros count as observations; summed power is not an hourly power reading.
 - Missing measurements remain nullable. Some display paths substitute zeros; this must not be mistaken for observed zero generation.
+- Daily load forecasts store one atomically inserted profile per local date, with UTC hourly targets and a separate generation timestamp. They remain fixed across collection runs and restarts; missing history stays null and no historical profiles are backfilled.
 - Raw and adjusted forecast fields stay separate. Adjusted writers accept only `_adj_` fields; raw collection can update its own panel fields at the same composite key.
 
 ## Migration behavior

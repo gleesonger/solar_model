@@ -70,6 +70,7 @@ def load_energy_summaries(
         for panel in panels
     ) or "SELECT NULL day, NULL start, NULL panel, NULL stamp, NULL target_day, NULL cumulative WHERE 0"
     parameters = {
+        "now": current_time.timestamp(),
         "today": current_time.date().isoformat(),
         "hour": current_time.hour,
         "fraction": (current_time.minute * 60 + current_time.second + current_time.microsecond / 1e6) / 3600,
@@ -105,9 +106,16 @@ def load_energy_summaries(
                  WHEN hour = :hour THEN :fraction ELSE 0 END
             ELSE 0 END) AS solar_forecast FROM energy GROUP BY day
     ),
+    load_forecast AS (
+        SELECT c.day, SUM(l.load_kwh / 10000.0 *
+            MIN(MAX((:now - l.forecast_time) / 3600.0, 0), 1)) AS load_forecast
+        FROM calendar c JOIN forecast_load l ON l.target_day = c.day
+        GROUP BY c.day
+    ),
     daily AS MATERIALIZED (
-        SELECT c.day AS date, {','.join('a.' + name for name in ACTUAL_COLUMNS)}, f.solar_forecast
+        SELECT c.day AS date, {','.join('a.' + name for name in ACTUAL_COLUMNS)}, f.solar_forecast, l.load_forecast
         FROM calendar c LEFT JOIN actual a ON a.day = c.day LEFT JOIN forecast f ON f.day = c.day
+        LEFT JOIN load_forecast l ON l.day = c.day
     )"""
     fields = ",".join(ENERGY_SUMMARY_COLUMNS)
     sums = ",".join(f"SUM({column}) AS {column}" for column in ENERGY_SUMMARY_COLUMNS)

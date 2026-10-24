@@ -6,13 +6,14 @@ import pytest
 
 from solar_model.config import OptimisationWeightsConfig, TariffPeriod, TariffRule, TariffsConfig, load_config
 from solar_model.planning.model import PlanningInputs, build_plan
+from solar_model.planning.scenarios import create_scenarios
 from solar_model.planning.types import DeviceInfo, DeviceState, ForecastData, ForecastInterval
 
 
 def test_in_memory_plan_preserves_scenario_energy_and_cost():
     start = datetime(2026, 10, 24, tzinfo=timezone.utc)
     end = start + timedelta(hours=2)
-    baseline = ForecastData("baseline", [ForecastInterval(start, end, 0.)],
+    baseline = ForecastData([ForecastInterval(start, end, 0.)],
                             [ForecastInterval(start, end, 2.)])
     device = DeviceInfo(**{field.name: 1. for field in fields(DeviceInfo)})
     device = replace(device, system_battery_capacity_kwh=10., battery_state_of_health_percent=100.,
@@ -43,3 +44,17 @@ def test_in_memory_plan_preserves_scenario_energy_and_cost():
         assert plan.net_cost.sum() == pytest.approx((plan.load_kwh * plan.import_rate).sum())
         assert plan.battery_end_kwh.tolist() == pytest.approx([0.] * 8, abs=1e-7)
     assert baseline.sum(start, end).load_kwh == 2.
+
+
+def test_generated_scenarios_separate_names_and_probabilities_from_forecasts():
+    start = datetime(2026, 10, 24, tzinfo=timezone.utc)
+    end = start + timedelta(hours=1)
+    forecast = ForecastData([ForecastInterval(start, end, 1.)], [ForecastInterval(start, end, 2.)])
+    scenarios = create_scenarios(forecast)
+    assert isinstance(scenarios, list)
+    assert len({scenario.name for scenario in scenarios}) == 9
+    assert sum(scenario.probability for scenario in scenarios) == pytest.approx(1.)
+    assert all(scenario.probability == pytest.approx(1 / 9) for scenario in scenarios)
+    base = next(scenario for scenario in scenarios if scenario.name == "base")
+    assert base.forecast_data.sum(start, end) == forecast.sum(start, end)
+    assert not hasattr(forecast, "name")

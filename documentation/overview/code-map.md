@@ -8,7 +8,7 @@ The application lives in the installable `solar_model` package. The root `docker
 solar_model/
   config.py, tariffs.py, time_utils.py, logging_setup.py, paths.py, utils.py
   planning/
-    model.py, types.py, scenarios.py, optimisation.py, scoring.py, system.py
+    model.py, types.py, scenarios.py, optimisation.py, system.py
     forecasts/solar.py, load.py
   services/collection.py, forecasting.py, planning.py
   integrations/
@@ -33,7 +33,7 @@ solar_model/
 | --- | --- |
 | [Planning model](../../solar_model/planning/model.py) | `PlanningInputs` and `build_plan`: in-memory inputs → scenarios → numerical simulation frames. No storage, network or UI imports |
 | [Forecast models](../../solar_model/planning/forecasts/solar.py) | Pure solar day-ahead/intraday calculations; [load.py](../../solar_model/planning/forecasts/load.py) predicts the fixed daily load profile |
-| [Optimisation](../../solar_model/planning/optimisation.py) | CVXPY flow variables, constraints, HiGHS solve and energy-balance checks; [system.py](../../solar_model/planning/system.py) derives physical limits; [scoring.py](../../solar_model/planning/scoring.py) defines the current cost/battery objective |
+| [Optimisation](../../solar_model/planning/optimisation.py) | CVXPY flow variables, constraints, HiGHS solve and energy-balance checks; [system.py](../../solar_model/planning/system.py) derives physical limits; the current cost/battery objective is calculated inline in the optimiser |
 | [Services](../../solar_model/services) | Collection transactions, forecast scheduling/calibration persistence, and as-of planning input assembly |
 | [Integrations](../../solar_model/integrations) | HTTP provider client; Modbus transport, map parsing/decoding and device specifications. Register-map JSON is packaged beside its loader |
 | [Storage](../../solar_model/storage) | Schema and scaled types; engine/session ownership; migrations; measurement/forecast transactions. `SolarDatabase` composes the two storage mixins |

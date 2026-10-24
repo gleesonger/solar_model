@@ -3,7 +3,14 @@ from dataclasses import dataclass
 from datetime import datetime
 from collections.abc import Iterable
 from enum import IntEnum
+
+import pandas as pd
 from solar_model.time_utils import utc_instant
+
+@dataclass(frozen=True)
+class SimulationResult:
+    next_action: NextAction
+    results: dict[str,pd.DataFrame]
 
 class OperatingMode(IntEnum):
     SELF_CONSUMPTION = 2
@@ -12,11 +19,10 @@ class OperatingMode(IntEnum):
 
 @dataclass(frozen=True)
 class NextAction:
-    """Control for the next time step; grid limits in kW and SOC in percent."""
-
+    """Control for the next time step; forced battery rates in kW and SOC in percent."""
     mode: OperatingMode
-    grid_import_limit_kw: float | None
-    grid_export_limit_kw: float | None
+    force_battery_charge_rate: float
+    force_battery_discharge_rate: float
     charge_cut_off_soc_percent: float
     discharge_cut_off_soc_percent: float
 
@@ -60,8 +66,7 @@ class ForecastInterval:
     kwh: float
 
 class ForecastData:
-    def __init__(self,name: str, solar: Iterable[ForecastInterval], load: Iterable[ForecastInterval]) -> None:
-        self.name = name
+    def __init__(self, solar: Iterable[ForecastInterval], load: Iterable[ForecastInterval]) -> None:
         self.solar = self._validate_intervals(solar, "solar")
         self.load = self._validate_intervals(load, "load")
 
@@ -108,3 +113,10 @@ class ForecastData:
             if cursor >= end:
                 return total_kwh
         raise ValueError("forecast range is outside the known data or contains a gap; extrapolation is not supported")
+
+
+@dataclass(frozen=True)
+class ScenarioData:
+    name: str
+    forecast_data: ForecastData
+    probability: float

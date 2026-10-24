@@ -15,7 +15,7 @@ import solar_model.storage.queries.dashboard as data
 from solar_model.storage.schema import HOURLY_ROLLUP_MARKER, ForecastSolarSample, SigenStorHourlySample, SigenStorModbusSample
 from solar_model.storage.connection import SolarDatabase
 from solar_model.storage.migrations import open_database
-from solar_model.planning.types import DeviceInfo, DeviceState, ForecastData, ForecastInterval
+from solar_model.planning.types import DeviceInfo, DeviceState, ForecastData, ForecastInterval, ScenarioData
 from solar_model.planning.optimisation import simulate_energy_plan
 from solar_model.tools.evaluate_forecasts import forecast_performance
 from solar_model.planning.forecasts.solar import _fit_scalars, _official_day_frame, _training_frames, add_adjusted_energy_values, calculate_adjusted_forecast
@@ -224,11 +224,11 @@ def test_dst_overlap_scenarios_and_solver_use_real_elapsed_hours(day, end_hour):
     start = datetime.combine(day, datetime.min.time(), zone)
     end = start.replace(hour=end_hour)
     interval = ForecastInterval(start, end, 4.)
-    forecast = ForecastData("base", [interval], [interval])
+    forecast = ForecastData([interval], [interval])
     for hour in range(4):
         assert forecast.sum(add_elapsed(start, timedelta(hours=hour)), add_elapsed(start, timedelta(hours=hour + 1))).solar_kwh == 1.
     scenarios = create_scenarios(forecast)
-    assert scenarios["base"].sum(start, end).solar_kwh == 4.
+    assert next(scenario.forecast_data for scenario in scenarios if scenario.name == "base").sum(start, end).solar_kwh == 4.
     cfg = load_config()
     cfg = replace(cfg, tariffs=tariffs(), energy_plan=replace(cfg.energy_plan, num_projection_hours=4,
                   projection_resolution_mins=60, minimum_battery_kwh=(rule(0.),), maximum_battery_kwh=(rule(10.),)))
@@ -236,7 +236,7 @@ def test_dst_overlap_scenarios_and_solver_use_real_elapsed_hours(day, end_hour):
     device = replace(device, system_battery_capacity_kwh=10., battery_state_of_health_percent=100.,
                      inverter_max_active_power_kw=5., inverter_max_absorption_power_kw=5.,
                      inverter_battery_charge_power_kw=5., inverter_battery_discharge_power_kw=5.)
-    plan = simulate_energy_plan(device, DeviceState(2.), [forecast], cfg, start)["base"]
+    plan = simulate_energy_plan(device, DeviceState(2.), [ScenarioData("base", forecast, 1.)], cfg, start)["base"]
     assert plan.solar_kwh.tolist() == [1.] * 4
     assert all((utc_instant(row.ends_at) - utc_instant(row.starts_at)).total_seconds() == 3600 for row in plan.itertuples())
     assert plan.battery_end_kwh.between(-1e-7, 10 + 1e-7).all()

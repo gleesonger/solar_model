@@ -109,7 +109,7 @@ def load_forecast_as_of(database: SolarDatabase, as_of: datetime, config: Config
         load.append(ForecastInterval(starts_at, add_elapsed(starts_at, timedelta(hours=1)), float(expected_load_kwh)))
         starts_at = add_elapsed(starts_at, timedelta(hours=1))
 
-    return ForecastData(name="base", solar=solar, load=load)
+    return ForecastData(solar=solar, load=load)
 
 def load_battery_state_as_of(database: SolarDatabase, as_of: datetime, device_info: DeviceInfo) -> DeviceState:
     """Load the latest battery state known at the as-of time."""

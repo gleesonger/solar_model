@@ -1,7 +1,7 @@
 from __future__ import annotations
 from datetime import datetime, timedelta
 from solar_model.time_utils import add_elapsed, utc_instant
-from solar_model.planning.types import ForecastData, ForecastInterval
+from solar_model.planning.types import ForecastData, ForecastInterval, ScenarioData
 
 # Scenario name -> (energy multiplier, optional first/second half-hour split).
 LOAD_SCENARIOS = {
@@ -16,11 +16,12 @@ SOLAR_SCENARIOS = {
     'high': (1.5, (0.25, 0.75)),
 }
 
-def create_scenarios(forecast_baseline: ForecastData) -> dict[str, ForecastData]:
+def create_scenarios(forecast_baseline: ForecastData) -> list[ScenarioData]:
     """Create load_solar scenarios with ±50% totals and high-case timing stress."""
     solar_half_hours = _half_hour_intervals(forecast_baseline.solar)
     load_half_hours = _half_hour_intervals(forecast_baseline.load)
-    scenarios = {}
+    scenarios = []
+    probability = 1 / (len(LOAD_SCENARIOS) * len(SOLAR_SCENARIOS))
     for load_name, (load_multiplier, load_split) in LOAD_SCENARIOS.items():
         for solar_name, (solar_multiplier,
         solar_split) in SOLAR_SCENARIOS.items():
@@ -29,7 +30,7 @@ def create_scenarios(forecast_baseline: ForecastData) -> dict[str, ForecastData]
             stressed_solar = _scenario_intervals(solar_half_hours, solar_multiplier, solar_split)
             stressed_load = _scenario_intervals(load_half_hours, load_multiplier, load_split)
 
-            scenarios[name] = ForecastData(name, stressed_solar, stressed_load)
+            scenarios.append(ScenarioData(name, ForecastData(stressed_solar, stressed_load), probability))
     return scenarios
 
 def _half_hour_intervals(intervals: tuple[ForecastInterval, ...]) -> list[tuple[datetime, float]]:

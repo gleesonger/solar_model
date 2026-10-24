@@ -63,3 +63,9 @@ Original documentation review: 2026-10-14. The lists below reflect remaining ite
 
 - Root README now links these guides and corrects unknown-key behavior, effective-dated tariff YAML, table/storage descriptions, and live/shared/Analysis refresh behavior.
 - Existing warning and notification descriptions were preserved. Remaining model/runtime limitations are described in the subsystem guides and findings above.
+
+## First-step action modelling
+
+`simulate_energy_plan` derives first-step operating mode from mutually exclusive forced battery rates. SOC stopping is modelled, including starting beyond the cut-off; self-consumption ignores action SOC cut-offs. The fixed 100 W minimum positive rate distinguishes forcing from zero. PV-first priority and saturation at other equipment/flow limits from the target plan model are not yet fully enforced; scenario flows remain optimisation decisions within the existing equations. Installed-firmware response is also unverified.
+
+- **Simulation result construction:** the current Model to Results section reads `next_action.force_battery_charge_rate`/`force_battery_discharge_rate` before assigning the local `next_action`. After a successful solve this raises `UnboundLocalError`; derive mode from the solved rate variables before constructing `NextAction`. Recorded during the probability-weighting change; not modified as part of that change.

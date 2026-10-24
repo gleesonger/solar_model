@@ -22,4 +22,4 @@ def build_plan(inputs: PlanningInputs, config: Config) -> dict[str, pd.DataFrame
     """Generate scenarios and return the current read-only simulation for each."""
     scenarios = create_scenarios(inputs.forecast)
     return simulate_energy_plan(inputs.device_info, inputs.device_state,
-                                list(scenarios.values()), config, inputs.starts_at)
+                                scenarios, config, inputs.starts_at)

@@ -1,6 +1,6 @@
 # Planning: database cutoffs, interval objects, solver, and workbook
 
-Sources: [model](../../solar_model/planning/model.py), [input assembly](../../solar_model/services/planning.py), [as-of queries](../../solar_model/storage/queries/planning.py), [optimisation](../../solar_model/planning/optimisation.py), [scoring](../../solar_model/planning/scoring.py), [physical limits](../../solar_model/planning/system.py) and [reports](../../solar_model/tools/reports.py). This is an offline report pipeline with independent scenario decisions, not device control.
+Sources: [model](../../solar_model/planning/model.py), [input assembly](../../solar_model/services/planning.py), [as-of queries](../../solar_model/storage/queries/planning.py), [optimisation](../../solar_model/planning/optimisation.py), [physical limits](../../solar_model/planning/system.py) and [reports](../../solar_model/tools/reports.py). This is an offline report pipeline with independent scenario decisions, not device control.
 
 ## 1. CLI call hierarchy
 
@@ -19,15 +19,13 @@ solar_model.tools.plan_as_of.main()
     interval_energies(adjusted) or interval_energies(raw)
     load_weighted_profile()
     construct solar/load ForecastInterval lists
-    ForecastData('base', ...)
+    ForecastData(solar=..., load=...)
   create_scenarios()
     _half_hour_intervals() -> _scenario_intervals()
   simulate_energy_plan()
-    build_model()
-      system_limits()
-      total_score()
-    optimise_model()
-    model_to_results()
+    Build Model section: system_limits(), _energy_until_soc(), inline score expressions
+    Optimise Model section: construct problem and solve with HiGHS
+    Model to Results section: derive action/mode and extract scenario frames
   group_plan(output timestep)
   write_workbook()
 ```
@@ -89,9 +87,8 @@ This profile is different from the production weekday/weekend hierarchical load 
 
 ```python
 ForecastInterval(starts_at=aware_datetime, ends_at=aware_datetime, kwh=0.5)
-ForecastData(name="base", solar=[...], load=[...])
+ForecastData(solar=[...], load=[...])
 # Stored attributes after construction:
-name: str
 solar: tuple[ForecastInterval, ...]
 load: tuple[ForecastInterval, ...]
 ```
@@ -100,7 +97,7 @@ Construction sorts each stream and requires non-empty positive-duration contiguo
 
 `create_scenarios()` resamples each stream to half-hours, requiring aligned endpoints and whole-hour paired coverage. It creates nine combinations of load/solar 0.5×, 1×, 1.5×. Base/base is named `base`; others are named `loadcase_solarcase`. High solar redistributes each paired hour 25%/75%; high load uses 80%/20%. Other cases preserve base half-hour timing with the multiplier.
 
-Output contract: `dict[str, ForecastData]`. Scenarios describe separate hypothetical futures, not probabilistic confidence intervals.
+Output contract: `list[ScenarioData]`, where the frozen dataclass has `name: str`, `forecast_data: ForecastData`, and `probability: float`. Names belong to scenarios; `ForecastData` contains only solar/load intervals. All nine generated scenarios initially have probability `1/9`; these are planning assumptions, not calibrated probabilities or confidence intervals.
 
 `LOAD_SCENARIOS` and `SOLAR_SCENARIOS` at the top of `planning/scenarios.py` define each case as `(energy_multiplier, half_hour_split)`. A split of `None` preserves the baseline timing; a pair redistributes each hour's scaled energy between its first and second half-hours. Scenario generation reads both parameters from these definitions.
 
@@ -108,27 +105,27 @@ Output contract: `dict[str, ForecastData]`. Scenarios describe separate hypothet
 
 ```text
 simulate_energy_plan(device_info, state, scenarios, config, projection_start)
-  build_model(...) -> EnergyModel
+  Build Model
     validate names/duration/efficiencies/capacity
-    derive T = hours*60/resolution, S = scenario count, dt = resolution/60
-    create flow variables of shape (T,S)
-    for each time step:
-      select local import/export rules and planning limits
-      for each scenario:
-        forecast.sum(interval) -> solar/load kWh
-        add conservation, mode, power and battery-bound constraints
-        add cost and battery-worth expressions
-        populate input/limit columns in result frame
-    construct cp.Problem without solving
-  optimise_model(model)
-    model.problem.solve(solver=cp.HIGHS)
-    check solver status
-  model_to_results(model) -> dict[str, DataFrame]
-    extract arrays and expressions per scenario
-    derive totals/costs; check solar/load energy balances
+    create scenario flow variables and shared first-step rate/SOC variables
+    _energy_until_soc -> bounded first-step forced energy
+    add scenario constraints and per-scenario score expressions
+  Optimise Model
+    construct cp.Problem maximising sum(scenario.probability * scenario score)
+    solve with HiGHS; reject unsuccessful status
+  Model to Results
+    derive numeric NextAction and OperatingMode locally
+    extract flow/battery values, calculate costs and check energy balances
+    return SimulationResult(next_action, results)
 ```
 
-`EnergyModel` carries the problem, scenario frames in forecast order, named flow expressions, battery-level expressions, charge-mode variable and initial battery energy. `optimise_model` solves it in place; `model_to_results` fills and returns its scenario frames. The wrapper retains its original arguments and result contract.
+These stages are inline sections of one function. Shared variables, constraints, score expressions and reporting data remain local; there are no intermediate model objects or separate build/optimise/result APIs. The return value is `SimulationResult`: `next_action` is the shared action including derived mode, and `results` maps scenario names to DataFrames. Each whole-scenario score is multiplied by `ScenarioData.probability` before summation; probabilities are used as supplied, without an additional scenario-count division or normalisation.
+
+The four shared first-step variables match numeric `NextAction`: forced battery charge/discharge rates and their respective SOC cut-offs. Rates are non-negative kW, with at most one positive. Activation Booleans distinguish zero from positive commands using `MIN_FORCE_RATE_KW = 0.1` (100 W); rates remain continuous above this threshold. SOC cut-offs independently lie in `[0, 100]` and need not be ordered.
+
+`_energy_until_soc` implements `min(requested_energy, max(0, SOC_headroom))` using bounded disjunctions. Charge headroom includes charge efficiency; discharge headroom includes discharge efficiency. Reaching the stopping SOC reduces forced energy, and starting at or beyond it produces zero forced energy. With both rates zero, active grid charging and battery export are disabled; passive PV charging and discharge to load ignore action SOC cut-offs. Hardware and scheduled kWh bounds still apply. Later controls remain independent.
+
+The Model to Results section creates a local numeric `NextAction` and derives a local `OperatingMode` IntEnum from the solved rates. The derived mode is stored in `NextAction`, which is returned alongside the scenario dictionary in `SimulationResult`. Minimum/maximum report columns retain scheduled bounds.
 
 Eight non-negative flow variables have shape `(T,S)`: solar→load/battery/grid/clipped, battery→load/grid, grid→load/battery. A boolean `battery_charging` variable has the same shape. Every flow value is interval kWh, not kW.
 
@@ -146,7 +143,7 @@ grid_export = solar_to_grid + battery_to_grid
 
 Charge and discharge constraints depend on the boolean mode. Combined DC→AC and AC→DC flows share the maximum active inverter power × `dt`; grid charge also observes absorption power. Battery export observes its scheduled kW limit. End-of-period battery bounds come from configured schedules, with maximum capped by SOH-adjusted capacity. An absent export schedule falls back to 9999 kW; absent minimum/maximum schedules still fail rule lookup.
 
-Objective maximises weighted average negative net cost plus weighted accumulated battery worth across all `(t,s)`. Battery worth is battery end kWh × interval import rate × `dt`. Scenarios have independent variables/constraints; no shared first action or common executable plan is enforced.
+Objective maximises weighted average negative net cost plus weighted accumulated battery worth across all `(t,s)`. Battery worth is battery end kWh × interval import rate × `dt`. Scenarios share the first-step forced battery rates and SOC cut-offs; their operating mode is derived from those rates. First-step outcomes and all later decisions remain scenario-specific.
 
 ## 7. Result DataFrame contract
 
@@ -177,8 +174,8 @@ No result is written back to SQLite. The existing output path is deleted before 
 
 ## Package API
 
-`planning.types.NextAction` is a frozen dataclass for the next time step: `mode: OperatingMode`, optional `grid_import_limit_kw`/`grid_export_limit_kw`, and `charge_cut_off_soc_percent`/`discharge_cut_off_soc_percent`. `OperatingMode` is an `IntEnum` with `SELF_CONSUMPTION = 2`, `CHARGE_PV_FIRST = 4`, and `DISCHARGE_PV_FIRST = 5`. Timing is implicit; the action has no timestamps or battery charge/discharge power limits. It is a data contract only; the current planner does not yet produce or execute it.
+`planning.types.NextAction` is a frozen dataclass with `force_battery_charge_rate`/`force_battery_discharge_rate` in kW and `charge_cut_off_soc_percent`/`discharge_cut_off_soc_percent`. Timing is implicit. `OperatingMode` remains an `IntEnum` (2/4/5) used for the locally derived mode in `simulate_energy_plan`, but is not an action field or independent solver choice. No device commands are executed.
 
 `PlanningInputs(device_info, device_state, forecast, starts_at)` is a frozen record of the current input objects; contained forecast/device objects are not deeply immutable. `build_plan(inputs, config)` expands the baseline through `create_scenarios` and returns `dict[str, pandas.DataFrame]`. It can run entirely in memory. `services.planning.plan_as_of(database, config, as_of)` supplies the same inputs from cutoff-aware queries. The CLI groups and writes those frames through `tools.reports`.
 
-`system_limits()` converts capacity, health, efficiency and inverter power into interval limits. `total_score()` retains the existing weighted average net cost and tariff-valued battery objective. The restructure does not implement the shared action, 0.5/1/2 scenario design or normalised protection scoring in the proposed plan-model document.
+`system_limits()` converts capacity, health, efficiency and inverter power into interval limits. The inline scenario score is probability times the configured weighted negative net cost plus tariff-valued battery objective. The restructure does not implement the shared action, 0.5/1/2 scenario design or normalised protection scoring in the proposed plan-model document.

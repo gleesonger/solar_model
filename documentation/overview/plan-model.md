@@ -32,7 +32,7 @@ The optimiser selects the shared next action that maximises that objective. We i
 
 We choose one action now by testing how it performs across nine possible futures. Later actions can adapt to whichever future unfolds.
 
-Shared variables describe the first action: operating mode, commanded power limits and applicable SOC targets or cut-offs. Each scenario has its own energy flows, battery path and later decisions.
+Shared variables describe the first action: forced battery charge/discharge rates and their SOC cut-offs. Positive charging implies charge mode, positive discharging implies discharge mode, and both zero imply self-consumption. Each scenario has its own energy flows, battery path and later decisions.
 
 The first interval's **physical outcomes are not shared**. The same self-consumption command can charge in a high-solar scenario and discharge in a high-load scenario. Those outcomes must follow the modelled command response; they cannot be freely chosen just to improve the score.
 
@@ -51,7 +51,7 @@ Later decisions can adapt independently in each scenario. This two-stage approxi
 
 ### 2.3 Next Action and Day Plan
 
-The primary output is one implementable action for the next time step, with mode, grid import/export power limits and applicable SOC settings. Timing is implicit; the action has no timestamps or battery charge/discharge power limits. It carries four planning intents mapped to three physical modes:
+The primary output is one implementable action for the next time step, with forced battery charge/discharge rates in kW and applicable SOC settings. Mode is derived from the rates rather than selected independently: charge rate positive means forced charge until charge SOC, discharge rate positive means forced discharge until discharge SOC, and both zero mean self-consumption ignoring these SOC cut-offs. Timing is implicit; the action has no timestamps. Net grid flow follows from battery power, load and solar. It carries four planning intents mapped to three physical modes:
 
 | Intent | SigenStor mode | Intended behaviour |
 | --- | --- | --- |
@@ -230,7 +230,7 @@ It represents battery storage, household demand, solar generation, the inverter 
 
 The executable control set is self-consumption (2), charge with PV first (4), and discharge with PV first (5). Modes 3 and 6 are excluded from this design. The numerical mapping is defined in Appendix 6 of the [Sigenergy Modbus V2.9 specification](../reference/Sigenergy%20Modbus%20Protocol%20EN_V2.9.pdf); exact command response still requires verification on the installed firmware.
 
-Model mode selection together with charge/discharge limits and applicable SOC settings. Enforce the selected priority and saturation behaviour in every scenario, including the first interval. Shared commands do not guarantee identical realised charging, export or end SOC. Additional binary variables may be needed to model modes and limits; the existing charge/discharge boolean alone is insufficient.
+Derive mode from the forced battery rates, enforcing mutual exclusion and the applicable SOC stopping behaviour. Self-consumption ignores the action SOC cut-offs. Enforce the selected priority and saturation behaviour in every scenario, including the first interval. Shared commands do not guarantee identical realised charging, export or end SOC. Additional binary variables may be needed to model modes and limits; the existing charge/discharge boolean alone is insufficient.
 
 Relevant plant registers are remote EMS enable `40029`, mode `40031`, charge/discharge power limits `40032`/`40034`, grid export/import limits `40038`/`40040`, and charge/discharge SOC cut-offs `40047`/`40048`. Plant address 247 returns acknowledgements. The V2.9 power-limit registers apply globally; power uses gain 1,000 and SOC cut-offs gain 10. Those protocol scales are separate from database scaling. Reading current state, writing only owned settings and defining handover are controller responsibilities.
 
@@ -286,16 +286,16 @@ Use synthetic data and temporary databases for implementation tests. Before actu
 
 The code is organised in the main `solar_model` package. Its pure planning API, `planning.model.build_plan`, accepts in-memory inputs; `services.planning` assembles as-of database inputs and `tools.plan_as_of` produces the workbook. This structural migration preserves the existing algorithms; the target behaviour below is still to be implemented.
 
-The current code supplies useful components but does not yet produce the shared command defined here.
+The current simulation uses shared first-step forced battery rate and SOC variables, and derives a local numeric `NextAction` and `OperatingMode` IntEnum after solving. The remaining command-response and scoring changes below are still required.
 
 | Component | Current implementation | Required change |
 | --- | --- | --- |
 | Forecasts | `solar_model/planning/forecasts/` contains pure solar and load models; services load and persist their data | Reuse these baselines with complete planning-horizon coverage |
 | Scenario generation | `solar_model/planning/scenarios.py` uses 0.5/1/1.5, with high-case timing changes and a separate temporary load profile | Use production baselines, 0.5/1/2 scalars and explicit dimension weights |
-| Solver | [solar_model/planning/optimisation.py](../../solar_model/planning/optimisation.py) already constructs one CVXPY problem with independent scenario-indexed flows | Add shared first controls and verified command-response constraints |
+| Solver | [solar_model/planning/optimisation.py](../../solar_model/planning/optimisation.py) builds per-scenario scores/constraints and shared first controls, solves and extracts results within one function | Add PV-priority/saturation constraints and verify command response |
 | Objective | Weighted net cost plus tariff-valued battery energy held over time | Replace with the reference-normalised cost/protection objective |
 | Battery bounds | Configured minimum/maximum schedules are hard interval-end constraints | Separate physical bounds from the soft preferred reserve |
-| Output | Per-scenario simulation frames and a workbook | Return one next action plus scenario day plans and score diagnostics |
+| Output | Per-scenario simulation frames and a workbook; numeric action/mode are local to the simulation | Integrate the next action and reference-normalised score diagnostics into the report/API |
 | Execution | No device-control writer | Implement and validate the separate controller and handover policy |
 
 ### 6.3 Assumptions and Unresolved Decisions

@@ -8,17 +8,16 @@ Original documentation review: 2026-10-14. The lists below reflect remaining ite
 
 | Finding | Evidence / consequence |
 | --- | --- |
-| Host timezone leaks into ORM local dates | [database.py](../../database.py) hybrids use host `astimezone()`/SQLite `localtime`; legacy hybrids still expose host dates; active recent/lifetime summaries now use configured timezone (R09). Configured timezone can differ from host, especially Docker. |
-| Missing planning rules pass config load | Minimum/maximum schedules default empty and validate only when non-empty, but [simulate_energy_plan](../../energy_plan_simulation.py) calls `tariff_rule` on both unconditionally. |
-| Solar interval conventions disagree | Dashboard treats forecast timestamps as starts; [load_forecast_as_of](../../test_energy_plan_as_of.py) uses them as ends and uses collection interval for the first interval width. Planning may shift energy timing. |
+| Host timezone leaks into ORM local dates | [solar_model/storage/schema.py](../../solar_model/storage/schema.py) hybrids use host `astimezone()`/SQLite `localtime`; legacy hybrids still expose host dates; active recent/lifetime summaries now use configured timezone (R09). Configured timezone can differ from host, especially Docker. |
+| Missing planning rules pass config load | Minimum/maximum schedules default empty and validate only when non-empty, but [simulate_energy_plan](../../solar_model/planning/optimisation.py) calls `tariff_rule` on both unconditionally. |
+| Solar interval conventions disagree | Dashboard treats forecast timestamps as starts; [load_forecast_as_of](../../solar_model/tools/plan_as_of.py) uses them as ends and uses collection interval for the first interval width. Planning may shift energy timing. |
 | Metadata has no global schema version | `database_metadata` tracks hourly readiness, not a global semantic database version. Migration regressions test the actual opener contract. |
-| Docker port metadata differs | [Dockerfile](../../Dockerfile) exposes 8080; shipped YAML serves 8090. Explicit correct port mapping still works. |
 | Tariff extraction still uses the old availability column | [check-tariffs/extract_minute_data.py](../../check-tariffs/extract_minute_data.py) queries `inverter_battery_available_discharge_kwh`; current schema renames it to `plant_battery_available_discharge_kwh`. The manual extractor needs reconciliation before running against a migrated database. |
 | Historical metric additions remain incomplete | Unrelated new hourly metrics still require an explicit backfill policy; v3 rebuilds the reviewed telemetry statistics, but derived minute PV columns are also not backfilled by the opener. Schema presence does not imply historical populated values. |
 
 ## Model and data questions requiring decisions
 
-- **Negative adjusted solar:** [operational_model._prediction_fields](../../forecast/operational_model.py) does not clamp additive residual output. Negative W/Wh is possible by inspection; decide physical bounds and test adverse residuals.
+- **Negative adjusted solar:** [operational_model._prediction_fields](../../solar_model/planning/forecasts/solar.py) does not clamp additive residual output. Negative W/Wh is possible by inspection; decide physical bounds and test adverse residuals.
 - **Replay parity:** live correction handles future target days in each collection; historical rebuild clears all selected targets but replays only each collection's current local day. Confirm the intended audit coverage before relying on rebuilt future-day vintages.
 - **DST representation:** several views use fixed 24 clock-hour buckets, merging repeated hours. Spring DST SQL tests exist; UTC planning arithmetic and both DST transitions now have regression coverage (R13); fixed-clock dashboard views and broader local display still need separate verification.
 - **Interval attribution:** counter gaps use the ending timestamp's tariff/hour and PV integration spans the whole gap. Decide acceptable maximum gap and whether tariff/day boundaries require interval splitting.
@@ -31,9 +30,9 @@ Original documentation review: 2026-10-14. The lists below reflect remaining ite
 
 - Chrome Android saved offline pages can preserve dashboard visuals while in-page scripts are inactive. Finite CSS activity indication and an absolute Last reading timestamp reduce ambiguity, but actual saved-page/freeze behaviour still needs verification on Android hardware; desktop Chromium regression checks do not establish it.
 
-- Runtime dependencies are ranged, with no lockfile; test/browser/extraction dependencies and explicit HiGHS installation are not declared together.
+- Runtime dependencies remain ranged, with no lockfile. HiGHS is now explicit; package extras declare test, browser and research dependencies.
 - Tariff helper logic is duplicated between config validation and economics; changes must preserve matching parity.
-- `dashboard/data.py` retains old aggregation paths beside the active SQL adapters; `HourlyTab` is unmounted. Clarify their retained compatibility purpose before removal.
+- `solar_model/storage/queries/dashboard.py` retains older ORM/pandas calculations used by current adapters or SQL regression comparisons. Remove individual paths only after checking both consumers and independent test references; the unmounted Hourly tab has been removed.
 - Independent `check-tariffs` scripts run on import and extraction has a hard-coded external database path; treat them as manual tools.
 
 ## Suggested repair order
@@ -43,6 +42,8 @@ Original documentation review: 2026-10-14. The lists below reflect remaining ite
 3. Reconcile dependency declaration, port metadata, and retained legacy paths.
 
 ## Application fixes completed
+
+- **2026-10-24, package restructure:** split planning, services, integrations, storage and dashboard responsibilities; retained launch commands and numerical behaviour. Removed the superseded lab sketch and unmounted Hourly component. Packaged assets/register maps, declared HiGHS and corrected Docker port metadata to 8090.
 
 - **2026-10-19, browser freshness:** short tab switches keep a fresh heartbeat. The three-dot live-update indicator expires through finite CSS with wall-clock/lifecycle checks, clears on unhealthy status, and has a reduced-motion variant. A small light-grey collection timestamp remains below Live / Today, including in static copies.
 

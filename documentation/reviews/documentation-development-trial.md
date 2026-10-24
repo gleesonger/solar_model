@@ -35,10 +35,10 @@ This model agreed with the source inspected by the parent. The agent did not mis
 
 **Source assessment: sound architecture; small lifecycle gap.**
 
-- [database.py](../../database.py) already declares the required period meters and mirrors them into hourly rows.
-- [chart_data_sql.py](../../dashboard/chart_data_sql.py)'s `ACTUAL_COLUMNS` and `_build_plan()` are the correct query extension points; band identity is currently lost in ordinary hourly actual grouping, so new band splits need deliberate SQL changes.
-- [data.py](../../dashboard/data.py)'s `load_analysis_range()` and custom metric list are the active adapter/selection path.
-- [anlaysis.py](../../dashboard/anlaysis.py), [charts.py](../../dashboard/charts.py), and [ChartDataDisplay](../../dashboard/chart_display.py) are the correct presentation path.
+- [solar_model/storage/schema.py](../../solar_model/storage/schema.py) already declares the required period meters and mirrors them into hourly rows.
+- [chart_data_sql.py](../../solar_model/storage/queries/analysis.py)'s `ACTUAL_COLUMNS` and `_build_plan()` are the correct query extension points; band identity is currently lost in ordinary hourly actual grouping, so new band splits need deliberate SQL changes.
+- [data.py](../../solar_model/storage/queries/dashboard.py)'s `load_analysis_range()` and custom metric list are the active adapter/selection path.
+- [anlaysis.py](../../solar_model/dashboard/tabs/analysis.py), [charts.py](../../solar_model/dashboard/components/charts.py), and [ChartDataDisplay](../../solar_model/dashboard/components/chart_display.py) are the correct presentation path.
 - Current split validation accepts calendar dimensions only. The agent correctly labelled tariff splitting as new rather than claiming it works already.
 
 The initial proposal did not explicitly include the fixed chart record and per-chart refresh registration. Phase 3 confirmed the necessary `HistoricalCharts` field, construction/return, and `_update_historical_charts()` edits; see the documentation improvement below.
@@ -51,11 +51,11 @@ The initial proposal did not explicitly include the fixed chart record and per-c
 
 **Source assessment: sound architecture; same chart lifecycle gap.**
 
-- [modbus_collector.py](../../modbus_collector.py)'s map loading/decoding feeds full electrical reads; no extra persisted scheduler is needed.
+- [solar_model/integrations/sigenstor/registers.py](../../solar_model/integrations/sigenstor/registers.py)'s map loading/decoding feeds full electrical reads; no extra persisted scheduler is needed.
 - `SolarDatabase.save_modbus_sample()` rejects undeclared metrics, so adding only a register definition would fail. The proposed ORM extension is necessary.
 - `HOURLY_MEASUREMENT_COLUMNS` and `SigenStorHourlySample` derive from raw model declarations; new non-cumulative numeric fields use the sum convention automatically. Historical added columns remain null without a separate backfill.
-- [chart_data_sql.py](../../dashboard/chart_data_sql.py)'s telemetry mapping and explicit mean path are appropriate. Additional valid-reading counts would be a new design if partial temperature missingness must be supported.
-- [live.py](../../dashboard/live.py)'s filtered map and values transformation are separate from persisted collection, as the agent recognised.
+- [chart_data_sql.py](../../solar_model/storage/queries/analysis.py)'s telemetry mapping and explicit mean path are appropriate. Additional valid-reading counts would be a new design if partial temperature missingness must be supported.
+- [live.py](../../solar_model/dashboard/live.py)'s filtered map and values transformation are separate from persisted collection, as the agent recognised.
 
 No temperature field, register address, sentinel rule, or device capability was invented. A new historical chart still needs explicit reference/refresh wiring, as in A.
 
@@ -67,9 +67,9 @@ No temperature field, register address, sentinel rule, or device capability was 
 
 **Source assessment: sound extension, with new policy decisions.**
 
-- [test_energy_plan_as_of.py](../../test_energy_plan_as_of.py)'s `load_weighted_profile()` is the stated baseline and can be extracted without invoking the workbook CLI or its output deletion.
+- [solar_model/tools/plan_as_of.py](../../solar_model/tools/plan_as_of.py)'s `load_weighted_profile()` is the stated baseline and can be extracted without invoking the workbook CLI or its output deletion.
 - The existing runtime has no persisted load-forecast service/table. The agent correctly proposed new components rather than assuming the report experiment is already production.
-- [docker_start.py](../../docker_start.py) explicitly starts two children; adding another process requires the proposed supervisor/configuration changes.
+- [solar_model/runtime/supervisor.py](../../solar_model/runtime/supervisor.py) explicitly starts two children; adding another process requires the proposed supervisor/configuration changes.
 - New tables require declarations, writers, and inclusion in `open_database()`'s explicit creation/migration path. Existing forecast selection/storage is solar-specific.
 - Planner integration through explicit issue selection and `ForecastInterval` construction is compatible with current solver inputs.
 
@@ -83,9 +83,9 @@ UTC issue/target boundaries, generation time, versioned settings/training input 
 
 **Source assessment: sound architecture; initial C/D coverage combination incomplete.**
 
-- [energy_plan_simulation.py](../../energy_plan_simulation.py)'s `simulate_energy_plan()` accepts a single named scenario and arbitrary covered projection start; using the first interval supports the proposed receding-horizon design.
+- [solar_model/planning/optimisation.py](../../solar_model/planning/optimisation.py)'s `simulate_energy_plan()` accepts a single named scenario and arbitrary covered projection start; using the first interval supports the proposed receding-horizon design.
 - Its energy routes and efficiency losses require deliberate command translation. Independent scenarios have no shared near-term decision, as the agent recognised.
-- [live.py](../../dashboard/live.py) pauses without connected browsers; it is not an appropriate sole state source for an independent controller.
+- [live.py](../../solar_model/dashboard/live.py) pauses without connected browsers; it is not an appropriate sole state source for an independent controller.
 - Current Modbus code performs reads only. A write/acknowledgement/expiry adapter is genuinely new and needs verified specifications.
 - Documented forecast start/end disagreement and SOC/capacity assumptions must be resolved before a control implementation relies on them.
 
@@ -99,7 +99,7 @@ The original [dashboard presentation guide](../implementation/dashboard-ui.md) e
 
 Phase 3 established the exact sequence:
 
-1. Add a `ChartDataDisplay` field to [models.py](../../dashboard/models.py)'s `HistoricalCharts`.
+1. Add a `ChartDataDisplay` field to [models.py](../../solar_model/dashboard/state.py)'s `HistoricalCharts`.
 2. Construct and return it from `charts.render_historical_charts()`.
 3. Update it explicitly in `AnalysisTab._update_historical_charts()`, with an options callback using the newly supplied DataFrame.
 

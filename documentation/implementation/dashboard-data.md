@@ -1,6 +1,6 @@
 # Dashboard queries and intermediate data structures
 
-Sources: [dashboard/data.py](../../dashboard/data.py), [dashboard/chart_data_sql.py](../../dashboard/chart_data_sql.py), [dashboard/summary_data_sql.py](../../dashboard/summary_data_sql.py), [dashboard/models.py](../../dashboard/models.py), [dashboard/snapshot.py](../../dashboard/snapshot.py).
+Sources: [solar_model/storage/queries/dashboard.py](../../solar_model/storage/queries/dashboard.py), [solar_model/storage/queries/analysis.py](../../solar_model/storage/queries/analysis.py), [solar_model/storage/queries/recent.py](../../solar_model/storage/queries/recent.py), [solar_model/dashboard/state.py](../../solar_model/dashboard/state.py), [solar_model/dashboard/snapshot.py](../../solar_model/dashboard/snapshot.py).
 
 This guide covers database-to-dataset processing. The [presentation guide](dashboard-ui.md) follows these datasets into browser elements. Existing ORM/pandas compatibility helpers and the mounted Analysis SQL path are distinguished below.
 
@@ -113,7 +113,7 @@ Forecast selection differs from the current-day table: `MIN(collected_at_utc)` s
 
 The shared snapshot calls `load_recent_energy_summaries()`: two minimum-timestamp queries establish the lifetime start, then **one aggregation statement** materializes daily history once and returns both finished numeric tables. SQL produces seven descending days plus Total, all twelve descending calendar months (including empty months) plus their Total, and a separate Lifetime row. Recent and lifetime totals have distinct date predicates when history exceeds twelve months. Python only separates the small tables and formats month/period labels. Standalone `load_recent_daily_energy()` and `load_recent_monthly_energy()` use the same SQL engine; `load_daily_energy_totals()` requests ascending daily rows without totals.
 
-`load_lifetime_start_date()` continues to read minimum raw electrical/forecast collection timestamps and converts them to the configured timezone. The combined query covers the union of daily, monthly and lifetime date ranges. Current-day Live/Today reads remain a separate loader and are not part of this single-statement guarantee. See [performance measurements](../reviews/recent-summary-performance.md) and [regression tests](../../tests/test_recent_summary_sql.py).
+`load_lifetime_start_date()` continues to read minimum raw electrical/forecast collection timestamps and converts them to the configured timezone. The combined query covers the union of daily, monthly and lifetime date ranges. Current-day Live/Today reads remain a separate loader and are not part of this single-statement guarantee. See [performance measurements](../reviews/recent-summary-performance.md) and [regression tests](../../tests/dashboard/test_recent_summary_sql.py).
 
 `load_device_information()` reads device history descending ID, keeps the newest row per human `variable`, sorts labels case-insensitively, and returns `{variable,value,unit}` strings. It is not a historical as-of selector.
 
@@ -211,7 +211,7 @@ For standard Analysis Energy by hour only, the batch SQL requests `load_forecast
 
 ## 7. Export and compatibility paths
 
-Exports use dedicated [export_data_sql.py](../../dashboard/export_data_sql.py) aggregation rather than loading full ORM objects or using the chart-specific SQL. The public `analysis_export_dataframe()` adapter delegates to `load_analysis_export_dataframe()`:
+Exports use dedicated [exports.py](../../solar_model/storage/queries/exports.py) aggregation rather than loading full ORM objects or using the chart-specific SQL. The public `analysis_export_dataframe()` adapter delegates to `load_analysis_export_dataframe()`:
 
 ```text
 prepare_download()
@@ -239,4 +239,4 @@ Native `SUM`/`AVG` handle numeric fields. For each last-reading field, `MAX(CASE
 
 The retained `load_analysis_source_data()`/`AnalysisSourceData` and pandas export helpers serve older/reference paths and regression comparisons; current downloads do not materialise those source-row lists. Logs report the native SQL/read duration, data preparation, and file-generation time. See the [performance investigation](../reviews/download-performance.md) for measured results and limits.
 
-Older `load_hourly_range`, `load_telemetry`, historical ORM/pandas frame helpers, and `custom_chart_preview_from_frames` remain in `data.py`. Some are used by the unmounted Hourly component or test comparison paths. The mounted `AnalysisTab` uses `load_analysis_range` and shared SQL; do not assume a similarly named old helper is its active implementation.
+Older `load_telemetry`, historical ORM/pandas frame helpers and `custom_chart_preview_from_frames` remain in `storage/queries/dashboard.py` for current consumers and independent SQL test comparisons. The mounted `AnalysisTab` uses `load_analysis_range` and shared SQL. The unmounted Hourly component and its unused range/navigation helpers have been removed.

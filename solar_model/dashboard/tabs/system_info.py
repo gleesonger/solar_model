@@ -1,0 +1,45 @@
+from __future__ import annotations
+
+from nicegui import ui
+from nicegui.elements.table import Table
+
+from solar_model.logging_setup import LOGGER
+from solar_model.config import Config
+
+from solar_model.dashboard.components.warnings import notify_error
+
+import solar_model.storage.queries.dashboard as data
+from solar_model.dashboard.state import DashboardElements
+
+
+class SystemInfoTab:
+    def __init__(self, config: Config, elements: DashboardElements) -> None:
+        self.config = config
+        self.elements = elements
+
+    def render_system_info_tab(self, device_information: list[dict[str, str]]) -> None:
+        try:
+            self.elements.system_table = render_system_information(
+                device_information
+            )
+        except Exception as error:
+            LOGGER.exception("Dashboard system information initial load failed")
+            notify_error(f"Unable to load system information: {error}")
+
+    def refresh_system_info_tab(self) -> None:
+        if self.elements.system_table is not None:
+            self.elements.system_table.rows = data.load_device_information(self.config.database.path)
+
+    def apply_loaded_data(self, device_information: list[dict[str, str]]) -> None:
+        if self.elements.system_table is not None:
+            self.elements.system_table.rows = device_information
+
+
+def render_system_information(device_information: list[dict[str, str]]) -> Table:
+    ui.label("System information").classes("text-lg font-semibold")
+    columns = [
+        {"name": "variable", "label": "Variable", "field": "variable", "align": "left"},
+        {"name": "value", "label": "Value", "field": "value", "align": "right"},
+        {"name": "unit", "label": "Unit", "field": "unit", "align": "left"},
+    ]
+    return ui.table(columns=columns, rows=device_information, row_key="variable").props("dense flat bordered").classes("w-full max-w-3xl")

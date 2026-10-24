@@ -4,18 +4,18 @@ For as-of queries, device/profile/interval structures, solver variables/equation
 
 ## Stored economics
 
-Source: [economics.py](../../economics.py), `economic_period_values`.
+Source: [solar_model/tariffs.py](../../solar_model/tariffs.py), `economic_period_values`.
 
 - Import cost = interval grid-import kWh × import rate.
 - Export revenue = interval grid-export kWh × export rate.
 - Net cost = import cost − export revenue.
 - No-solar/battery comparator = measured load kWh × import rate; it excludes standing charges.
 - Collection stores rates/band/costs at that time. Editing YAML does not retroactively change stored history.
-- [recalculate_economics.py](../../recalculate_economics.py) replaces selected historical values and rebuilds hourly aggregates; see [operations.md](../operations/runbook.md).
+- [solar_model/tools/recalculate_economics.py](../../solar_model/tools/recalculate_economics.py) replaces selected historical values and rebuilds hourly aggregates; see [operations.md](../operations/runbook.md).
 
 ## Optimiser contract
 
-Source: [energy_plan_simulation.py](../../energy_plan_simulation.py), `simulate_energy_plan`.
+Source: [solar_model/planning/optimisation.py](../../solar_model/planning/optimisation.py), `simulate_energy_plan`.
 
 - Inputs: `DeviceInfo`, starting battery kWh, named solar/load interval forecasts, configuration, projection start.
 - `ForecastData` sorts intervals and rejects gaps, overlaps, invalid lengths, and uncovered query ranges. Overlap energy assumes uniform power within each supplied interval.
@@ -31,7 +31,7 @@ Source: [energy_plan_simulation.py](../../energy_plan_simulation.py), `simulate_
 
 ## As-of workbook
 
-Source: [test_energy_plan_as_of.py](../../test_energy_plan_as_of.py), a CLI rather than automated tests.
+Source: [solar_model/tools/plan_as_of.py](../../solar_model/tools/plan_as_of.py), a CLI rather than automated tests.
 
 - Reads the newest device metadata, battery sample, and forecast collection known by the cutoff; it avoids `open_database()` migration side effects.
 - The cutoff applies to database observations and forecast vintages. Efficiencies, tariffs, and planning settings come from the supplied configuration; retain that configuration to reproduce a historical run.
@@ -48,4 +48,6 @@ Source: [test_energy_plan_as_of.py](../../test_energy_plan_as_of.py), a CLI rath
 
 - [check-tariffs/extract_minute_data.py](../../check-tariffs/extract_minute_data.py) reads a hard-coded database path and emits minute CSV/actuals workbook.
 - [check-tariffs/model_tariffs.py](../../check-tariffs/model_tariffs.py) compares enabled JSON tariffs/plans, includes standing charges, and writes Excel summaries. It uses a separate rule-based model and Wh/cents units.
-- Both execute top-level work on import; run intentionally from their working folder after inspecting paths. `openpyxl` used by extraction is absent from project requirements.
+- Both execute top-level work on import; run intentionally from their working folder after inspecting paths. Extraction requires the optional `research` package dependencies (`openpyxl`).
+
+The public calculation entry point is `planning.model.build_plan(PlanningInputs(...), config)`. It returns scenario frames; `services.planning.plan_as_of` loads the cutoff-aware inputs and `tools.reports` handles Excel/grouping. `planning/system.py` and `planning/scoring.py` isolate physical limits and the unchanged objective.

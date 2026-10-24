@@ -4,8 +4,8 @@ This is an implementation recipe, **not an existing feature**. Example contract:
 
 ## 1. Decode and persist
 
-1. In [sigen_register_map.json](../../sigen_register_map.json), add the verified register with `metric: inverter_temperature`, normalised `unit: C`, and `cumulative: false`. `column_name()` maps that pair to `inverter_temperature_c`. A temperature is not a cumulative counter and needs no `_period` field.
-2. Add the nullable declaration to `SigenStorModbusSample` in [database.py](../../database.py):
+1. In [solar_model/integrations/sigenstor/register_maps/sigen_register_map.json](../../solar_model/integrations/sigenstor/register_maps/sigen_register_map.json), add the verified register with `metric: inverter_temperature`, normalised `unit: C`, and `cumulative: false`. `column_name()` maps that pair to `inverter_temperature_c`. A temperature is not a cumulative counter and needs no `_period` field.
+2. Add the nullable declaration to `SigenStorModbusSample` in [solar_model/storage/schema.py](../../solar_model/storage/schema.py):
 
    ```python
    inverter_temperature_c: Mapped[float | None] = mapped_column(Float)
@@ -26,13 +26,13 @@ For a new table, also register it in `open_database()`'s explicit table-creation
 
 | Layer | Required change for the temperature example |
 | --- | --- |
-| [chart_data_sql.py](../../dashboard/chart_data_sql.py) | Add `temperature_inverter: inverter_temperature_c` to `TELEMETRY_COLUMNS`. This puts it on the valid-count mean path; do not route it through summed energy `ACTUAL_COLUMNS`. |
-| [data.py](../../dashboard/data.py), `load_analysis_range` | Request the metric in the telemetry batch and extract a temperature frame. Its current fixed power/battery projections would otherwise discard it. |
-| [models.py](../../dashboard/models.py), `AnalysisRangeData` | If adding a dedicated standard chart, add its `temperature` frame and update every constructor/caller, including empty/reference paths used by tests. Keep °C separate from the existing kW frame. |
+| [analysis.py](../../solar_model/storage/queries/analysis.py) | Add `temperature_inverter: inverter_temperature_c` to `TELEMETRY_COLUMNS`. This puts it on the valid-count mean path; do not route it through summed energy `ACTUAL_COLUMNS`. |
+| [dashboard.py](../../solar_model/storage/queries/dashboard.py), `load_analysis_range` | Request the metric in the telemetry batch and extract a temperature frame. Its current fixed power/battery projections would otherwise discard it. |
+| [types.py](../../solar_model/storage/queries/types.py), `AnalysisRangeData` | If adding a dedicated standard chart, add its `temperature` frame and update every constructor/caller, including empty/reference paths used by tests. Keep °C separate from the existing kW frame. |
 | Standard Analysis chart | Add its `HistoricalCharts` field, construct/return it in `render_historical_charts`, then update it in `AnalysisTab._update_historical_charts`. Use a °C axis and `show_total=False`; follow [chart registration](dashboard-ui.md#registering-a-new-standard-analysis-chart). |
 | Optional custom chart | Add the selectable metric/label in `AnalysisTab._show_custom_chart_builder` and the relevant metric list; add its unit to `charts.CUSTOM_CHART_UNITS`. Confirm it remains an average when the energy selector says Sum. |
 | Full-data download | `SAMPLE_EXPORT_COLUMNS` derives from declared measurement fields. Confirm the new column is included and `export_aggregation()` selects average; avoid duplicating the schema list in the exporter. Chart CSV instead uses the component's extracted DataFrame. |
-| Optional live display | Separately extend `LIVE_*_METRICS`, filtered register reads, `LivePowerData.values` and the chosen UI consumer in [live.py](../../dashboard/live.py)/[recent.py](../../dashboard/recent.py). Persisted collection does not automatically add a live value. |
+| Optional live display | Separately extend `LIVE_*_METRICS`, filtered register reads, `LivePowerData.values` and the chosen UI consumer in [live.py](../../solar_model/dashboard/live.py)/[recent.py](../../solar_model/dashboard/tabs/recent.py). Persisted collection does not automatically add a live value. |
 
 ## 4. Acceptance checks
 

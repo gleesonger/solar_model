@@ -2,7 +2,7 @@
 
 The [runtime implementation guide](../implementation/runtime.md) traces YAML normalisation, dataclass relationships, and which processes/components consume configuration.
 
-Source: [config.yaml](../../config.yaml), [config.py](../../config.py). Configuration loads at process startup; a managed restart reloads it for both children.
+Source: [config.yaml](../../config.yaml), [solar_model/config.py](../../solar_model/config.py). Configuration loads at process startup; a managed restart reloads it for both children.
 
 ## Sections
 
@@ -29,7 +29,7 @@ These are current file values, not universal defaults. Preserve exact configurat
 
 Rename the former `forecast.models` key to `forecast.model_calibration_parameters` in separately deployed configuration files.
 
-The live collector passes these settings to solar correction and the fixed daily load forecast. `python -m forecast.evaluate_load_profile --config config.yaml ...` and `python -m forecast.rebuild_operational_adjusted_forecasts --config config.yaml ...` load the same settings. Both CLIs use the configured database/timezone unless overridden by `--database`/`--timezone`. Existing `energy_plan` load-history fields belong to the separate temporary planning profile.
+The live collector passes these settings to solar correction and the fixed daily load forecast. `python -m solar_model.tools.evaluate_load --config config.yaml ...` and `python -m solar_model.tools.rebuild_forecasts --config config.yaml ...` load the same settings. Both CLIs use the configured database/timezone unless overridden by `--database`/`--timezone`. Existing `energy_plan` load-history fields belong to the separate temporary planning profile.
 
 ## Validation and parsing
 
@@ -52,6 +52,6 @@ The live collector passes these settings to solar correction and the fixed daily
 
 ## Register configuration
 
-- [sigen_register_map.json](../../sigen_register_map.json) and [sigen_device_register_map.json](../../sigen_device_register_map.json) are source-relative fixed filenames.
+- [solar_model/integrations/sigenstor/register_maps/sigen_register_map.json](../../solar_model/integrations/sigenstor/register_maps/sigen_register_map.json) and [solar_model/integrations/sigenstor/register_maps/sigen_device_register_map.json](../../solar_model/integrations/sigenstor/register_maps/sigen_device_register_map.json) are source-relative fixed filenames.
 - Explicit map device IDs override the default. Current maps distinguish plant 247 and inverter 1.
 - Map `scale` is a **divisor** during decoding, separate from database fixed-point scaling.

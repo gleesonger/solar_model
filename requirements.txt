@@ -9,3 +9,4 @@ dacite>=1.9,<2
 XlsxWriter>=3.2,<4
 xlsxturbo>=1.11,<2
 cvxpy>=1.6,<2
+highspy>=1.7,<2

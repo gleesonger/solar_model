@@ -1,17 +1,19 @@
 # Runtime, configuration, and object ownership
 
-Sources: [docker_start.py](../../docker_start.py), [main_data_collection.py](../../main_data_collection.py), [main_dashboard.py](../../main_dashboard.py), [config.py](../../config.py), [common.py](../../common.py).
+Sources: [solar_model/runtime/supervisor.py](../../solar_model/runtime/supervisor.py), [solar_model/runtime/collector.py](../../solar_model/runtime/collector.py), [solar_model/dashboard/app.py](../../solar_model/dashboard/app.py), [solar_model/config.py](../../solar_model/config.py), [solar_model/time_utils.py](../../solar_model/time_utils.py).
+
+Root files are compatibility launchers. Installable console commands and module entry points call the same package functions. The supervisor and Control subprocesses inherit configuration-directory working paths and receive the package location in `PYTHONPATH`; resources resolve inside the package.
 
 ## 1. Managed process hierarchy
 
 ```text
-docker_start.main()
+solar_model.runtime.supervisor.main()
   start_processes()                       nested supervisor helper
     load_config()
     open_database(config.database.path)
     database.close()
-    subprocess.Popen(main_data_collection.py)
-    subprocess.Popen(main_dashboard.py)
+    subprocess.Popen(python -m solar_model.runtime.collector)
+    subprocess.Popen(python -m solar_model.dashboard.app)
   supervision loop
     restart marker exists -> stop_processes() -> start_processes()
     child exits -> record exit code -> stop remaining children
@@ -75,7 +77,7 @@ Validation checks complete weekday/minute tariff coverage, effective-date orderi
 
 ## 3. Collector-owned objects
 
-`main_data_collection.main()` keeps these objects for its entire loop:
+`solar_model.runtime.collector.main()` keeps these objects for its entire loop:
 
 | Object | Shape / lifetime |
 | --- | --- |
@@ -92,7 +94,7 @@ The full interval aligns to wall-clock multiples through `sleep_until_next_inter
 ## 4. Dashboard startup and browser hierarchy
 
 ```text
-main_dashboard.main()
+solar_model.dashboard.app.main()
   load_config(), configure_logging(), open_database()/close()
   LivePowerCollector(...)
   DashboardSnapshotStore(config, live_collector, full_interval)
@@ -117,13 +119,13 @@ each browser page
 
 One server-wide live collector and snapshot store serve all pages. `DashboardState`, `DashboardElements`, tab instances, warnings metadata and subscriptions belong to individual pages. The persisted collector runs in another process and does not share these Python objects.
 
-At startup, `main_dashboard` passes the source-relative `dashboard/assets/solar_power.svg` path to `ui.run(favicon=...)`. NiceGUI references `/favicon.ico` in the page icon link and serves the SVG file through that route. The SVG is not embedded in the page. Deploy the valid asset, restart the dashboard and reload the page; the fixed favicon URL may require browser cache refresh after image changes.
+At startup, `main_dashboard` passes the source-relative `solar_model/dashboard/assets/solar_power.svg` path to `ui.run(favicon=...)`. NiceGUI references `/favicon.ico` in the page icon link and serves the SVG file through that route. The SVG is not embedded in the page. Deploy the valid asset, restart the dashboard and reload the page; the fixed favicon URL may require browser cache refresh after image changes.
 
 `apply_snapshot` uses `client.safe_invoke` to update that client's UI context. Reconnect replaces the subscription and reapplies the current snapshot. Disconnect unsubscribes and reevaluates whether live polling should pause. The server snapshot worker continues refreshing without a connected browser; live Modbus polling does not.
 
 ## 5. Paths, timestamps, and utilities
 
-- Config and relative database paths resolve against **process working directory**. `source_path()` resolves relative register-map/favicon/script paths against source.
+- Config and relative database paths resolve against **process working directory**. Register maps and assets resolve inside the installed package (`package_path()` for shared resource lookup); subprocesses run package modules.
 - Docker stores source under `/app` but runs from `/config`; its entrypoint creates YAML only if absent. It does not copy updated settings over an existing volume.
 - `timestamps()` returns `(UTC ISO seconds, configured-local ISO seconds)` from one instant. Database decorators later convert measurement timestamps to epochs.
 - `heavy_work(name)` wraps synchronous operations, logging duration and re-raising failures; it does not schedule threads or transactions.

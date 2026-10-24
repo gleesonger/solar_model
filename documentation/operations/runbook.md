@@ -32,19 +32,19 @@ Use a verified backup and preferably stop persisted collection before bulk rewri
 
 ```powershell
 # Read stored forecast performance; optional --date and --csv
-python -m forecast.evaluate_forecasts --database solar.db
+python -m solar_model.tools.evaluate_forecasts --database solar.db
 
 # Report-only production-load-model evaluation; choose dates with existing history
-python -m forecast.evaluate_load_profile --config config.yaml --database solar.db --start 2026-09-01 --end 2026-09-30
+python -m solar_model.tools.evaluate_load --config config.yaml --database solar.db --start 2026-09-01 --end 2026-09-30
 
 # Forecast rebuild preview; add --apply to clear/replace adjusted fields
-python -m forecast.rebuild_operational_adjusted_forecasts --config config.yaml --database solar.db --start 2026-09-01 --end 2026-09-30
+python -m solar_model.tools.rebuild_forecasts --config config.yaml --database solar.db --start 2026-09-01 --end 2026-09-30
 
 # Immediately overwrites rates/costs, then rebuilds affected hourly rows
 python recalculate_economics.py --config config.yaml --from 2026-09-01 --to 2026-09-30
 
 # Reads existing schema and writes/replaces the specified workbook
-python test_energy_plan_as_of.py --database solar.db --as-of "2026-09-15T00:00:00+01:00" --output review-plan.xlsx
+python -m solar_model.tools.plan_as_of --database solar.db --as-of "2026-09-15T00:00:00+01:00" --output review-plan.xlsx
 ```
 
 - Recalculation date bounds are inclusive; omitted `--to` updates all later matching raw rows. CLI alone does not restart the application; Control does.
@@ -88,7 +88,7 @@ Save the configuration/maps separately; a database backup does not include them.
 2. Preserve the failed/current database and any `-wal`, `-shm`, or `-journal` siblings together in a separate recovery directory. Do not overwrite the only copy or mix old sidecars with the replacement.
 3. Copy the verified backup to a new `restore-check.db`. Inspect it through read-only SQLite first: `PRAGMA integrity_check`, raw/forecast counts and time ranges. Compare with values recorded before maintenance; missing history is not repaired by a successful integrity check.
 4. Test the intended source revision's `open_database("restore-check.db")` on this expendable copy, then close it and repeat the checks. Opening can migrate/rebuild; the original backup must remain untouched. Reopening should preserve raw values and complete hourly readiness.
-5. With writers still stopped and the destination clear of the prior file/sidecars, copy the verified backup into the configured database path. Restore the matching configuration/maps, check file ownership for Docker, and launch through `docker_start.py`.
+5. With writers still stopped and the destination clear of the prior file/sidecars, copy the verified backup into the configured database path. Restore the matching configuration/maps, check file ownership for Docker, and launch through `solar_model/runtime/supervisor.py`.
 6. Confirm persisted timestamps advance, recent known energy/cost totals are plausible, and hourly initialization succeeds without repeated rebuilds. A synthetic live reading or healthy browser connection alone does not prove persisted collection is working.
 
 Useful **read-only SQL** for before/after comparison (timestamps here are UTC epoch seconds):

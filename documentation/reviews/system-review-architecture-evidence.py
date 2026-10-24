@@ -9,12 +9,10 @@ import tempfile
 from unittest.mock import Mock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-import database
-import docker_start
-from config import load_config
-from dashboard.live import (
-    LivePowerCollector, LIVE_POWER_METRICS, LIVE_BATTERY_METRICS, LIVE_TODAY_METRICS,
-)
+import solar_model.storage as database
+import solar_model.runtime.supervisor as docker_start
+from solar_model.config import load_config
+from solar_model.dashboard.live import LivePowerCollector, LIVE_POWER_METRICS, LIVE_BATTERY_METRICS, LIVE_TODAY_METRICS
 
 root = Path(tempfile.mkdtemp(prefix="solar-architecture-evidence-"))
 print("Temporary evidence directory:", root)

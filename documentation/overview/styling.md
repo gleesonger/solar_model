@@ -4,18 +4,18 @@
 
 | Location | Ownership |
 | --- | --- |
-| [layout.py](../../dashboard/layout.py), `render_dashboard_styles` | Shared CSS, tab/control positioning, mobile table rules |
+| [layout.py](../../solar_model/dashboard/layout.py), `render_dashboard_styles` | Shared CSS, tab/control positioning, mobile table rules |
 | Tab/component Python files | NiceGUI utility classes, Quasar props, local inline sizing |
-| [charts.py](../../dashboard/charts.py) | ECharts colours, series, axes, legends, zoom, forecast patterns |
-| [models.py](../../dashboard/models.py), `PANEL_COLORS` | Array colour sequence |
-| [chart_display.py](../../dashboard/chart_display.py), [tables.py](../../dashboard/tables.py) | Chart headers/actions, table presentation, total-row class |
-| [warnings.py](../../dashboard/warnings.py) | Inline persistent-banner appearance; shared notification settings |
-| [live_updates.css](../../dashboard/assets/live_updates.css) | Hidden-by-default three-dot indicator, repeating pulse cycles, three-second expiry and reduced-motion variant |
-| [live_updates.js](../../dashboard/assets/live_updates.js) | Three-dot indicator wall-clock expiry and lifecycle/health handling |
+| [charts.py](../../solar_model/dashboard/components/charts.py) | ECharts colours, series, axes, legends, zoom, forecast patterns |
+| [state.py](../../solar_model/dashboard/state.py), `PANEL_COLORS` | Array colour sequence |
+| [chart_display.py](../../solar_model/dashboard/components/chart_display.py), [tables.py](../../solar_model/dashboard/components/tables.py) | Chart headers/actions, table presentation, total-row class |
+| [warnings.py](../../solar_model/dashboard/components/warnings.py) | Inline persistent-banner appearance; shared notification settings |
+| [live_updates.css](../../solar_model/dashboard/assets/live_updates.css) | Hidden-by-default three-dot indicator, repeating pulse cycles, three-second expiry and reduced-motion variant |
+| [live_updates.js](../../solar_model/dashboard/assets/live_updates.js) | Three-dot indicator wall-clock expiry and lifecycle/health handling |
 
 There is no standalone theme stylesheet or central typography/token system. Current appearance combines shared CSS and local classes.
 
-[create_solar_icon.py](../../dashboard/assets/create_solar_icon.py) writes `solar_power.svg` beside the generator script, regardless of the current working directory.
+[create_solar_icon.py](../../solar_model/dashboard/assets/create_solar_icon.py) writes `solar_power.svg` beside the generator script, regardless of the current working directory.
 
 Regenerate it from the repository root with `python dashboard/assets/create_solar_icon.py`. The asset must be valid SVG without Git conflict markers. On 2026-10-22, committed conflict markers caused NiceGUI to emit `/favicon.ico` instead of an embedded SVG and return HTTP 500 for the icon; regenerating the asset restored valid XML, an embedded favicon URL and browser image decoding.
 

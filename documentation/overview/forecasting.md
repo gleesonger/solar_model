@@ -4,7 +4,7 @@ For database queries, intermediate DataFrame fields, calibration arrays, update 
 
 ## Production model
 
-The live hook is [forecast.operational_model.refresh_adjusted_forecast](../../forecast/operational_model.py), called by [forecast_collector.py](../../forecast_collector.py).
+The live hook is [solar_model.services.forecasting.refresh_adjusted_forecast](../../solar_model/planning/forecasts/solar.py), called by [solar_model/services/forecasting.py](../../solar_model/services/forecasting.py).
 
 - Raw provider W, cumulative Wh, and daily Wh are preserved separately from adjusted output.
 - For each local target day, correction uses the latest provider snapshot at/before midnight. A new installation without one uses its first same-day snapshot.
@@ -20,7 +20,7 @@ The live hook is [forecast.operational_model.refresh_adjusted_forecast](../../fo
 
 ## Daily load model
 
-The load model now lives in [operational_model.py](../../forecast/operational_model.py), alongside solar correction. At the first scheduled forecast run of each configured-local day, the collector generates and saves one fixed hourly load profile using `forecast.model_calibration_parameters.load`. It uses only hourly load energy from before that day's midnight, within the configured lookback. Recency-weighted weekday/weekend hourly means shrink toward all-days hourly means; there is no intraday load adjustment.
+The load model lives in [load.py](../../solar_model/planning/forecasts/load.py), alongside the pure solar model in the planning package. At the first scheduled forecast run of each configured-local day, the collector generates and saves one fixed hourly load profile using `forecast.model_calibration_parameters.load`. It uses only hourly load energy from before that day's midnight, within the configured lookback. Recency-weighted weekday/weekend hourly means shrink toward all-days hourly means; there is no intraday load adjustment.
 
 `forecast_load` stores the generation time and each UTC target hour's kWh. The entire day is inserted atomically, and later runs/restarts/configuration changes cannot replace it. A failed write can retry on the next scheduled run. Targets follow the actual local calendar day (23/24/25 hours around DST); repeated clock hours retain distinct UTC targets. Missing historical hours remain null, including an entirely empty profile, which is still frozen for that day. No historical load forecasts are fabricated during deployment.
 
@@ -28,7 +28,7 @@ The two Recent Past tables show Load (Forecast), prorated through the current ti
 
 ## Dashboard forecast meanings
 
-Source: [dashboard/data.py](../../dashboard/data.py), `load_day` and forecast selectors.
+Source: [solar_model/storage/queries/dashboard.py](../../solar_model/storage/queries/dashboard.py), `load_day` and forecast selectors.
 
 | View | Selection / meaning |
 | --- | --- |
@@ -44,9 +44,9 @@ Source: [dashboard/data.py](../../dashboard/data.py), `load_day` and forecast se
 
 ## Maintenance and research
 
-- [rebuild_operational_adjusted_forecasts.py](../../forecast/rebuild_operational_adjusted_forecasts.py): `--apply` clears adjusted fields in a target-date range and replays collection times, committing by local day. It currently rebuilds same-day targets rather than every future day handled live.
-- [evaluate_forecasts.py](../../forecast/evaluate_forecasts.py): MAE/RMSE/bias and improvement, overall and by lead band; compares stored vintages with hourly actuals and excludes collections after target time and hours not completed by `--as-of` (default now). Sparse completed hours remain eligible.
-- [evaluate_load_profile.py](../../forecast/evaluate_load_profile.py): report-only evaluation of the production 42-day/14-day-half-life weekday/weekend profile shrunk toward all-day hourly means. It differs from planning's exact weekday/hour profile.
+- [rebuild_forecasts.py](../../solar_model/tools/rebuild_forecasts.py): `--apply` clears adjusted fields in a target-date range and replays collection times, committing by local day. It currently rebuilds same-day targets rather than every future day handled live.
+- [evaluate_forecasts.py](../../solar_model/tools/evaluate_forecasts.py): MAE/RMSE/bias and improvement, overall and by lead band; compares stored vintages with hourly actuals and excludes collections after target time and hours not completed by `--as-of` (default now). Sparse completed hours remain eligible.
+- [evaluate_load.py](../../solar_model/tools/evaluate_load.py): report-only evaluation of the production 42-day/14-day-half-life weekday/weekend profile shrunk toward all-day hourly means. It differs from planning's exact weekday/hour profile.
 
 The three model blocks use the same names: `lookback`, `halflife`, and `prior_effective_observations`. The last field is the decimal fraction of influence after one unit of evidence, despite its retained name. Defaults are:
 

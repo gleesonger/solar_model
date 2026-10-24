@@ -2,7 +2,7 @@
 
 For register definitions, wire decoding, tuple dictionaries, provider JSON examples, and the complete ingestion call chain, see [collection implementation](../implementation/collection.md).
 
-Source: [main_data_collection.py](../../main_data_collection.py), [modbus_collector.py](../../modbus_collector.py), [forecast_collector.py](../../forecast_collector.py).
+Source: [solar_model/runtime/collector.py](../../solar_model/runtime/collector.py), [solar_model/integrations/sigenstor/registers.py](../../solar_model/integrations/sigenstor/registers.py), [solar_model/services/forecasting.py](../../solar_model/services/forecasting.py).
 
 ## Persisted scheduler
 
@@ -26,7 +26,7 @@ Source: [main_data_collection.py](../../main_data_collection.py), [modbus_collec
 - Words decode in big-endian order; signed types use two's complement. Numeric result is divided by map `scale`; strings decode UTF-8 through the first NUL.
 - The client tries the `device_id` argument, with a `slave` fallback for API compatibility.
 - An error or short response rejects the electrical interval. The connection is closed and retried next cycle.
-- Metadata failure retains an already saved electrical row. Empty/zero/non-finite metadata is discarded; valid changed values append history. Known inverter models add maximum PV input power from [datasheets.py](../../datasheets.py).
+- Metadata failure retains an already saved electrical row. Empty/zero/non-finite metadata is discarded; valid changed values append history. Known inverter models add maximum PV input power from [solar_model/integrations/sigenstor/datasheets.py](../../solar_model/integrations/sigenstor/datasheets.py).
 
 ## Forecast collection
 
@@ -38,7 +38,7 @@ Source: [main_data_collection.py](../../main_data_collection.py), [modbus_collec
 
 ## Live dashboard collection
 
-- [dashboard/live.py](../../dashboard/live.py) uses its own client/thread and filtered register subset.
+- [solar_model/dashboard/live.py](../../solar_model/dashboard/live.py) uses its own client/thread and filtered register subset.
 - It polls while a browser is connected, retains successful readings in memory, and retries on failure.
 - It also reads daily energy/battery values and uses database baselines for grid/PV totals; it does not write samples.
 - Shipped polling is 1 second plus request time. Failed reads retain the last value; [freshness warnings](dashboard.md) expose its age.

@@ -8,6 +8,14 @@ The system exists to choose **the next battery-control action to implement**, wi
 
 One joint optimisation evaluates nine solar/load scenarios. All share the next 15-minute action, while their outcomes and later decisions can differ. A user preference balances expected financial return against retained battery protection. Only the next action is committed; the rest of the day is reconsidered at the next update.
 
+| Section | Covers |
+| --- | --- |
+| [Plan Model](#2-plan-model) | How we choose the next action across nine possible futures and replan as observations arrive |
+| [Scoring](#3-scoring) | How financial return, battery protection and the user's preference determine the winning plan |
+| [Forecast Models](#4-forecast-models) | How solar and load forecasts produce the low, medium and high scenarios |
+| [System Model](#5-system-model) | How battery behaviour, energy losses, operating modes and physical limits are represented |
+| [Validation and Open Decisions](#6-validation-and-open-decisions) | How the model will be checked, what must change and what remains unresolved |
+
 ## 2. Plan Model
 
 ### 2.1 Overview
@@ -276,13 +284,15 @@ Use synthetic data and temporary databases for implementation tests. Before actu
 
 ### 6.2 Current Implementation and Required Changes
 
+The code is organised in the main `solar_model` package. Its pure planning API, `planning.model.build_plan`, accepts in-memory inputs; `services.planning` assembles as-of database inputs and `tools.plan_as_of` produces the workbook. This structural migration preserves the existing algorithms; the target behaviour below is still to be implemented.
+
 The current code supplies useful components but does not yet produce the shared command defined here.
 
 | Component | Current implementation | Required change |
 | --- | --- | --- |
-| Forecasts | [operational_model.py](../../forecast/operational_model.py) implements the two solar stages and fixed daily load | Reuse these baselines with complete planning-horizon coverage |
-| Scenario generation | [test_energy_plan_as_of.py](../../test_energy_plan_as_of.py) uses 0.5/1/1.5, with high-case timing changes and a separate temporary load profile | Use production baselines, 0.5/1/2 scalars and explicit dimension weights |
-| Solver | [energy_plan_simulation.py](../../energy_plan_simulation.py) already constructs one CVXPY problem with independent scenario-indexed flows | Add shared first controls and verified command-response constraints |
+| Forecasts | `solar_model/planning/forecasts/` contains pure solar and load models; services load and persist their data | Reuse these baselines with complete planning-horizon coverage |
+| Scenario generation | `solar_model/planning/scenarios.py` uses 0.5/1/1.5, with high-case timing changes and a separate temporary load profile | Use production baselines, 0.5/1/2 scalars and explicit dimension weights |
+| Solver | [solar_model/planning/optimisation.py](../../solar_model/planning/optimisation.py) already constructs one CVXPY problem with independent scenario-indexed flows | Add shared first controls and verified command-response constraints |
 | Objective | Weighted net cost plus tariff-valued battery energy held over time | Replace with the reference-normalised cost/protection objective |
 | Battery bounds | Configured minimum/maximum schedules are hard interval-end constraints | Separate physical bounds from the soft preferred reserve |
 | Output | Per-scenario simulation frames and a workbook | Return one next action plus scenario day plans and score diagnostics |

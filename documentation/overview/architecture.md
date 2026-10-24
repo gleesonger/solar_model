@@ -4,11 +4,10 @@ Detailed startup/call hierarchies and object ownership are in [runtime.md](../im
 
 ## Runtime ownership
 
-- [docker_start.py](../../docker_start.py) supervises two Python children, initialises the database, and handles full-application restart requests.
-- [main_data_collection.py](../../main_data_collection.py) owns persisted collection: Modbus on each full interval, Forecast.Solar when due, plus one fixed load forecast at the first scheduled forecast run of each local day.
-- [main_dashboard.py](../../main_dashboard.py) serves NiceGUI. It owns one shared snapshot worker and one browser-activated live Modbus collector.
-- [database.py](../../database.py) owns ORM schema, automatic migrations, collector persistence, derived PV measurements, and hourly rollups. Maintenance scripts also issue direct SQL updates.
-- [energy_plan_simulation.py](../../energy_plan_simulation.py) is a standalone optimiser called by the as-of workbook script, not the running dashboard.
+- Root launchers forward to `solar_model.runtime.supervisor`, `solar_model.runtime.collector` and `solar_model.dashboard.app`, preserving existing commands.
+- The supervisor initialises storage and manages the persisted collector and NiceGUI server. The collector calls collection/forecasting services; the dashboard owns its snapshot worker and browser-activated live collector.
+- `solar_model.storage` owns schema, migrations, measurements, forecast persistence and queries. Data-only query results do not depend on NiceGUI.
+- `solar_model.planning` owns pure forecasts, planning inputs, scenarios, physical limits, scoring and optimisation. `services.planning` loads as-of data; `tools.plan_as_of` writes reports. Planning is not called by the running dashboard and sends no device commands.
 
 ```mermaid
 flowchart LR
@@ -40,7 +39,7 @@ flowchart LR
 
 ## Design boundaries
 
-- Hardware fetching/decoding belongs in collectors; storage calculations belong in `SolarDatabase`; UI formatting and aggregation belong in `dashboard/`.
+- Integration clients fetch/decode; services orchestrate; storage persists/queries; planning calculates; dashboard components format/render. Native SQL aggregation remains in storage queries.
 - Browser JavaScript evaluates connectivity/freshness and the live-update indicator; Python publishes timestamps and sends heartbeats.
 - Dashboard Control actions trigger tariff recalculation and process restarts, not inverter charge/discharge commands.
 - Offline experiments and generated workbooks are separate from the managed application.

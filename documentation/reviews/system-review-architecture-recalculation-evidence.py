@@ -10,9 +10,10 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from sqlalchemy.exc import SQLAlchemyError
-from config import DatabaseConfig, TariffPeriod, TariffRule, TariffsConfig, load_config
-from database import SolarDatabase, open_database
-import recalculate_economics
+from solar_model.config import DatabaseConfig, TariffPeriod, TariffRule, TariffsConfig, load_config
+from solar_model.storage.connection import SolarDatabase
+from solar_model.storage.migrations import open_database
+import solar_model.tools.recalculate_economics as recalculate_economics
 
 root = Path(tempfile.mkdtemp(prefix="solar-architecture-recalculation-"))
 path = root / "fixture.db"

@@ -1,6 +1,6 @@
 # Storage, derived samples, rollups, and retrieval
 
-Source: [database.py](../../database.py). The [data-model overview](../overview/data-model.md) lists tables and invariants; this guide follows the values through actual persistence functions.
+Source: [solar_model/storage/schema.py](../../solar_model/storage/schema.py). The [data-model overview](../overview/data-model.md) lists tables and invariants; this guide follows the values through actual persistence functions.
 
 ## 1. Database abstraction and decorators
 
@@ -181,3 +181,9 @@ Typical ORM row: `{id, collected_at_utc, collected_at_local, variable_name, vari
 No foreign keys link these tables. Their relation is temporal and metric-based. Model opening/migration and reader creation are different operations: many dashboard reads use `create_engine_for_database()` directly and do not trigger schema migration.
 
 Next: [forecast correction](forecasting.md), [dashboard queries](dashboard-data.md), or [planning](planning.md).
+
+## Package ownership
+
+`schema.py` declares the ORM tables and scaling types. `connection.py` owns cached engines, SQL timing and `SolarDatabase`; its measurement and forecast methods come from `measurements.py` and `forecasts.py`. `migrations.py` owns `open_database` and legacy upgrades. This split preserves the same transactions and migration/backfill order.
+
+`queries/forecasting.py` loads calibration frames; `queries/planning.py` selects as-of planning inputs; `queries/recent.py`, `analysis.py` and `exports.py` own native dashboard aggregation. `queries/dashboard.py` retains dataframe adapters and reference calculations. `queries/types.py` defines data records without importing NiceGUI. Presentation helpers live in `dashboard/formatting.py`.

@@ -1,6 +1,6 @@
 # Exact schema field reference
 
-Field inventory derived from the reviewed SQLAlchemy metadata in [database.py](../../database.py). This is a static documentation snapshot, not a database inspection or migration. Update it when model declarations change.
+Field inventory derived from the reviewed SQLAlchemy metadata in [solar_model/storage/schema.py](../../solar_model/storage/schema.py). This is a static documentation snapshot, not a database inspection or migration. Update it when model declarations change.
 
 Read [storage.md](../implementation/storage.md) for derivations, transaction boundaries, rollup rules, and retrieval. Column SQL types describe storage; the API column below describes SQLAlchemy values.
 

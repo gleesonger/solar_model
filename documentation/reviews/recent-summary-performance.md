@@ -4,7 +4,7 @@ Implemented and verified on **2026-10-15**, following a native SQLite feasibilit
 
 ## Current implementation
 
-[summary_data_sql.py](../../dashboard/summary_data_sql.py) performs the daily, monthly and lifetime numeric calculations in native SQLite. [snapshot.py](../../dashboard/snapshot.py) calls `load_recent_energy_summaries()` once for both Recent summary tables. Two indexed minimum-timestamp queries establish the lifetime start, followed by one shared aggregation statement. No schema migration or new index is required.
+[summary_data_sql.py](../../solar_model/storage/queries/recent.py) performs the daily, monthly and lifetime numeric calculations in native SQLite. [snapshot.py](../../solar_model/dashboard/snapshot.py) calls `load_recent_energy_summaries()` once for both Recent summary tables. Two indexed minimum-timestamp queries establish the lifetime start, followed by one shared aggregation statement. No schema migration or new index is required.
 
 - A small calendar CTE supplies configured-local dates and UTC midnight boundaries. Indexed range joins select hourly actuals and the first forecast collection per date.
 - Only the eight required energy/economics columns are summed from hourly rollups, explicitly converting fixed-point storage with `/10000.0`.
@@ -35,7 +35,7 @@ The old monthly loader alone measured 2.234s, 2.328s and 2.215s. An initial 55-d
 
 ## Validation
 
-- [test_recent_summary_sql.py](../../tests/test_recent_summary_sql.py): 17 cases covering an independent retained ORM/Python forecast reference across Dublin spring/autumn DST and Kolkata, one/two/no configured panels, null readings, decreasing/negative cumulative values, first-vintage selection, out-of-range targets, tariff-split hours, empty databases, twelve empty-month rows, leap-day history exceeding twelve months, distinct totals, shared snapshot loading and invalid ranges.
+- [test_recent_summary_sql.py](../../tests/dashboard/test_recent_summary_sql.py): 17 cases covering an independent retained ORM/Python forecast reference across Dublin spring/autumn DST and Kolkata, one/two/no configured panels, null readings, decreasing/negative cumulative values, first-vintage selection, out-of-range targets, tariff-split hours, empty databases, twelve empty-month rows, leap-day history exceeding twelve months, distinct totals, shared snapshot loading and invalid ranges.
 - Query instrumentation requires two lifetime-minimum statements and exactly one shared aggregation statement for both tables. Standalone daily/monthly outputs match the combined results.
 - Real-data-copy comparison checked every row and column against the previous loaders with time frozen for identical elapsed-day forecast weights.
 - Full suite: `.venv/Scripts/python.exe -m pytest -q` returned **255 passed, 1 skipped**, including the legacy-named migration regression. Warnings are dependency/deprecation notices. An initial system-Python attempt crashed importing its OSQP extension; the repository virtual environment completed the full suite.

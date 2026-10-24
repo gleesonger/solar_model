@@ -37,6 +37,6 @@ The shutdown endpoint belongs only to this loopback fixture. Generated database/
 
 ## Browser automation and boundaries
 
-Install Playwright/browser separately if needed; the [warning browser tests](../../tests/test_dashboard_freshness_browser.py) exercise synthetic DOM/socket state. Full-app scripts under the archived review's `browser/` directory target port 18091 and may write results beside themselves: copy them into the temporary directory before adapting/running them. Some deliberately reproduce old defects and are not current passing regression tests.
+Install Playwright/browser separately if needed; the [warning browser tests](../../tests/browser/test_dashboard_freshness_browser.py) exercise synthetic DOM/socket state. Full-app scripts under the archived review's `browser/` directory target port 18091 and may write results beside themselves: copy them into the temporary directory before adapting/running them. Some deliberately reproduce old defects and are not current passing regression tests.
 
 This workflow verifies presentation against synthetic inputs. It does not exercise real register compatibility, provider limits, Docker deployment, persisted collector scheduling under real load, or actual administrative subprocesses. Use targeted temporary-database tests for those server contracts before controlled integration checks.

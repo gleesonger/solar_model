@@ -6,11 +6,11 @@ Material gaps: no real hardware/provider response capture; no production databas
 
 ## Baseline and evidence
 
-- Source HEAD: `3932b02f6de46bc74dc7392da0022726cf7af1d5`. Initial working changes: modified `documentation/index.md`; untracked review plan and `forecast/evaluate_load_profile.py`. All preserved. Other reviewers' concurrent artifacts are outside this assessment.
+- Source HEAD: `3932b02f6de46bc74dc7392da0022726cf7af1d5`. Initial working changes: modified `documentation/index.md`; untracked review plan and `solar_model/tools/evaluate_load.py`. All preserved. Other reviewers' concurrent artifacts are outside this assessment.
 - Verification interpreter: `.venv\Scripts\python.exe`, Python 3.12.10; pandas 2.3.3; SQLAlchemy 2.0.52; CVXPY 1.9.3. Installed solvers include HIGHS; the actual HIGHS solver was used. Initial system-Python inspection found 3.11.8/CVXPY 1.7.5 without HIGHS; that is **not** a finding about the project venv.
-- Reproduction script: [check_data.py](C:/Users/glees/AppData/Local/Temp/solar-review-data-20261015/check_data.py).
-- Machine-readable results: [results.json](C:/Users/glees/AppData/Local/Temp/solar-review-data-20261015/results.json).
-- Solver routes: [solver_plan.csv](C:/Users/glees/AppData/Local/Temp/solar-review-data-20261015/solver_plan.csv).
+- Reproduction script: check_data.py (historical temporary artifact: `C:/Users/glees/AppData/Local/Temp/solar-review-data-20261015/check_data.py`; no longer retained).
+- Machine-readable results: results.json (historical temporary artifact: `C:/Users/glees/AppData/Local/Temp/solar-review-data-20261015/results.json`; no longer retained).
+- Solver routes: solver_plan.csv (historical temporary artifact: `C:/Users/glees/AppData/Local/Temp/solar-review-data-20261015/solver_plan.csv`; no longer retained).
 - All fixture databases are in that same temporary directory. The harness recreates only its explicitly named fixture files. Run from repository root: `.venv\Scripts\python.exe C:\Users\glees\AppData\Local\Temp\solar-review-data-20261015\check_data.py`.
 - Independent expectations use arithmetic, physical-unit contracts, and controlled inputs; they do not call application aggregation functions to construct the expected results. Actual outputs do use the reviewed functions. The NaN persistence probe substitutes only the input loader, then executes the actual adjustment/write path.
 - `.venv\Scripts\python.exe -m pytest -q --ignore=tests/test_database_0_1_0_migration.py`: **137 passed, 1 skipped, 1769 warnings, 14.73 s**. This is the documented subset, not a passing full suite. `.venv\Scripts\python.exe -m pytest -q --collect-only` still fails on absent `migrate_database_0_1_0`; 137 other tests collected. A browser module is skipped. Deprecation/null-equality warnings remain.
@@ -31,7 +31,7 @@ Acceptance: this fixture writes finite 1000 W for panel 1, zero for unused panel
 
 ### DATA-02 — Hourly grid telemetry cancels import/export before splitting (High, high confidence)
 
-Category: correctness. Affects `database.py::_add_hourly_sample` and `dashboard/chart_data_sql.py` telemetry calculation; also retained `average_hourly_rollup_telemetry`.
+Category: correctness. Affects `database.py::_add_hourly_sample` and `solar_model/storage/queries/analysis.py` telemetry calculation; also retained `average_hourly_rollup_telemetry`.
 
 Hourly storage retains signed grid-power sums. Multi-day Analysis/default hourly telemetry splits the sign of the already-netted sum. Alternating import and export disappear from both magnitudes. This is distinct from meter energy; no assertion is made that energy import/export totals fail.
 

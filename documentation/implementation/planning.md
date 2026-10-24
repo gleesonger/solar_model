@@ -1,16 +1,18 @@
 # Planning: database cutoffs, interval objects, solver, and workbook
 
-Sources: [test_energy_plan_as_of.py](../../test_energy_plan_as_of.py), [energy_plan_simulation.py](../../energy_plan_simulation.py), [economics.py](../../economics.py). Despite the root script's filename, this is an offline report pipeline rather than pytest coverage or device control.
+Sources: [model](../../solar_model/planning/model.py), [input assembly](../../solar_model/services/planning.py), [as-of queries](../../solar_model/storage/queries/planning.py), [optimisation](../../solar_model/planning/optimisation.py), [scoring](../../solar_model/planning/scoring.py), [physical limits](../../solar_model/planning/system.py) and [reports](../../solar_model/tools/reports.py). This is an offline report pipeline with independent scenario decisions, not device control.
 
 ## 1. CLI call hierarchy
 
 ```text
-test_energy_plan_as_of.main()
+solar_model.tools.plan_as_of.main()
   parse args + load_config()
   parse as_of; convert to configured timezone
   SolarDatabase(create_engine_for_database(path))  no schema opener
   delete existing output workbook
-  load_device_info_as_of()
+  services.planning.plan_as_of()
+    PlanningInputs -> planning.model.build_plan()
+    load_device_info_as_of()
   load_battery_state_as_of()
   load_forecast_as_of()
     select one forecast vintage
@@ -21,6 +23,8 @@ test_energy_plan_as_of.main()
   create_scenarios()
     _half_hour_intervals() -> _scenario_intervals()
   simulate_energy_plan()
+    system_limits()
+    total_score()
   group_plan(output timestep)
   write_workbook()
 ```
@@ -95,6 +99,8 @@ Construction sorts each stream and requires non-empty positive-duration contiguo
 
 Output contract: `dict[str, ForecastData]`. Scenarios describe separate hypothetical futures, not probabilistic confidence intervals.
 
+`LOAD_SCENARIOS` and `SOLAR_SCENARIOS` at the top of `planning/scenarios.py` define each case as `(energy_multiplier, half_hour_split)`. A split of `None` preserves the baseline timing; a pair redistributes each hour's scaled energy between its first and second half-hours. Scenario generation reads both parameters from these definitions.
+
 ## 6. Solver hierarchy and arrays
 
 ```text
@@ -160,3 +166,9 @@ Solar/load conservation is checked within 0.001 kWh after extracting values. Onl
 `write_workbook()` writes Summary plus one sheet per scenario, removing datetime timezone metadata for Excel while retaining local time. Summary contains as-of text, period count and cost/revenue totals. Formatting/tables do not alter calculated results.
 
 No result is written back to SQLite. The existing output path is deleted before loading/solving succeeds, so a failed report can leave no workbook. Relevant current limitations are collected in [review findings](../reviews/findings.md).
+
+## Package API
+
+`PlanningInputs(device_info, device_state, forecast, starts_at)` is a frozen record of the current input objects; contained forecast/device objects are not deeply immutable. `build_plan(inputs, config)` expands the baseline through `create_scenarios` and returns `dict[str, pandas.DataFrame]`. It can run entirely in memory. `services.planning.plan_as_of(database, config, as_of)` supplies the same inputs from cutoff-aware queries. The CLI groups and writes those frames through `tools.reports`.
+
+`system_limits()` converts capacity, health, efficiency and inverter power into interval limits. `total_score()` retains the existing weighted average net cost and tariff-valued battery objective. The restructure does not implement the shared action, 0.5/1/2 scenario design or normalised protection scoring in the proposed plan-model document.

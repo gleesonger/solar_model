@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "solar-model"
+version = "0.1.0"
+description = "Solar telemetry, forecasting, read-only planning and dashboard"
+requires-python = ">=3.12"
+dynamic = ["dependencies"]
+
+[project.optional-dependencies]
+test = ["pytest>=8,<10"]
+browser = ["playwright>=1.45,<2"]
+research = ["openpyxl>=3.1,<4"]
+
+[project.scripts]
+solar-model = "solar_model.runtime.supervisor:main"
+solar-dashboard = "solar_model.dashboard.app:main"
+solar-collect = "solar_model.runtime.collector:main"
+solar-plan = "solar_model.tools.plan_as_of:main"
+
+[tool.setuptools.dynamic]
+dependencies = {file = ["requirements.txt"]}
+
+[tool.setuptools.packages.find]
+include = ["solar_model*"]
+
+[tool.setuptools.package-data]
+"solar_model.dashboard" = ["assets/*.css", "assets/*.js", "assets/*.svg", "assets/*.ico", "assets/*.png"]
+"solar_model.integrations.sigenstor" = ["register_maps/*.json"]

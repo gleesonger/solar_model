@@ -2,7 +2,7 @@
 
 For sample derivation, transaction/rollup behavior, and reader contracts, see [storage implementation](../implementation/storage.md). The [schema reference](../reference/schema.md) lists every declared field.
 
-Source: [database.py](../../database.py), especially `ScaledInteger`, `EpochSeconds`, and `SolarDatabase`.
+Source: [solar_model/storage/schema.py](../../solar_model/storage/schema.py), especially `ScaledInteger`, `EpochSeconds`, and `SolarDatabase`.
 
 For a consolidated comparison of units, signs, missing values, time attribution and chart/download aggregation, see [metric semantics](../reference/metric-semantics.md).
 

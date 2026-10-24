@@ -6,7 +6,8 @@
 - If a proposed change creates or reveals a major conflict with the documentation, notify the user, explain the conflict, and ask for direction before proceeding with the conflicting change.
 - Document verified behavior; keep defects and unresolved design questions in [review findings](documentation/reviews/findings.md). Remove or revise findings when resolved.
 - Preserve unrelated working-tree changes. Consult the documentation baseline for reviewed revision and working-tree context; Git HEAD alone may not describe local experimental files.
-- Production entry points: `docker_start.py`, `main_data_collection.py`, `main_dashboard.py`. Planning and research scripts are separate; the application does not send battery-control commands.
+- Application code lives under `solar_model/`: planning calculations have no storage/network/UI dependency; services assemble inputs and persist results; storage queries have no NiceGUI dependency. Read [code-map.md](documentation/overview/code-map.md) for ownership. Tools run with `python -m solar_model.tools.<name>`.
+- Production entry points: `solar_model/runtime/supervisor.py`, `solar_model/runtime/collector.py`, `solar_model/dashboard/app.py`. Root entry points are compatibility launchers for package modules. Planning/report tools are separate; the application does not send battery-control commands.
 - Database measurements use integers scaled by 10,000; SQLAlchemy returns physical units. Raw SQL must convert explicitly. Most measurement timestamps are UTC epoch seconds; device-history timestamps are ISO strings.
 - Preserve raw forecast history, snapshot/target-time distinctions, cumulative-counter reset handling, and configured-timezone date boundaries. See [data-model.md](documentation/overview/data-model.md).
 - `open_database()` can migrate and backfill a database. Use temporary databases or copies for development; do not use the user's `solar.db` for destructive verification.

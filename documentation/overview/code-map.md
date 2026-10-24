@@ -1,55 +1,62 @@
 # Code map
 
-For call hierarchies and structures crossing module boundaries, see the [detailed implementation guides](../implementation/index.md). This file is the module-level navigation map.
+The application lives in the installable `solar_model` package. The root `docker_start.py`, `main_data_collection.py`, `main_dashboard.py` and `recalculate_economics.py` files are compatibility launchers. Configuration and database paths still resolve from the working directory.
 
-## Core files
+## Package layout
 
-| File | Responsibility / useful symbols |
+```text
+solar_model/
+  config.py, tariffs.py, time_utils.py, logging_setup.py, paths.py, utils.py
+  planning/
+    model.py, types.py, scenarios.py, optimisation.py, scoring.py, system.py
+    forecasts/solar.py, load.py
+  services/collection.py, forecasting.py, planning.py
+  integrations/
+    forecast_solar.py
+    sigenstor/client.py, registers.py, datasheets.py, register_maps/
+  storage/
+    schema.py, connection.py, migrations.py, measurements.py, forecasts.py
+    queries/planning.py, forecasting.py, dashboard.py, recent.py, analysis.py, exports.py, types.py
+  dashboard/
+    app.py, layout.py, state.py, snapshot.py, live.py, formatting.py
+    tabs/recent.py, analysis.py, system_info.py, control.py
+    components/charts.py, tables.py, chart_display.py, download_dialog.py, warnings.py
+    assets/
+  runtime/supervisor.py, collector.py
+  tools/plan_as_of.py, reports.py, evaluate_forecasts.py, evaluate_load.py,
+        rebuild_forecasts.py, recalculate_economics.py
+```
+
+## Responsibility boundaries
+
+| Area | Responsibility and entry points |
 | --- | --- |
-| [docker_start.py](../../docker_start.py) | Child-process supervision; restart marker; shutdown |
-| [main_data_collection.py](../../main_data_collection.py) | Collection scheduler and reconnect loop |
-| [main_dashboard.py](../../main_dashboard.py) | NiceGUI page, startup/shutdown, snapshot subscriptions |
-| [config.py](../../config.py) | Frozen configuration dataclasses; `load_config`, `validate_config` |
-| [common.py](../../common.py) | Logging, timestamps, wall-clock scheduling, source-relative paths |
-| [database.py](../../database.py) | ORM models, scaled storage, `SolarDatabase`, migrations, rollups |
-| [modbus_collector.py](../../modbus_collector.py) | Register blocks, decoding, one-pass electrical/device collection |
-| [forecast_collector.py](../../forecast_collector.py) | Provider requests and operational correction hook |
-| [economics.py](../../economics.py) | Effective-date/rule lookup and interval costs |
-| [datasheets.py](../../datasheets.py) | Inverter-model-to-nameplate-PV-power catalogue |
-| [energy_plan_simulation.py](../../energy_plan_simulation.py) | Forecast intervals, device inputs, mixed-integer optimisation |
-| [test_energy_plan_as_of.py](../../test_energy_plan_as_of.py) | Report CLI, as-of inputs, weighted load profile, scenarios, Excel output; despite its name, not a pytest test suite |
-| [recalculate_economics.py](../../recalculate_economics.py) | Direct SQL tariff backdating and rollup rebuild |
+| [Planning model](../../solar_model/planning/model.py) | `PlanningInputs` and `build_plan`: in-memory inputs → scenarios → numerical simulation frames. No storage, network or UI imports |
+| [Forecast models](../../solar_model/planning/forecasts/solar.py) | Pure solar day-ahead/intraday calculations; [load.py](../../solar_model/planning/forecasts/load.py) predicts the fixed daily load profile |
+| [Optimisation](../../solar_model/planning/optimisation.py) | CVXPY flow variables, constraints, HiGHS solve and energy-balance checks; [system.py](../../solar_model/planning/system.py) derives physical limits; [scoring.py](../../solar_model/planning/scoring.py) defines the current cost/battery objective |
+| [Services](../../solar_model/services) | Collection transactions, forecast scheduling/calibration persistence, and as-of planning input assembly |
+| [Integrations](../../solar_model/integrations) | HTTP provider client; Modbus transport, map parsing/decoding and device specifications. Register-map JSON is packaged beside its loader |
+| [Storage](../../solar_model/storage) | Schema and scaled types; engine/session ownership; migrations; measurement/forecast transactions. `SolarDatabase` composes the two storage mixins |
+| [Queries](../../solar_model/storage/queries) | Planning/forecast input selection, native Recent/Analysis/export SQL, dataframe adapters and data-only contracts. No NiceGUI dependency |
+| [Dashboard](../../solar_model/dashboard) | NiceGUI lifecycle, browser state, live polling, shared snapshots, tabs, reusable widgets and formatting. `analysis.py` replaces the old misspelt module |
+| [Runtime](../../solar_model/runtime) | Managed child lifecycle and persisted collection loop; subprocess imports work from a separate configuration directory |
+| [Tools](../../solar_model/tools) | Explicit module CLIs and workbook output, separate from normal application startup |
 
-## Dashboard package
+The unmounted Hourly tab was removed. Older ORM/pandas query paths remain where they support current calculations or independent SQL regression comparisons; they are not a second UI. The independent `check-tariffs/` experiment retains its inputs and reports; it is outside application startup.
 
-- [layout.py](../../dashboard/layout.py): tab composition, shared CSS, browser-script injection.
-- [models.py](../../dashboard/models.py): state/data/element dataclasses and shared panel colours.
-- [snapshot.py](../../dashboard/snapshot.py): shared Recent/System Info cache and subscriptions.
-- [live.py](../../dashboard/live.py): browser-activated live polling, daily meters, PV proportions.
-- [recent.py](../../dashboard/recent.py): Live/Today, daily/monthly summaries, in-place updates.
-- [anlaysis.py](../../dashboard/anlaysis.py): Analysis controls, chart builder, zoom and download actions. **Keep the existing misspelling when locating/importing this file.**
-- [data.py](../../dashboard/data.py): summaries, forecast selection, exports, calendar helpers, chart adapters; also retains older ORM/pandas paths.
-- [chart_data_sql.py](../../dashboard/chart_data_sql.py): selection-aware `ChartRequest` aggregation and batched SQL.
-- [summary_data_sql.py](../../dashboard/summary_data_sql.py): shared native SQL daily/monthly/lifetime summaries, forecast differences and elapsed-day weighting.
-- [export_data_sql.py](../../dashboard/export_data_sql.py): raw-sample/selected-vintage SQL aggregation for downloads; chronological last readings and tariff labels.
-- [charts.py](../../dashboard/charts.py), [chart_display.py](../../dashboard/chart_display.py): ECharts options and reusable chart/table/export UI.
-- [warnings.py](../../dashboard/warnings.py), [warnings.js](../../dashboard/assets/warnings.js), [live_updates.js](../../dashboard/assets/live_updates.js): notifications, persistent freshness banner, update indicator.
-- [control.py](../../dashboard/control.py): operator recalculation/restart actions; [download_data_dialog.py](../../dashboard/download_data_dialog.py): interval CSV/Excel downloads.
-- [system_info.py](../../dashboard/system_info.py), [tables.py](../../dashboard/tables.py): metadata table and total-row styling.
-- [hourly.py](../../dashboard/hourly.py): older Hourly tab component, currently absent from `DashboardLayout`.
-- [solar_power.svg](../../dashboard/assets/solar_power.svg): existing vector asset.
+## Data flow
 
-## Forecast and experimental tools
+```text
+runtime.collector → integrations → services.collection / services.forecasting → storage
+storage.queries → dashboard.snapshot / dashboard.tabs → components / formatting
+ tools.plan_as_of → services.planning → storage.queries.planning
+                                    → planning.model → scenarios → optimisation → reports
+```
 
-- [operational_model.py](../../forecast/operational_model.py): production solar scalar/residual correction and fixed daily load profiles.
-- [rebuild_operational_adjusted_forecasts.py](../../forecast/rebuild_operational_adjusted_forecasts.py): chronological replacement of stored adjusted values.
-- [evaluate_forecasts.py](../../forecast/evaluate_forecasts.py): raw/adjusted performance report.
-- [evaluate_load_profile.py](../../forecast/evaluate_load_profile.py): report-only backtest of the shared production weekday/weekend load model.
-- [check-tariffs/](../../check-tariffs): independent minute-data extraction and tariff simulations using `hardware.json`, `energy_plan.json`, and the intentionally named `tarrifs.json`.
+Production forecasting and offline planning share the package but have different current input policies: the as-of loader still uses its historical load profile. The [plan-model design](plan-model.md) describes the future shared next action and protection scoring; this restructure preserves the current independent-scenario solver.
 
-## Change routing
+## Tests and change routing
 
-- New metric: follow the [worked recipe](../implementation/adding-a-metric.md) through register JSON, declared storage, historical-data policy, valid counts, SQL, frame/chart registration, labels and tests.
-- Forecast change: production model, collector integration, rebuild behavior, dashboard snapshot meaning, evaluation.
-- Tariff change: configuration and matching, stored economics, recalculation, rollups, money charts.
-- Styling change: follow [styling.md](styling.md); freshness policy lives in warning code, not tab layout.
+Tests are grouped into `core/`, `forecasting/`, `storage/`, `dashboard/`, `browser/`, `planning/` and cross-layer `regressions/`. Run `python -m pytest -q` for all groups, including the legacy-named migration regression.
+
+For a metric change, follow [adding a metric](../implementation/adding-a-metric.md). For state/data contracts and call hierarchies, use the [implementation index](../implementation/index.md). Styling and freshness changes follow [styling](styling.md); unresolved policies belong in [review findings](../reviews/findings.md).

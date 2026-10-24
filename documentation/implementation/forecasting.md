@@ -1,11 +1,13 @@
 # Operational forecast correction: frames, calculations, and writes
 
-Source: [forecast/operational_model.py](../../forecast/operational_model.py). The [forecasting overview](../overview/forecasting.md) explains model intent and displayed forecast meanings. This guide traces the production implementation; evaluation and maintenance tools are in [maintenance-research.md](maintenance-research.md).
+Source: [solar_model/planning/forecasts/solar.py](../../solar_model/planning/forecasts/solar.py). The [forecasting overview](../overview/forecasting.md) explains model intent and displayed forecast meanings. This guide traces the production implementation; evaluation and maintenance tools are in [maintenance-research.md](maintenance-research.md).
+
+Package ownership: `planning/forecasts/solar.py` contains solar mathematics, `planning/forecasts/load.py` contains `predict_day`, `storage/queries/forecasting.py` loads historical inputs, and `services/forecasting.py` schedules collection and persists results.
 
 ## 1. Function hierarchy
 
 ```text
-forecast_collector.collect_once()
+solar_model.services.forecasting.collect_once()
   refresh_adjusted_forecast(database, collection_time, timezone)
     load_operational_inputs(database)
       _load_inputs(database_path)
@@ -91,7 +93,7 @@ tuple[pd.Timestamp, dict[str, dict[str, float]]] | None
 # inner mapping: adjusted-field names in physical units
 ```
 
-Model settings are passed as `ForecastModelsConfig` from `config.forecast.model_calibration_parameters`; its three `ForecastModelConfig` children share `lookback`, `halflife`, and `prior_effective_observations`. The collector passes the startup configuration through `refresh_adjusted_forecast()` into `calculate_adjusted_forecast()`. The rebuild CLI also loads and passes YAML settings. Direct pure-helper calls without settings retain the original defaults, defined in `config.py`.
+Model settings are passed as `ForecastModelsConfig` from `config.forecast.model_calibration_parameters`; its three `ForecastModelConfig` children share `lookback`, `halflife`, and `prior_effective_observations`. The collector passes the startup configuration through `refresh_adjusted_forecast()` into `calculate_adjusted_forecast()`. The rebuild CLI also loads and passes YAML settings. Direct pure-helper calls without settings retain the original defaults, defined in `solar_model/config.py`.
 
 ## 4. Calibration structures
 
@@ -173,7 +175,7 @@ Historical replay's `add_adjusted_energy_values()` consumes an in-memory update 
 
 ## 8. Fixed daily load profile
 
-`forecast_collector.collect_once()` calls `refresh_daily_load_forecast()` once a scheduled scan is due, independently of solar HTTP/adjustment success. A saved `target_day` skips both loading and fitting. For a new day, `load_hourly_load()` queries bounded `sigenstor_hourly` load-energy sums, explicitly removes the 10,000 storage scale, and adds configured-local hour/day/type. `predict_day()` implements the shared recency-weighted hierarchical profile (also called by the evaluation CLI).
+`solar_model.services.forecasting.collect_once()` calls `refresh_daily_load_forecast()` once a scheduled scan is due, independently of solar HTTP/adjustment success. A saved `target_day` skips both loading and fitting. For a new day, `load_hourly_load()` queries bounded `sigenstor_hourly` load-energy sums, explicitly removes the 10,000 storage scale, and adds configured-local hour/day/type. `predict_day()` implements the shared recency-weighted hierarchical profile (also called by the evaluation CLI).
 
 Training ends strictly before target-day midnight; current-day observations do not influence a late first run. The pure helper returns 24 clock-hour predictions; the orchestration maps them to the real UTC-hour targets between local midnights, preserving the 23/25-hour DST day. Unobserved hours stay null. `save_daily_load_forecast()` uses `BEGIN IMMEDIATE`, checks for existing rows, then writes the whole profile in one transaction. No existing day is overwritten, even after restart or tuning changes. `collected_at_utc` records generation time separately from `forecast_time`; `target_day` is the configured-local ISO date.
 

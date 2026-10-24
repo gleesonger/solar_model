@@ -13,13 +13,15 @@ RUN python -m pip install --upgrade pip \
 
 COPY . .
 
+RUN python -m pip install --no-deps .
+
 RUN chmod +x /app/docker-entrypoint.sh
 
 WORKDIR /config
 
 VOLUME ["/config"]
 
-EXPOSE 8080
+EXPOSE 8090
 
 ENTRYPOINT ["/app/docker-entrypoint.sh"]
 

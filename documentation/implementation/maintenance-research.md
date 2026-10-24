@@ -4,7 +4,7 @@ These tools sit outside the managed collection/UI loop. Some mutate history; oth
 
 ## 1. Tariff recalculation
 
-Source: [recalculate_economics.py](../../recalculate_economics.py), [dashboard/control.py](../../dashboard/control.py).
+Source: [solar_model/tools/recalculate_economics.py](../../solar_model/tools/recalculate_economics.py), [solar_model/dashboard/tabs/control.py](../../solar_model/dashboard/tabs/control.py).
 
 ```text
 ControlTab recalculate callback
@@ -41,7 +41,7 @@ Inclusive date bounds become `[local start midnight, midnight after end)` UTC ep
 
 ## 2. Chronological operational forecast rebuild
 
-Source: [forecast/rebuild_operational_adjusted_forecasts.py](../../forecast/rebuild_operational_adjusted_forecasts.py).
+Source: [solar_model/tools/rebuild_forecasts.py](../../solar_model/tools/rebuild_forecasts.py).
 
 ```text
 main()
@@ -73,7 +73,7 @@ Live refresh loops over all target days in a current provider collection; this r
 
 ## 3. Raw-versus-adjusted performance report
 
-Source: [forecast/evaluate_forecasts.py](../../forecast/evaluate_forecasts.py).
+Source: [solar_model/tools/evaluate_forecasts.py](../../solar_model/tools/evaluate_forecasts.py).
 
 ```text
 main()
@@ -97,7 +97,7 @@ No model fitting or adjusted writes occur. Optional CSV stores the report, not t
 
 ## 4. Hierarchical load-profile report
 
-Source: [forecast/evaluate_load_profile.py](../../forecast/evaluate_load_profile.py), a report-only evaluator of the production load model in `forecast/operational_model.py`.
+Source: [solar_model/tools/evaluate_load.py](../../solar_model/tools/evaluate_load.py), a report-only evaluator of the production load model in `solar_model/planning/forecasts/solar.py`.
 
 The CLI loads `--config` (default `config.yaml`) and uses `forecast.model_calibration_parameters.load`; configured database/timezone are defaults, overridable by CLI flags. The shared production `load_hourly_load()` queries hourly load period sums grouped by UTC hour, divides by storage scale, and adds local `day`, `hour`, and weekday/weekend `day_type`. `predict_day()` uses only prior history within `settings.lookback` days (default 42), weighted by `settings.halflife` days (default 14). It blends type-specific and all-days hourly means with `type_weight/(type_weight+settings.prior_strength)`. The shared field `prior_effective_observations` is a decimal influence fraction after one unit of weighted evidence, default `0.2` (20%); its derived strength is `1 / prior_effective_observations - 1` (default 4). Without matching day-type observations the all-days hourly mean is used, including at fraction `1` (100% influence); hours with no observations remain missing. Pure helper calls may receive settings explicitly or use the original configuration defaults.
 

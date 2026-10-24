@@ -65,7 +65,7 @@ Confirm the feature inventory before declaring coverage complete. Add features d
 
 ### Architecture, runtime and recovery
 
-- Trace `docker_start.py`, `main_data_collection.py` and `main_dashboard.py`, including standalone startup and database initialization.
+- Trace `solar_model/runtime/supervisor.py`, `solar_model/runtime/collector.py` and `solar_model/dashboard/app.py`, including standalone startup and database initialization.
 - Check scheduling, worker/thread ownership, shared versus browser-specific state, shutdown and restart behavior.
 - Verify exception handling, partial success, retry behavior, stale-state retention and recovery after failures.
 - Exercise interrupted collection, process restarts, cache rebuilding and failed/interrupted migrations on temporary databases. Verify that recovery and repeated operations do not duplicate records, apply transformations twice or leave partial/corrupt state.

@@ -1,18 +1,18 @@
 # Collection and external data ingestion
 
-Sources: [modbus_collector.py](../../modbus_collector.py), [forecast_collector.py](../../forecast_collector.py), [main_data_collection.py](../../main_data_collection.py), both [electrical](../../sigen_register_map.json) and [device](../../sigen_device_register_map.json) register maps.
+Sources: [solar_model/integrations/sigenstor/registers.py](../../solar_model/integrations/sigenstor/registers.py), [solar_model/services/forecasting.py](../../solar_model/services/forecasting.py), [solar_model/runtime/collector.py](../../solar_model/runtime/collector.py), both [electrical](../../solar_model/integrations/sigenstor/register_maps/sigen_register_map.json) and [device](../../solar_model/integrations/sigenstor/register_maps/sigen_device_register_map.json) register maps.
 
 ## 1. Full-interval call hierarchy
 
 ```text
-main_data_collection.main()
+solar_model.runtime.collector.main()
   load_registers(electrical_map, default_device_id)
   load_registers(device_map, default_device_id)
   database.load_previous_cumulatives()
   wait for next full interval
   each cycle:
     connect if client is None
-    modbus_collector.collect_once(...)
+    solar_model.services.collection.collect_once(...)
       read_registers(electrical blocks)
         read_block() -> pymodbus result
         decode_registers() / decode_string()
@@ -20,7 +20,7 @@ main_data_collection.main()
       database.save_modbus_sample(...)
       read_registers(device blocks)
       database.save_device_info(...)
-    forecast_collector.collect_once(..., interval_seconds)
+    solar_model.services.forecasting.collect_once(..., interval_seconds)
       database.claim_forecast_collection(now, interval_seconds)
       if recent: log last attempt/next due; return without HTTP or adjustment
       if due:

@@ -1,4 +1,5 @@
 from __future__ import annotations
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from collections.abc import Sequence
 from typing import cast
@@ -13,12 +14,25 @@ from solar_model.planning.system import system_limits
 from solar_model.planning.scoring import total_score
 
 
+@dataclass
+class EnergyModel:
+    problem: cp.Problem
+    scenario_frames: dict[str, pd.DataFrame]
+    flows: dict[str, cp.Expression]
+    battery_levels: list[list[cp.Expression]]
+    battery_charging: cp.Variable
+    initial_battery_kwh: float
+
+
 def simulate_energy_plan(device_info: DeviceInfo, device_state: DeviceState, forecasts: Sequence[ForecastData], config: Config, projection_starts_at: datetime) -> dict[str, pd.DataFrame]:
-    """Solve independent scenario trajectories in one problem and return numerical reports.
+    """Build, optimise and report independent scenario trajectories."""
+    model = build_model(device_info, device_state, forecasts, config, projection_starts_at)
+    optimise_model(model)
+    return model_to_results(model)
 
-    First actions are not yet shared across scenarios; see the plan-model design.
-    """
 
+def build_model(device_info: DeviceInfo, device_state: DeviceState, forecasts: Sequence[ForecastData], config: Config, projection_starts_at: datetime) -> EnergyModel:
+    """Construct the scenario problem and reporting expressions without solving."""
     if not forecasts:
         raise ValueError("at least one forecast scenario is required")
 
@@ -110,18 +124,44 @@ def simulate_energy_plan(device_info: DeviceInfo, device_state: DeviceState, for
         constraints,
     )
 
-    problem.solve(solver=cp.HIGHS)
+    return EnergyModel(
+        problem=problem,
+        scenario_frames=dict_df_results,
+        flows={
+            "solar_to_load": solar_to_load,
+            "solar_to_battery": solar_to_battery,
+            "solar_to_battery_loss": solar_to_battery_loss,
+            "grid_to_battery_loss": grid_to_battery_loss,
+            "solar_to_grid": solar_to_grid,
+            "solar_clipped": solar_clipped,
+            "battery_to_load": battery_to_load,
+            "battery_to_grid": battery_to_grid,
+            "battery_to_ac_loss": battery_to_ac_loss,
+            "grid_to_load": grid_to_load,
+            "grid_to_battery": grid_to_battery,
+        },
+        battery_levels=battery_levels,
+        battery_charging=battery_charging,
+        initial_battery_kwh=device_state.battery_kwh,
+    )
 
-    if problem.status not in (cp.OPTIMAL, cp.OPTIMAL_INACCURATE):
-        raise ValueError(f"unable to find a feasible energy plan: {problem.status}")
 
-    for s, forecast in enumerate(forecasts):
-        df = dict_df_results[forecast.name]
+def optimise_model(model: EnergyModel) -> None:
+    """Solve the constructed problem and reject unsuccessful solver states."""
+    model.problem.solve(solver=cp.HIGHS)
 
-        battery_end_values = [level.value for level in battery_levels[s]]
-        df["battery_start_kwh"] = [device_state.battery_kwh, *battery_end_values[:-1]]
+    if model.problem.status not in (cp.OPTIMAL, cp.OPTIMAL_INACCURATE):
+        raise ValueError(f"unable to find a feasible energy plan: {model.problem.status}")
 
-        for name, value in {"solar_to_load": solar_to_load, "solar_to_battery": solar_to_battery, "solar_to_battery_loss": solar_to_battery_loss, "grid_to_battery_loss": grid_to_battery_loss, "solar_to_grid": solar_to_grid, "solar_clipped": solar_clipped, "battery_to_load": battery_to_load, "battery_to_grid": battery_to_grid, "battery_to_ac_loss": battery_to_ac_loss, "grid_to_load": grid_to_load, "grid_to_battery": grid_to_battery}.items():
+
+def model_to_results(model: EnergyModel) -> dict[str, pd.DataFrame]:
+    """Extract solved values, calculate report columns and check energy balances."""
+    for s, (scenario_name, df) in enumerate(model.scenario_frames.items()):
+
+        battery_end_values = [level.value for level in model.battery_levels[s]]
+        df["battery_start_kwh"] = [model.initial_battery_kwh, *battery_end_values[:-1]]
+
+        for name, value in model.flows.items():
             df[f"{name}_kwh"] = value.value[:, s]
         df["solar_to_inverter_kwh"] = df["solar_to_load_kwh"] + df["solar_to_battery_kwh"] + df["solar_to_battery_loss_kwh"] + df["solar_to_grid_kwh"]
         df["battery_to_inverter_kwh"] = df["battery_to_load_kwh"] + df["battery_to_grid_kwh"]
@@ -130,7 +170,7 @@ def simulate_energy_plan(device_info: DeviceInfo, device_state: DeviceState, for
         df["grid_import_kwh"] = df["grid_to_load_kwh"] + df["grid_to_battery_kwh"] + df["grid_to_battery_loss_kwh"]
         df["grid_export_kwh"] = df["solar_to_grid_kwh"] + df["battery_to_grid_kwh"]
         df["battery_end_kwh"] = battery_end_values
-        df["battery_charging"] = battery_charging.value[:, s]
+        df["battery_charging"] = model.battery_charging.value[:, s]
         df["import_cost"] = df["grid_import_kwh"] * df["import_rate"]
         df["export_revenue"] = df["grid_export_kwh"] * df["export_rate"]
         df["net_cost"] = df["import_cost"] - df["export_revenue"]
@@ -138,5 +178,5 @@ def simulate_energy_plan(device_info: DeviceInfo, device_state: DeviceState, for
         load_accounted_kwh = df["solar_to_load_kwh"] + df["battery_to_load_kwh"] + df["grid_to_load_kwh"]
         invalid_periods = df.index[((df["solar_kwh"] - solar_accounted_kwh).abs() > 0.001) | ((df["load_kwh"] - load_accounted_kwh).abs() > 0.001)].tolist()
         if invalid_periods:
-            raise ValueError(f"energy balance check failed for {forecast.name} periods: {invalid_periods}")
-    return dict_df_results
+            raise ValueError(f"energy balance check failed for {scenario_name} periods: {invalid_periods}")
+    return model.scenario_frames

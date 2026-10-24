@@ -51,7 +51,7 @@ Later decisions can adapt independently in each scenario. This two-stage approxi
 
 ### 2.3 Next Action and Day Plan
 
-The primary output is one implementable action, with start/end times, mode, power limits and applicable SOC settings. It carries four planning intents mapped to three physical modes:
+The primary output is one implementable action for the next time step, with mode, grid import/export power limits and applicable SOC settings. Timing is implicit; the action has no timestamps or battery charge/discharge power limits. It carries four planning intents mapped to three physical modes:
 
 | Intent | SigenStor mode | Intended behaviour |
 | --- | --- | --- |

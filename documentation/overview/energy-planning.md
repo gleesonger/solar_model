@@ -17,6 +17,8 @@ Source: [solar_model/tariffs.py](../../solar_model/tariffs.py), `economic_period
 
 Source: [solar_model/planning/optimisation.py](../../solar_model/planning/optimisation.py), `simulate_energy_plan`.
 
+`simulate_energy_plan` calls `build_model`, `optimise_model`, then `model_to_results`. `EnergyModel` holds the CVXPY problem, reporting expressions and scenario input frames between these stages.
+
 - Inputs: `DeviceInfo`, starting battery kWh, named solar/load interval forecasts, configuration, projection start.
 - `ForecastData` sorts intervals and rejects gaps, overlaps, invalid lengths, and uncovered query ranges. Overlap energy assumes uniform power within each supplied interval.
 - Each result is a scenario DataFrame containing interval bounds, tariffs/limits, energy routes/losses, battery levels, and economics.

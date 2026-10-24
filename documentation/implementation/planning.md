@@ -23,8 +23,11 @@ solar_model.tools.plan_as_of.main()
   create_scenarios()
     _half_hour_intervals() -> _scenario_intervals()
   simulate_energy_plan()
-    system_limits()
-    total_score()
+    build_model()
+      system_limits()
+      total_score()
+    optimise_model()
+    model_to_results()
   group_plan(output timestep)
   write_workbook()
 ```
@@ -105,22 +108,27 @@ Output contract: `dict[str, ForecastData]`. Scenarios describe separate hypothet
 
 ```text
 simulate_energy_plan(device_info, state, scenarios, config, projection_start)
-  validate names/duration/efficiencies/capacity
-  derive T = hours*60/resolution, S = scenario count, dt = resolution/60
-  create flow variables of shape (T,S)
-  for each time step:
-    select local import/export rules and planning limits
-    for each scenario:
-      forecast.sum(interval) -> solar/load kWh
-      add conservation, mode, power and battery-bound constraints
-      add cost and battery-worth expressions
-      populate input/limit columns in result frame
-  cp.Problem(...).solve(solver=cp.HIGHS)
-  check solver status
-  extract arrays and expressions per scenario
-  derive totals/costs; check solar/load energy balances
-  return dict[str, DataFrame]
+  build_model(...) -> EnergyModel
+    validate names/duration/efficiencies/capacity
+    derive T = hours*60/resolution, S = scenario count, dt = resolution/60
+    create flow variables of shape (T,S)
+    for each time step:
+      select local import/export rules and planning limits
+      for each scenario:
+        forecast.sum(interval) -> solar/load kWh
+        add conservation, mode, power and battery-bound constraints
+        add cost and battery-worth expressions
+        populate input/limit columns in result frame
+    construct cp.Problem without solving
+  optimise_model(model)
+    model.problem.solve(solver=cp.HIGHS)
+    check solver status
+  model_to_results(model) -> dict[str, DataFrame]
+    extract arrays and expressions per scenario
+    derive totals/costs; check solar/load energy balances
 ```
+
+`EnergyModel` carries the problem, scenario frames in forecast order, named flow expressions, battery-level expressions, charge-mode variable and initial battery energy. `optimise_model` solves it in place; `model_to_results` fills and returns its scenario frames. The wrapper retains its original arguments and result contract.
 
 Eight non-negative flow variables have shape `(T,S)`: solar→load/battery/grid/clipped, battery→load/grid, grid→load/battery. A boolean `battery_charging` variable has the same shape. Every flow value is interval kWh, not kW.
 
@@ -168,6 +176,8 @@ Solar/load conservation is checked within 0.001 kWh after extracting values. Onl
 No result is written back to SQLite. The existing output path is deleted before loading/solving succeeds, so a failed report can leave no workbook. Relevant current limitations are collected in [review findings](../reviews/findings.md).
 
 ## Package API
+
+`planning.types.NextAction` is a frozen dataclass for the next time step: `mode: OperatingMode`, optional `grid_import_limit_kw`/`grid_export_limit_kw`, and `charge_cut_off_soc_percent`/`discharge_cut_off_soc_percent`. `OperatingMode` is an `IntEnum` with `SELF_CONSUMPTION = 2`, `CHARGE_PV_FIRST = 4`, and `DISCHARGE_PV_FIRST = 5`. Timing is implicit; the action has no timestamps or battery charge/discharge power limits. It is a data contract only; the current planner does not yet produce or execute it.
 
 `PlanningInputs(device_info, device_state, forecast, starts_at)` is a frozen record of the current input objects; contained forecast/device objects are not deeply immutable. `build_plan(inputs, config)` expands the baseline through `create_scenarios` and returns `dict[str, pandas.DataFrame]`. It can run entirely in memory. `services.planning.plan_as_of(database, config, as_of)` supplies the same inputs from cutoff-aware queries. The CLI groups and writes those frames through `tools.reports`.
 

@@ -2,7 +2,23 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 from collections.abc import Iterable
+from enum import IntEnum
 from solar_model.time_utils import utc_instant
+
+class OperatingMode(IntEnum):
+    SELF_CONSUMPTION = 2
+    CHARGE_PV_FIRST = 4
+    DISCHARGE_PV_FIRST = 5
+
+@dataclass(frozen=True)
+class NextAction:
+    """Control for the next time step; grid limits in kW and SOC in percent."""
+
+    mode: OperatingMode
+    grid_import_limit_kw: float | None
+    grid_export_limit_kw: float | None
+    charge_cut_off_soc_percent: float
+    discharge_cut_off_soc_percent: float
 
 @dataclass
 class DeviceInfo:

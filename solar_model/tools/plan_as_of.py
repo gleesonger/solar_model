@@ -20,7 +20,7 @@ def main() -> None:
     parser.add_argument("--config", type=Path, default=Path("config.yaml"))
     parser.add_argument("--database", type=Path, default=Path("solar.db"))
     parser.add_argument("--as-of", required=True, help="planning cut-off as an ISO date-time; system timezone is assumed when omitted")
-    parser.add_argument("--output-timestep-min", type=int, default=None, help="output resolution in minutes; must be a multiple of the projection resolution")
+    parser.add_argument("--output-timestep-min", type=int, default=None, help="optional start-time grouping in minutes; default preserves mixed model intervals")
     parser.add_argument("--output", type=Path, default=Path("energy_plan.xlsx"))
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -39,15 +39,11 @@ def main() -> None:
         LOGGER.info("Loading planning inputs and solving scenarios")
         plans = plan_as_of(database, config, as_of).results
 
-        output_timestep_mins = args.output_timestep_min or config.energy_plan.projection_resolution_mins
-
-        if output_timestep_mins <= 0:
-            raise ValueError("--output-timestep-min must be greater than zero")
-        if output_timestep_mins % config.energy_plan.projection_resolution_mins:
-            raise ValueError("--output-timestep-min must be a multiple of the projection resolution")
-
-        plans = {name: group_plan(plan, output_timestep_mins) for name, plan in plans.items()}
-        LOGGER.info("Grouped %d plans into %d-minute periods", len(plans), output_timestep_mins)
+        if args.output_timestep_min is not None:
+            if args.output_timestep_min <= 0:
+                raise ValueError("--output-timestep-min must be greater than zero")
+            plans = {name: group_plan(plan, args.output_timestep_min) for name, plan in plans.items()}
+            LOGGER.info("Grouped %d plans into %d-minute start-time buckets", len(plans), args.output_timestep_min)
         write_workbook(plans, args.output, as_of)
     finally:
         database.engine.dispose()

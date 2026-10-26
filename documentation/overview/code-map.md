@@ -33,7 +33,7 @@ solar_model/
 | --- | --- |
 | [Planning simulation](../../solar_model/planning/optimisation.py) | `simulate_energy_plan`: in-memory device/state/scenarios to `SimulationResult`. The service creates scenarios directly; planning has no storage/network/UI imports |
 | [Forecast models](../../solar_model/planning/forecasts/solar.py) | Pure solar day-ahead/intraday calculations; [house_load.py](../../solar_model/planning/forecasts/house_load.py) predicts the fixed daily load profile |
-| [Optimisation](../../solar_model/planning/optimisation.py) | CVXPY flow variables, constraints, HiGHS solve and energy-balance checks; [system.py](../../solar_model/planning/system.py) derives physical limits; the standalone `score_simulation` in this script builds the agreed reference-normalised cost/protection objective |
+| [Optimisation](../../solar_model/planning/optimisation.py) | CVXPY flow variables, constraints, HiGHS solve and energy-balance checks; [system.py](../../solar_model/planning/system.py) derives physical limits; the standalone `score_simulation` builds the probability-weighted tariff-scaled protection reward minus cost |
 | [Services](../../solar_model/services) | Collection transactions, forecast scheduling/calibration persistence, and as-of planning input assembly |
 | [Integrations](../../solar_model/integrations) | HTTP provider client; Modbus transport, map parsing/decoding and device specifications. Register-map JSON is packaged beside its loader |
 | [Storage](../../solar_model/storage) | Schema and scaled types; engine/session ownership; migrations; measurement/forecast transactions. `SolarDatabase` composes the two storage mixins |

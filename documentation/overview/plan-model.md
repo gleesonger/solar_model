@@ -1,6 +1,6 @@
 # Plan model
 
-Proposed design, agreed on 2026-10-24. This document defines the target model; it does not describe an already implemented control system. Section 6 identifies the changes from current behaviour.
+Proposed design, initially agreed on 2026-10-24; scoring revised on 2026-10-26. This document defines the target model; it does not describe an already implemented control system. Section 6 identifies the changes from current behaviour.
 
 ## 1. Summary
 
@@ -20,7 +20,7 @@ One joint optimisation evaluates nine solar/load scenarios. All share the next 1
 
 ### 2.1 Overview
 
-The plan model chooses the next 15-minute battery-control action to implement, considering its consequences over a rolling 24-hour horizon.
+The plan model chooses the next 15-minute battery-control action to implement, considering its consequences over a rolling 24-hour horizon. Later intervals are hourly, shortened at the horizon end and split at tariff or scheduled-limit changes. Forecast energy and hardware limits follow each interval duration; protection is averaged using elapsed time.
 
 It evaluates nine combinations of low, medium and high solar and load forecasts. Every scenario shares the same next action. Scenario-specific outcomes and subsequent decisions can vary, subject to the system's physical constraints and command behaviour.
 
@@ -45,7 +45,7 @@ problem = combine(blocks.constraints, weighted_objective(blocks))
 solve(problem)
 ```
 
-Building a block creates variables, constraints and expressions; it does not solve a separate problem. The formulation remains a mixed-integer linear problem using CVXPY and HiGHS. Each reference or compromise optimisation includes all nine blocks.
+Building a block creates variables, constraints and expressions; it does not solve a separate problem. The formulation remains a mixed-integer linear problem using CVXPY and HiGHS. The single tariff-scaled optimisation includes all nine blocks.
 
 Later decisions can adapt independently in each scenario. This two-stage approximation effectively assumes the scenario becomes known after the first interval; it is optimistic about future information. It is an initial design, not a guarantee against every possible future.
 
@@ -62,7 +62,7 @@ The primary output is one implementable action for the next time step, with forc
 
 The two passive intents send the same mode command. Actual PV and load determine the direction; the intent describes the expected movement. Mixed scenario expectations should be reported rather than forcing a single predicted direction.
 
-Alongside the action, return a possible day plan for each scenario, weighted expected cost and protection, minimum usable battery energy, time below the preferred reserve, and the spread of outcomes. Targets and commanded limits are distinguished from predicted battery energy or grid flows, which vary by scenario.
+Alongside the action, return a possible day plan for each scenario, weighted expected cost and protection, minimum stored battery energy, time below the preferred reserve, and the spread of outcomes. Targets and commanded limits are distinguished from predicted battery energy or grid flows, which vary by scenario.
 
 ### 2.4 Replanning and Execution
 
@@ -76,72 +76,86 @@ The application currently has no battery-control writer. This document specifies
 
 ### 3.1 Total Score and User Preference
 
-We compare how much financial return we give up against how much extra battery protection we gain. The preference slider determines that balance, and the solver chooses the plan with the highest combined score.
+Scoring design revised by agreement on 2026-10-26. This tariff-scaled objective is implemented in `score_simulation`; section 6.2 distinguishes the remaining model work.
 
-The user supplies a preferred reserve, defined in section 3.3, and a protection preference $p$ from 0 to 100. The preference changes the balance between objectives, not the shape of the protection curve.
+The user supplies two inputs:
 
-For each candidate joint plan, calculate weighted expected cost $C$ and protection $H$. Establish two reference plans using exactly the same scenarios, weights, starting state, constraints and horizon:
+- **Target reserve R**, in stored battery kWh measured from zero, with R greater than zero. It controls the diminishing-return protection curve in section 3.3 and the reserve's replacement value. Do not add or subtract the physical discharge cut-off when interpreting R.
+- **Protection preference X**, from 0 to 100. It controls the strength of the protection reward. The user adjusts it by inspecting the cost and battery trajectory; it is not a percentage reserve requirement or a percentage cost increase.
 
-| Reference | Primary objective | Tie-break | Recorded values |
-| --- | --- | --- | --- |
-| Financial optimum | Minimise expected cost | Maximise protection | $C_0,H_0$ |
-| Protection optimum | Maximise expected protection | Minimise cost | $C_1,H_1$ |
+For each scenario, add up net electricity cost and calculate its average battery-protection score. Convert protection into a monetary reward using the tariff plan, subtract cost, then average scenario scores using their probabilities. Maximise this single objective; cost remains part of it at every X, including 100.
 
-Normalise the candidate's position between these reference outcomes:
+#### Tariff-based protection value
 
-$$
-F=100\frac{C_1-C}{C_1-C_0},\qquad
-P=100\frac{H-H_0}{H_1-H_0}
-$$
-
-Then maximise:
+Sample the import tariff at projection start and then every elapsed hour for the next **24 hours**. Use the configured-local weekday and effective tariff plan at each timestamp, then average these 24 values. Changes between samples are deliberately approximated; this is a preference scale, not billing arithmetic. Do not weight by forecast consumption, cheapest charging opportunities or candidate-plan outcomes:
 
 $$
-\boxed{J=\left(1-\frac{p}{100}\right)F+\frac{p}{100}P}
+\bar r=\frac{1}{24}\sum_{h=0}^{23}r^{buy}(\text{projection start}+h\text{ hours})
 $$
 
-$F$ measures financial performance relative to the reference cost range; $P$ measures protection improvement over the cheapest plan. A protection score $P=0$ does not mean an empty battery. It means no improvement over $H_0$. Normalisation happens after scenario aggregation, with one common set of reference values.
+Buying the target reserve would cost R times this reference rate. For a projection lasting T elapsed hours, define the maximum protection reward in EUR:
 
-At preference 0, choose the financial reference; at 100, choose the protection reference. Interior preferences require the compromise solve. There are three logical optimisation stages; exact tie-breaking may require additional solver passes. If either reference range is zero within tolerance, avoid division and choose the solution achieving both objectives. Tiny ranges require numerical tolerances. Dominated candidates can fall outside the reference ranges; do not clip their scores in a way that changes the intended objective.
+$$
+\boxed{V=\frac{X}{100}\,R\bar r\,\frac{T}{24}}
+$$
 
-The following numbers are illustrative, not simulation results:
+A 24-hour projection uses the daily value directly; shorter/longer projections scale it proportionally because electricity cost accumulates over time while protection is averaged. R therefore changes both the preferred energy level and the monetary scale. No arbitrary maximum monetary reward is required.
 
-| Plan | Expected cost $C$ | Average protection $H$ | Financial score $F$ | Protection score $P$ |
+Clip the reference mean to zero if it is non-positive. Such a tariff gives zero protection reward and cost-only selection, avoiding a negative monetary multiplier. Missing tariff coverage raises an error rather than inventing a rate.
+
+#### Scenario score and combined objective
+
+Let C_s be scenario net cost in EUR and H_s its time-averaged protection score on the existing 0–100 curve. Let scenario probabilities w_s be non-negative and sum to one:
+
+$$
+J_s=-C_s+V\frac{H_s}{100},\qquad
+\boxed{J=\sum_s w_s J_s=-C+V\frac{H}{100}}
+$$
+
+The numerical score has EUR units but includes a subjective protection reward. It is not an electricity bill, profit forecast or expected payout. Report net electricity cost and protection separately alongside the chosen plan.
+
+- **X = 0:** minimise expected net cost; battery protection has no influence on selection.
+- **Increasing X:** pay progressively more attention to retaining energy, using the same tariff-based scale.
+- **X = 100:** use the full tariff-scaled reserve value; cost still matters. This is not a protection-only endpoint.
+
+There are no cheapest/protection-first reference solves, no division by an achievable min/max range and no hard extra-spending allowance. Small protection improvements remain small. With non-negative V, bounded protection and an optimal solve, extra expected cost versus the cheapest feasible plan cannot exceed V, but spending V is not a target: any extra cost must be justified by the actual protection gain, V times the change in H divided by 100.
+
+#### Example
+
+For R = 4 kWh, average import rate EUR 0.30/kWh, X = 50 and T = 24 hours:
+
+- Reserve replacement value: EUR 1.20.
+- Maximum protection reward V: EUR 0.60.
+- Holding R throughout the horizon scores 70 and earns EUR 0.42; holding 2R scores 80 and earns EUR 0.48; holding 3R scores 85 and earns EUR 0.51.
+
+Moving from R to 2R justifies at most EUR 0.06 extra cost. Moving from 2R to 3R justifies only EUR 0.03 extra. These values are rewards for entire trajectories with those average protection scores, not per-interval payments.
+
+The following candidate outcomes are illustrative, not simulation results:
+
+| Plan | Expected net cost C | Average protection H | Protection reward | Combined score J |
 | --- | --- | --- | --- | --- |
-| A | EUR 10.00 | 40 | 100 | 0 |
-| B | EUR 10.10 | 52 | 95 | 30 |
-| C | EUR 10.40 | 64 | 80 | 60 |
-| D | EUR 11.00 | 74 | 50 | 85 |
-| E | EUR 12.00 | 80 | 0 | 100 |
+| A | EUR 10.00 | 70 | EUR 0.42 | -9.58 |
+| B | EUR 10.05 | 80 | EUR 0.48 | **-9.57** |
+| C | EUR 10.10 | 85 | EUR 0.51 | -9.59 |
 
-Here $C_0=10$, $C_1=12$, $H_0=40$, and $H_1=80$. Combined scores are:
-
-| User preference | A | B | C | D | E |
-| --- | --- | --- | --- | --- | --- |
-| 0 | **100** | 95 | 80 | 50 | 0 |
-| 25 | 75 | **78.75** | 75 | 58.75 | 25 |
-| 50 | 50 | 62.5 | **70** | 67.5 | 50 |
-| 75 | 25 | 46.25 | 65 | **76.25** | 75 |
-| 100 | 0 | 30 | 60 | 85 | **100** |
-
-The solver searches feasible schedules, not five predefined plans. The same preference expresses a relative balance on different days; its euro impact can vary. Display the additional cost against the financial reference and the resulting energy trajectory, rather than presenting the preference as a percentage of protection or a spending limit.
+B wins: its protection improvement over A is worth more than the extra cost, while C's further improvement is not. The optimiser searches all feasible schedules, not these three predefined outcomes. Protection continues increasing above R, but the additional benefit diminishes; it never penalises energy merely for being above reserve.
 
 ### 3.2 Cost Score
 
-Financial performance is expected net electricity cost over the horizon. For scenario $s$, let $I_{t,s}$ and $X_{t,s}$ be imported and exported energy in kWh, and $r_t^{buy}$, $r_t^{sell}$ the applicable rates in EUR/kWh:
+Financial performance is expected net electricity cost over the horizon. For scenario $s$, let $I_{t,s}$ and $O_{t,s}$ be imported and exported energy in kWh, and $r_t^{buy}$, $r_t^{sell}$ the applicable rates in EUR/kWh:
 
 $$
-C_s=\sum_t\left(I_{t,s}r_t^{buy}-X_{t,s}r_t^{sell}\right),\qquad
+C_s=\sum_t\left(I_{t,s}r_t^{buy}-O_{t,s}r_t^{sell}\right),\qquad
 C=\sum_s w_s C_s
 $$
 
-Losses are included in the physical energy flows. Cost can be negative when export revenue exceeds import cost. Fixed standing charges do not affect decisions; battery degradation cost is not included in the initial model. The financial score $F$ is derived from $C$ as defined in section 3.1.
+Losses are included in the physical energy flows. Cost can be negative when export revenue exceeds import cost. Fixed standing charges do not affect decisions; battery degradation cost is not included in the initial model. Cost enters the objective directly as $-C$; it is not normalised against reference plans.
 
 ### 3.3 Protection Score
 
 Keeping energy matters most when the battery is nearly empty. Once we have a comfortable reserve, retaining more becomes progressively less valuable. We score the energy available rather than claiming a precise outage duration, since household behaviour and solar availability during an outage are uncertain.
 
-Let $E_{t,s}\ge0$ be usable battery energy at interval end, above the physical discharge cut-off, and $R>0$ the user's preferred reserve in the same kWh convention. The agreed score is:
+Let $E_{t,s}\ge0$ be stored battery energy at interval end, measured from zero, and $R>0$ the user's preferred reserve on that same scale. Score the stored energy directly, without subtracting the physical discharge cut-off. For example, R = 4 kWh means 4 kWh stored, even if the discharge cut-off corresponds to 2 kWh. Physical discharge limits remain separate feasibility constraints. The agreed score is:
 
 $$
 S(E)=
@@ -151,7 +165,7 @@ S(E)=
 \end{cases}
 $$
 
-| Usable energy | Score |
+| Stored energy | Score |
 | --- | --- |
 | 0 | 0 |
 | $R/2$ | 45.2 |
@@ -172,7 +186,7 @@ $$
 
 $\Delta t_t$ is elapsed interval duration in hours. Equal 15-minute intervals reduce this to an ordinary average. Scoring the average battery energy would give a different result and hide low-energy periods. Even this time-averaged score does not guarantee a minimum reserve; display the minimum and time below $R$ separately.
 
-Use a piecewise-linear approximation over the feasible energy range, with more breakpoints near zero and $R$. For segment lines $a_kE+b_k$, constrain interval score $q_{t,s}\le a_kE_{t,s}+b_k$ for every segment, and reward $q$. Concavity permits this with linear constraints and no extra binary variables. Chord interpolation understates the exact score between breakpoints. Use the same approximation in both references and the compromise solve; resolve score variables consistently when scoring a cost-only solution.
+Use a piecewise-linear approximation over the feasible energy range, with more breakpoints near zero and $R$. For segment lines $a_kE+b_k$, constrain interval score $q_{t,s}\le a_kE_{t,s}+b_k$ for every segment, and reward $q$. Concavity permits this with linear constraints and no extra binary variables. Chord interpolation understates the exact score between breakpoints. Use this approximation in the single combined solve. At X = 0, protection variables are not rewarded and can sit below the curve; recompute reported protection from the solved energy trajectory rather than reporting arbitrary slack values.
 
 ## 4. Forecast Models
 
@@ -238,7 +252,7 @@ Relevant plant registers are remote EMS enable `40029`, mode `40031`, charge/dis
 
 We track where energy goes and how much remains in the battery, accounting for losses whenever it is charged or discharged.
 
-Battery state is stored energy $B$, bounded by usable device capacity and physical cut-offs. Protection energy $E$ is the remaining usable portion above the discharge floor. Reconcile capacity, state of health, SOC and measured available energy before mapping between $B$, $E$ and SOC; do not mix their conventions.
+Battery state is stored energy $B$, bounded by device capacity and physical cut-offs. Protection scores this same stored energy: $E=B$, with zero as the origin for both E and R. The discharge cut-off does not shift the scoring origin. Reconcile capacity, state of health and SOC when deriving stored energy; available-discharge telemetry may use a different convention and must not silently replace it.
 
 Use interval kWh for all energy routes. With charge efficiency $\eta_c$ and discharge efficiency $\eta_d$, define solar/grid-to-battery flows as stored energy and battery-to-load/grid flows as delivered energy. Conservation is:
 
@@ -275,7 +289,7 @@ The implemented model should demonstrate:
 
 - One identical first command across all scenarios, with differing first outcomes when inputs differ; later decisions can diverge.
 - Exact 0.5/1/2 forecast scaling, normalised weights and reproducible weighted costs/protection.
-- Score values matching section 3, correct preference endpoints and tie-breaking, safe zero-range handling, and bounded approximation error.
+- Score values matching section 3, 24 elapsed-hour tariff samples with local weekday/effective-date selection and documented approximate weighting, correct X endpoints, probability blending, horizon scaling and bounded protection-approximation error; no reference solves or min/max normalisation.
 - A below-reserve initial state remains feasible whenever physical conditions permit; capacity, losses and power limits are never bypassed to meet protection preferences.
 - Energy conservation, correct AC/DC boundaries, no artificial import/export arbitrage, and correct midnight/DST/as-of behaviour.
 - Only the next action is committed, measured state replaces previous predictions on replanning, and failures are visible.
@@ -292,10 +306,10 @@ The current simulation uses shared first-step forced battery rate and SOC variab
 | --- | --- | --- |
 | Forecasts | `solar_model/planning/forecasts/` contains pure solar and load models; services load and persist their data | Reuse these baselines with complete planning-horizon coverage |
 | Scenario generation | `solar_model/planning/scenarios.py` uses 0.5/1/1.5, with high-case timing changes and a separate temporary load profile | Use production baselines, 0.5/1/2 scalars and explicit dimension weights |
-| Solver | [solar_model/planning/optimisation.py](../../solar_model/planning/optimisation.py) builds per-scenario scores/constraints and shared first controls, solves and extracts results within one function | Add PV-priority/saturation constraints and verify command response |
-| Objective | `score_simulation` implements probability-weighted cost and the agreed reserve utility, normalised against financial/protection references | Expose reference/score diagnostics in reports |
+| Solver | [solar_model/planning/optimisation.py](../../solar_model/planning/optimisation.py) builds mixed-resolution scenario blocks with explicit battery-state variables, shared first controls and duration-weighted scoring, then solves and extracts results | Add PV-priority/saturation constraints and verify command response |
+| Objective | `score_simulation` implements section 3: tariff-scaled protection reward minus cost, stored energy measured from zero, diminishing returns, normalised scenario probabilities and one solve | Expose cost/protection/reward diagnostics in reports |
 | Battery bounds | Configured minimum/maximum schedules are hard interval-end constraints | Separate physical bounds from the soft preferred reserve |
-| Output | Per-scenario simulation frames and a workbook; numeric action/mode are local to the simulation | Integrate the next action and reference-normalised score diagnostics into the report/API |
+| Output | Per-scenario simulation frames and a workbook; numeric action/mode are local to the simulation | Integrate the next action, expected cost/protection and tariff-scaled reward diagnostics into the report/API |
 | Execution | No device-control writer | Implement and validate the separate controller and handover policy |
 
 ### 6.3 Assumptions and Unresolved Decisions
@@ -306,4 +320,4 @@ Before implementation is complete, settle the installed firmware's exact mode/li
 
 These implementation questions are tracked in [review findings](../reviews/findings.md). They do not change the agreed purpose: select and implement the next action using the day plan as decision context.
 
-The scoring implementation uses the normalised share of the existing `optimisation_weights` as protection preference, and `preferred_reserve_kwh` (default 4 kWh) as the soft reserve. `score_simulation` in `optimisation.py` builds a piecewise-linear approximation bounded to 0.05 score points and reference solves with a fixed `1e-6` tie/range tolerance.
+The scoring implementation uses `protection_preference` for X (0-100, shipped 5) and `preferred_reserve_kwh` for R (positive stored kWh from zero, default 4). The old `optimisation_weights` block is replaced by the required preference scalar. The concave piecewise-linear protection approximation remains bounded to 0.05 score points; reference solves and their range tolerance are removed. Non-positive average import tariffs produce zero protection reward. Any desired exact-score tie-break remains a separate implementation decision.

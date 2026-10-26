@@ -65,7 +65,7 @@ config.dashboard.actuals_to_forecast   # dict[str, int], e.g. {'pv1': 1}
 | `actuals` | `ModbusConfig`, `DataRetrivalScheduleConfig`; full/live collection |
 | `forecast` | `ForecastConfig`, tuple of `SolarArrayConfig`; API requests, panel labels, model/UI selection |
 | `tariffs` | `TariffsConfig` → `TariffPeriod` → `TariffRule`; collection, planning, recalculation |
-| `energy_plan` | `EnergyPlanConfig`, `OptimisationWeightsConfig`, limit-rule tuples; offline planner |
+| `energy_plan` | `EnergyPlanConfig`, scalar protection preference, limit-rule tuples; offline planner |
 | `additional_device_info` | Charge/discharge efficiencies; overrides planner metadata inputs |
 | `dashboard` | Host/port and PV-string mapping; NiceGUI and array allocation |
 

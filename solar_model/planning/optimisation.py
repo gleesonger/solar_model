@@ -1,11 +1,12 @@
 from __future__ import annotations
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 from typing import cast
 import math
 import cvxpy as cp
 import pandas as pd
 from solar_model.config import Config
-from solar_model.time_utils import add_elapsed
+from solar_model.time_utils import add_elapsed, utc_instant
 from solar_model.tariffs import tariff_rule, tariff_rule_rate, tariff_rules_for_timestamp
 
 from solar_model.planning.types import DeviceInfo, DeviceState, ScenarioData, NextAction, OperatingMode, SimulationResult
@@ -13,7 +14,6 @@ from solar_model.planning.system import system_limits
 
 MIN_FORCE_RATE_KW = 0.1  # Minimum positive command: 100 watts.
 PROTECTION_APPROXIMATION_ERROR = 0.05  # Protection score points.
-REFERENCE_TOLERANCE = 1e-6  # Cost/score units for reference tie-breaks and zero ranges.
 
 
 def simulate_energy_plan(device_info: DeviceInfo, device_state: DeviceState, scenarios: list[ScenarioData], config: Config, projection_starts_at: datetime) -> SimulationResult:
@@ -31,12 +31,10 @@ def simulate_energy_plan(device_info: DeviceInfo, device_state: DeviceState, sce
     if any(not math.isfinite(s.probability) or s.probability < 0 for s in scenarios) or sum(s.probability for s in scenarios) <= 0:
         raise ValueError("scenario probabilities must be finite, non-negative and have a positive total")
 
-    num_time_periods: int = int(config.energy_plan.num_projection_hours * 60) // config.energy_plan.projection_resolution_mins
-    scenario_count = len(scenarios)
-    theta_hrs = config.energy_plan.projection_resolution_mins / 60
-
-    if num_time_periods <= 0:
-        raise ValueError("num_projection_hours must be greater than zero")
+    periods = _projection_intervals(config, projection_starts_at)
+    num_time_periods, scenario_count = len(periods), len(scenarios)
+    durations = [(utc_instant(end) - utc_instant(start)).total_seconds() / 3600 for start, end in periods]
+    theta_hrs = durations[0]
 
     plan_columns = ["starts_at", "ends_at", "minimum_battery_kwh", "maximum_battery_kwh", "tariff_name", "import_rate", "export_rate", "limit_battery_export_rate_to_grid_kw", "load_kwh", "solar_kwh"]
     dict_df_results = {scenario.name: pd.DataFrame(index=range(num_time_periods), columns=plan_columns) for scenario in scenarios}
@@ -94,12 +92,13 @@ def simulate_energy_plan(device_info: DeviceInfo, device_state: DeviceState, sce
     )
     net_cost_flows: list[list[cp.Expression]] = [[] for _ in scenarios]
     battery_levels: list[list[cp.Expression]] = [[] for _ in scenarios]
-    battery_level_eop: list[cp.Expression | float] = [device_state.battery_kwh for _ in scenarios]
+    battery_level_eop = cp.Variable((num_time_periods, scenario_count), nonneg=True, name="battery_level_eop")
 
-    # Set up the LP problem for each time period
-    for t in range(num_time_periods):
-        starts_at = add_elapsed(projection_starts_at, timedelta(minutes=t * config.energy_plan.projection_resolution_mins))
-        ends_at = add_elapsed(starts_at, timedelta(minutes=config.energy_plan.projection_resolution_mins))
+    # Each period has its own duration and energy limits.
+    for t, (starts_at, ends_at) in enumerate(periods):
+        theta_hrs = durations[t]
+        limits = system_limits(device_info, theta_hrs)
+        max_charge_kwh, max_discharge_kwh = limits.max_charge_kwh, limits.max_discharge_kwh
         import_rules, export_rules = tariff_rules_for_timestamp(config.tariffs, starts_at)
         import_rule = tariff_rule(import_rules, starts_at)
         limit_battery_export_rate_to_grid_kw = tariff_rule_rate(config.energy_plan.limit_battery_export_rate_to_grid_kw, starts_at,9999)
@@ -114,7 +113,7 @@ def simulate_energy_plan(device_info: DeviceInfo, device_state: DeviceState, sce
             forecast_point = scenario.forecast_data.sum(starts_at, ends_at)
             solar_kwh = forecast_point.solar_kwh
             load_kwh = forecast_point.load_kwh
-            battery_level_bop = battery_level_eop[s]
+            battery_level_bop = device_state.battery_kwh if t == 0 else battery_level_eop[t - 1, s]
             inverter_flows_dc_to_ac = solar_to_load[t, s] + solar_to_grid[t, s] + battery_to_load[t, s] + battery_to_grid[t, s]
             inverter_flows_ac_to_dc = grid_to_battery[t, s] + grid_to_battery_loss[t, s]
             charging = battery_charging[t, s]
@@ -139,15 +138,17 @@ def simulate_energy_plan(device_info: DeviceInfo, device_state: DeviceState, sce
                 grid_to_battery[t, s] + grid_to_battery_loss[t, s] <= device_info.inverter_max_absorption_power_kw * theta_hrs,
                 battery_to_grid[t, s] <= limit_battery_export_rate_to_grid_kw * theta_hrs,
             ]
-            battery_level_eop[s] = battery_level_bop + solar_to_battery[t, s] + grid_to_battery[t, s] - battery_to_load[t, s] - battery_to_grid[t, s] - battery_to_ac_loss[t, s]
-            battery_levels[s].append(battery_level_eop[s])
-            constraints += [minimum_battery_kwh <= battery_level_eop[s], battery_level_eop[s] <= maximum_battery_kwh]
+            constraints += [
+                battery_level_eop[t, s] == battery_level_bop + solar_to_battery[t, s] + grid_to_battery[t, s] - battery_to_load[t, s] - battery_to_grid[t, s] - battery_to_ac_loss[t, s],
+                minimum_battery_kwh <= battery_level_eop[t, s], battery_level_eop[t, s] <= maximum_battery_kwh,
+            ]
+            battery_levels[s].append(battery_level_eop[t, s])
             net_cost_flows[s].append(import_rate * (grid_to_load[t, s] + grid_to_battery[t, s] + grid_to_battery_loss[t, s]) - export_rate * (solar_to_grid[t, s] + battery_to_grid[t, s]))
             dict_df_results[scenario.name].loc[t] = {"starts_at": starts_at, "ends_at": ends_at, "tariff_name": cast(str, import_rule.name), "import_rate": import_rate, "export_rate": export_rate, "limit_battery_export_rate_to_grid_kw": limit_battery_export_rate_to_grid_kw, "minimum_battery_kwh": minimum_battery_kwh, "maximum_battery_kwh": maximum_battery_kwh, "load_kwh": load_kwh, "solar_kwh": solar_kwh}
 
     # #### Optimise Model
 
-    score = score_simulation(net_cost_flows, battery_levels, scenarios, device_info, config, constraints)
+    score = score_simulation(net_cost_flows, battery_levels, scenarios, device_info, config, constraints, projection_starts_at, durations)
     problem = cp.Problem(cp.Maximize(score), constraints)
 
     problem.solve(solver=cp.HIGHS)
@@ -217,89 +218,84 @@ def simulate_energy_plan(device_info: DeviceInfo, device_state: DeviceState, sce
     )
 
 
+def _projection_intervals(config: Config, starts_at: datetime) -> list[tuple[datetime, datetime]]:
+    """Short first action, then hourly periods, split at price and limit changes."""
+    settings = config.energy_plan
+    if settings.num_projection_hours <= 0 or settings.projection_resolution_mins <= 0:
+        raise ValueError("projection duration and resolution must be greater than zero")
+    start = utc_instant(starts_at)
+    end = start + timedelta(hours=settings.num_projection_hours)
+    first_end = min(end, start + timedelta(minutes=settings.projection_resolution_mins))
+    boundaries = {start, first_end, end}
+    cursor = first_end
+    while cursor < end:
+        cursor = min(end, cursor + timedelta(hours=1))
+        boundaries.add(cursor)
+    zone = ZoneInfo(config.timezone)
+    day = start.astimezone(zone).replace(hour=0, minute=0, second=0, microsecond=0)
+    while day.astimezone(timezone.utc) < end:
+        imports, exports = tariff_rules_for_timestamp(config.tariffs, day)
+        rules = (*imports, *exports, *settings.minimum_battery_kwh, *settings.maximum_battery_kwh,
+                 *settings.limit_battery_export_rate_to_grid_kw)
+        minutes = {0, 1440, *(rule.start_minutes for rule in rules), *(rule.end_minutes for rule in rules)}
+        for minute in minutes:
+            for fold in (0, 1):
+                boundary = (day + timedelta(minutes=minute)).replace(fold=fold).astimezone(timezone.utc)
+                if first_end < boundary < end:
+                    boundaries.add(boundary)
+        day += timedelta(days=1)
+    ordered = sorted(boundaries)
+    return [(left.astimezone(zone), right.astimezone(zone)) for left, right in zip(ordered, ordered[1:])]
+
+
 def score_simulation(
-        net_cost_flows: list[list[cp.Expression]], # Scenario x Time
+        net_cost_flows: list[list[cp.Expression]],  # Scenario x Time
         battery_levels: list[list[cp.Expression]],
         scenarios: list[ScenarioData],
         device: DeviceInfo,
         config: Config,
-        constraints: list[cp.Constraint]
+        constraints: list[cp.Constraint],
+        projection_starts_at: datetime,
+        durations: list[float] | None = None,
     ) -> cp.Expression:
-    """Give higher scores to plans that cost less and keep more battery reserve.
+    """Maximise protection reward minus electricity cost, averaged over scenarios.
 
-    Compute a cost score and a battery score for each scenario, mix them using
-    the configured weights, then sum the scenario scores times their probabilities.
-
-    Cost is the sum of net costs across all time steps. Battery protection is
-    scored at each step and averaged: usable energy is zero at the discharge
-    cut-off, earns 70 points at the preferred reserve, and approaches 100 with
-    diminishing returns above reserve. Linear segments approximate this curve.
-
-    Money and battery points need a common scale. First solve for the cheapest
-    plan and the plan with the highest average protection, using probability-
-    weighted results across scenarios. These two plans set the scoring endpoints:
-    cost scores 100 at the cheapest cost and 0 at the protection-first cost;
-    battery scores 0 at the cheapest plan's protection and 100 at the best protection.
-    Ties favour more protection for the cheapest plan, or less cost for the other.
-
-    Every scenario uses these same endpoints, so an individual score can fall
-    outside 0–100. This function adds scoring constraints and runs the reference
-    solves; the caller then maximises the returned combined score.
-
-    Issues with this approach:
-     - It does not pick up on small differences, for example if the high and low
-        battery/protection levels are almost the same then a person would treat them as the same
-        but the model will give the range 100 of a score difference
-     - We would need some real world way to link them:
-        A) A person's utility function for cost and protection - Annoying to calibrate
-        B) Convert protection into money terms, eg annual allowance for proection,
-            but this seems very sensitive to the input and may not yield deseired outcome
-        C) Maybe a joint utility function, user provides the joint measure of comparison, but this would need a UI interface
+    R is stored kWh measured from zero; X is protection_preference (0-100).
+    The maximum reward is X/100 * R * average import rate * horizon hours/24.
+    Price is time-weighted over the next 24 elapsed hours, independent of load.
+    Each scenario earns that reward times its average diminishing-return score
+    divided by 100. Cost always matters, including at X=100. No reference solves
+    or min/max normalisation are needed.
     """
-    scenario_costs = {}
-    scenario_protection = {}
+    settings = config.energy_plan
+    protection_value = (settings.protection_preference / 100 * settings.preferred_reserve_kwh
+                        * _reference_import_rate(config, projection_starts_at, add_elapsed(projection_starts_at, timedelta(hours=24)))
+                        * settings.num_projection_hours / 24)
+    scores = []
     for scenario, costs, levels in zip(scenarios, net_cost_flows, battery_levels):
-        scenario_costs[scenario.name], scenario_protection[scenario.name] = score_scenario(
-            costs, levels, device, config, constraints,
-        )
+        cost, protection = score_scenario(costs, levels, device, config, constraints, durations)
+        scores.append(scenario.probability * (-cost + protection_value * protection / 100))
+    return cp.sum(scores) / sum(s.probability for s in scenarios)
 
-    expected_cost = cp.sum([s.probability * scenario_costs[s.name] for s in scenarios])
-    expected_protection = cp.sum([s.probability * scenario_protection[s.name] for s in scenarios])
 
-    # Find the cheapest plan; among equally cheap plans, prefer more battery reserve.
-    _solve_reference(cp.Minimize(expected_cost), constraints)
-    cheapest = float(expected_cost.value)
-    _solve_reference(cp.Maximize(expected_protection), constraints + [expected_cost <= cheapest + REFERENCE_TOLERANCE])
-    c0, h0 = float(expected_cost.value), float(expected_protection.value)
-
-    # Find the best-protected plan; among equally protected plans, prefer lower cost.
-    _solve_reference(cp.Maximize(expected_protection), constraints)
-    safest = float(expected_protection.value)
-    _solve_reference(cp.Minimize(expected_cost), constraints + [expected_protection >= safest - REFERENCE_TOLERANCE])
-    c1, h1 = float(expected_cost.value), float(expected_protection.value)
-
-    weights = config.energy_plan.optimisation_weights
-    preference = weights.maximise_battery / (weights.maximise_profit + weights.maximise_battery)
-    # If the goals tie or only one matters, keep that goal at its best reference value.
-    if c1 - c0 <= REFERENCE_TOLERANCE:
-        constraints += [expected_cost <= c0 + REFERENCE_TOLERANCE,
-                        expected_protection >= h1 - REFERENCE_TOLERANCE]
-    elif preference == 0 or h1 - h0 <= REFERENCE_TOLERANCE:
-        constraints += [expected_cost <= c0 + REFERENCE_TOLERANCE,
-                        expected_protection >= h0 - REFERENCE_TOLERANCE]
-    elif preference == 1:
-        constraints += [expected_protection >= h1 - REFERENCE_TOLERANCE,
-                        expected_cost <= c1 + REFERENCE_TOLERANCE]
-    # Convert each scenario to the same scales, mix cost and battery scores,
-    # then combine the scenarios using their probabilities.
-    scenario_scores = {}
-    for scenario in scenarios:
-        financial_score = (cp.Constant(100.) if c1 - c0 <= REFERENCE_TOLERANCE
-                           else 100 * (c1 - scenario_costs[scenario.name]) / (c1 - c0))
-        protection_score = (cp.Constant(100.) if h1 - h0 <= REFERENCE_TOLERANCE
-                            else 100 * (scenario_protection[scenario.name] - h0) / (h1 - h0))
-        scenario_scores[scenario.name] = (1 - preference) * financial_score + preference * protection_score
-    return cp.sum([s.probability * scenario_scores[s.name] for s in scenarios])
+def _reference_import_rate(config: Config, starts_at: datetime, ends_at: datetime) -> float:
+    """Approximate the reference price using one tariff sample per elapsed hour."""
+    if any(value.tzinfo is None or value.utcoffset() is None for value in (starts_at, ends_at)):
+        raise ValueError("reference tariff range must be timezone-aware")
+    cursor, end = starts_at.astimezone(timezone.utc), ends_at.astimezone(timezone.utc)
+    duration = (end - cursor).total_seconds()
+    if duration <= 0:
+        raise ValueError("reference tariff end must be after start")
+    zone = ZoneInfo(config.timezone)
+    weighted_rate = 0.
+    while cursor < end:
+        local = cursor.astimezone(zone)
+        import_rules, _ = tariff_rules_for_timestamp(config.tariffs, local)
+        rule = tariff_rule(import_rules, local)
+        range_end = min(end, cursor + timedelta(hours=1))
+        weighted_rate += rule.rate * (range_end - cursor).total_seconds()
+        cursor = range_end
+    return max(0., weighted_rate / duration)
 
 
 def score_scenario(
@@ -308,47 +304,29 @@ def score_scenario(
         device: DeviceInfo,
         config: Config,
         constraints: list[cp.Constraint],
+        durations: list[float] | None = None,
     ) -> tuple[cp.Expression, cp.Expression]:
-    """Return total cost and average battery protection for one scenario.
-
-    Add the battery-utility constraints here; score_simulation puts both values
-    on common reference scales and combines them with the other scenarios.
-    """
-    # Only energy above the physical discharge cut-off counts towards the reserve.
+    """Return total cost and average diminishing-return protection from zero kWh."""
     capacity = device.system_battery_capacity_kwh * device.battery_state_of_health_percent / 100
-    floor = capacity * device.battery_discharge_cut_off_soc_percent / 100
     reserve = config.energy_plan.preferred_reserve_kwh
-    if not math.isfinite(floor) or not 0 <= floor <= capacity:
-        raise ValueError("physical discharge cut-off must be between 0 and 100 percent")
     if not math.isfinite(reserve) or reserve <= 0:
         raise ValueError("preferred_reserve_kwh must be finite and greater than zero")
-    segments = _protection_segments(capacity - floor, reserve)
-    # Add up this scenario's cost, then score how well its battery stays filled.
+    segments = _protection_segments(capacity, reserve)
     cost = cp.sum(costs)
-    if capacity == floor:
-        return cost, cp.Constant(0.)
-    usable = cp.hstack(levels) - floor
-    if floor > 0:
-        # Preserve existing feasible trajectories below the physical cut-off:
-        # they have zero usable energy, rather than a negative protection score.
-        above_floor = cp.Variable(len(levels), boolean=True)
-        available = cp.Variable(len(levels), nonneg=True)
-        constraints += [available >= usable,
-                        available <= usable + floor * (1 - above_floor),
-                        available <= (capacity - floor) * above_floor]
-        usable = available
+    stored_energy = cp.hstack(levels)
     protection = cp.Variable(len(levels), nonneg=True)
     # Linear bounds approximate diminishing returns: 0 empty, 70 at reserve,
     # approaching 100 as energy increases. Maximisation lifts scores onto the curve.
     constraints.append(protection <= 100)
-    constraints.extend(protection <= slope * usable + intercept for slope, intercept in segments)
-    return cost, cp.sum(protection) / len(levels)
+    constraints.extend(protection <= slope * stored_energy + intercept for slope, intercept in segments)
+    durations = durations if durations is not None else [1.] * len(levels)
+    return cost, cp.sum(cp.multiply(protection, durations)) / sum(durations)
 
 
 def battery_protection_score(energy: float, reserve: float) -> float:
     """Agreed reserve utility: 0 at empty, 70 at reserve, then diminishing returns."""
     if not math.isfinite(energy) or energy < 0 or not math.isfinite(reserve) or reserve <= 0:
-        raise ValueError("usable energy must be finite and non-negative; reserve must be finite and positive")
+        raise ValueError("stored energy must be finite and non-negative; reserve must be finite and positive")
     if energy <= reserve:
         return 100 * (1 - 0.3 ** (energy / reserve))
     return 70 + 30 * (energy - reserve) / (energy + reserve)
@@ -380,13 +358,6 @@ def _protection_segments(capacity: float, reserve: float) -> list[tuple[float, f
         else:
             segments.append((slope, intercept))
     return segments
-
-
-def _solve_reference(objective: cp.Minimize | cp.Maximize, constraints: list[cp.Constraint]) -> None:
-    problem = cp.Problem(objective, constraints)
-    problem.solve(solver=cp.HIGHS)
-    if problem.status not in (cp.OPTIMAL, cp.OPTIMAL_INACCURATE):
-        raise ValueError(f"unable to find a feasible energy plan for scoring reference: {problem.status}")
 
 
 def _energy_until_soc(requested: cp.Expression, headroom: cp.Expression, big_m: float,constraints: list[cp.Constraint]) -> cp.Variable:

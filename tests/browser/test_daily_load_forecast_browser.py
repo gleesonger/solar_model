@@ -89,6 +89,8 @@ ui.run(host="127.0.0.1", port={port}, reload=False, show=False)
                     assert page.locator(".live-today-table").get_by_text("House Load (Forecast)", exact=True).count() == 0
                     assert page.get_by_role("columnheader", name="House Load (Forecast)", exact=True).count() == 0
                     assert page.get_by_role("columnheader", name="House Load", exact=True).count() == 2
+                    assert page.locator(".live-today-table").get_by_role("cell", name="Load", exact=True).count() == 0
+                    assert page.get_by_role("columnheader", name="Load", exact=True).count() == 2
                     house = page.locator(".live-today-table").get_by_role("row").filter(has=page.get_by_role("cell", name="House Load", exact=True))
                     assert [value.strip() for value in house.get_by_role("cell").all_text_contents()] == ["House Load", "0.3", "3.0", "", "24.0", ""]
                     page.get_by_role("button", name="Hourly", exact=True).click()

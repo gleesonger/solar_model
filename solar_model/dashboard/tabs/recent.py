@@ -42,7 +42,7 @@ class RecentTab:
                 f" - {array_names[panel_id]}": pv_string
                 for pv_string, panel_id in config.dashboard.actuals_to_forecast.items()
             },
-            **{label: key for label, key in SUMMARY_LATEST_KEYS.items() if label != "Solar"},
+            **{label: key for label, key in SUMMARY_LATEST_KEYS.items() if label not in {"Solar", "Load"}},
         }
         self._today_values: dict[str, float | None] = {}
         self._previous_live_for_today: LivePowerData | None = None

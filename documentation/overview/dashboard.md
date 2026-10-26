@@ -25,6 +25,7 @@ The favicon is the amber sun/panel in `solar_model/dashboard/assets/solar_power.
 - Per-string voltage/current gives PV proportions. Live PV kW and daily array energy are allocated from plant solar totals using those proportions/integrals; they are not direct independent meters.
 - Available battery energy comes from plant availability telemetry; SOC is shown separately.
 - All three Recent tables include actual House Load. Live/Today uses measured load power for Latest, stored integrated house energy for Today (updated on full snapshot refresh), and the full saved daily house profile for BoD Forecast. Its Latest Forecast and Raw Forecast cells remain blank; the house forecaster has no separate versions for those columns. House Load Today resets on local date change. Past tables include house actual totals only, without a house-forecast column.
+- Live/Today hides the separate Load row, whose Latest power duplicates House Load while its Today energy comes from the device load counter. The Past tables retain both Load and House Load energy.
 
 ## Queries, charts, exports
 

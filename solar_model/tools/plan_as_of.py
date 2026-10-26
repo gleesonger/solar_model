@@ -37,7 +37,7 @@ def main() -> None:
         Path(args.output).unlink(missing_ok=True)
         
         LOGGER.info("Loading planning inputs and solving scenarios")
-        plans = plan_as_of(database, config, as_of)
+        plans = plan_as_of(database, config, as_of).results
 
         output_timestep_mins = args.output_timestep_min or config.energy_plan.projection_resolution_mins
 

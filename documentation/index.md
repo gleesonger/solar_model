@@ -41,6 +41,7 @@ Keep concise explanations in `overview/`, detailed code/data contracts in `imple
 | [Adding a metric](implementation/adding-a-metric.md) | Worked ingestion → storage → statistics → query → chart/export change recipe |
 | [Operations](operations/runbook.md) | Launch, Docker, restart, maintenance, troubleshooting |
 | [Review findings](reviews/findings.md) | Confirmed defects and open questions |
+| [Sigenergy Home Assistant register review](reviews/sigenergy-home-assistant-register-review.md) | Register comparison, household versus total load, conversion residuals and collection lessons |
 | [System review plan](reviews/system-review-plan.md) | Approved deep review scope, independent reviewers, browser/output checks, and consolidation assessment |
 | [System review report](reviews/system-review-report.md) | Validated correctness/recovery findings, independent assessments, and explicit limitations |
 | [System review coverage](reviews/system-review-coverage.md) | Website interactions/output checks and server/data verification statuses |

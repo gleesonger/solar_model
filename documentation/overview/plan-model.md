@@ -284,16 +284,16 @@ Use synthetic data and temporary databases for implementation tests. Before actu
 
 ### 6.2 Current Implementation and Required Changes
 
-The code is organised in the main `solar_model` package. Its pure planning API, `planning.model.build_plan`, accepts in-memory inputs; `services.planning` assembles as-of database inputs and `tools.plan_as_of` produces the workbook. This structural migration preserves the existing algorithms; the target behaviour below is still to be implemented.
+The code is organised in the main `solar_model` package. Its pure planning API, `planning.optimisation.simulate_energy_plan`, accepts in-memory device/state/scenarios; `services.planning` assembles as-of database inputs and `tools.plan_as_of` produces the workbook. This structural migration preserves the existing algorithms; the target behaviour below is still to be implemented.
 
-The current simulation uses shared first-step forced battery rate and SOC variables, and derives a local numeric `NextAction` and `OperatingMode` IntEnum after solving. The remaining command-response and scoring changes below are still required.
+The current simulation uses shared first-step forced battery rate and SOC variables, and derives a local numeric `NextAction` and `OperatingMode` IntEnum after solving. The remaining command-response and reporting changes below are still required.
 
 | Component | Current implementation | Required change |
 | --- | --- | --- |
 | Forecasts | `solar_model/planning/forecasts/` contains pure solar and load models; services load and persist their data | Reuse these baselines with complete planning-horizon coverage |
 | Scenario generation | `solar_model/planning/scenarios.py` uses 0.5/1/1.5, with high-case timing changes and a separate temporary load profile | Use production baselines, 0.5/1/2 scalars and explicit dimension weights |
 | Solver | [solar_model/planning/optimisation.py](../../solar_model/planning/optimisation.py) builds per-scenario scores/constraints and shared first controls, solves and extracts results within one function | Add PV-priority/saturation constraints and verify command response |
-| Objective | Weighted net cost plus tariff-valued battery energy held over time | Replace with the reference-normalised cost/protection objective |
+| Objective | `score_simulation` implements probability-weighted cost and the agreed reserve utility, normalised against financial/protection references | Expose reference/score diagnostics in reports |
 | Battery bounds | Configured minimum/maximum schedules are hard interval-end constraints | Separate physical bounds from the soft preferred reserve |
 | Output | Per-scenario simulation frames and a workbook; numeric action/mode are local to the simulation | Integrate the next action and reference-normalised score diagnostics into the report/API |
 | Execution | No device-control writer | Implement and validate the separate controller and handover policy |
@@ -305,3 +305,5 @@ The initial design assumes independent scenario weights, full scenario-specific 
 Before implementation is complete, settle the installed firmware's exact mode/limit response, battery energy/SOC conventions, tomorrow's load coverage and freezing policy, missing-data fallback, curve-approximation tolerance, and numerical tie-breaking tolerances. Before enabling writes, define command ownership, stale-plan handling and verified handover behaviour. The existing solar timestamp mismatch and potentially negative adjusted solar also need resolution at the planning boundary.
 
 These implementation questions are tracked in [review findings](../reviews/findings.md). They do not change the agreed purpose: select and implement the next action using the day plan as decision context.
+
+The scoring implementation uses the normalised share of the existing `optimisation_weights` as protection preference, and `preferred_reserve_kwh` (default 4 kWh) as the soft reserve. `score_simulation` in `optimisation.py` builds a piecewise-linear approximation bounded to 0.05 score points and reference solves with a fixed `1e-6` tie/range tolerance.

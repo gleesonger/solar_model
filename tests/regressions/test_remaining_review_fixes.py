@@ -236,7 +236,7 @@ def test_dst_overlap_scenarios_and_solver_use_real_elapsed_hours(day, end_hour):
     device = replace(device, system_battery_capacity_kwh=10., battery_state_of_health_percent=100.,
                      inverter_max_active_power_kw=5., inverter_max_absorption_power_kw=5.,
                      inverter_battery_charge_power_kw=5., inverter_battery_discharge_power_kw=5.)
-    plan = simulate_energy_plan(device, DeviceState(2.), [ScenarioData("base", forecast, 1.)], cfg, start)["base"]
+    plan = simulate_energy_plan(device, DeviceState(2.), [ScenarioData("base", forecast, 1.)], cfg, start).results["base"]
     assert plan.solar_kwh.tolist() == [1.] * 4
     assert all((utc_instant(row.ends_at) - utc_instant(row.starts_at)).total_seconds() == 3600 for row in plan.itertuples())
     assert plan.battery_end_kwh.between(-1e-7, 10 + 1e-7).all()

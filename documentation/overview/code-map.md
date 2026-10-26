@@ -8,7 +8,7 @@ The application lives in the installable `solar_model` package. The root `docker
 solar_model/
   config.py, tariffs.py, time_utils.py, logging_setup.py, paths.py, utils.py
   planning/
-    model.py, types.py, scenarios.py, optimisation.py, system.py
+    types.py, scenarios.py, optimisation.py, system.py
     forecasts/solar.py, house_load.py
   services/collection.py, forecasting.py, planning.py
   integrations/
@@ -31,9 +31,9 @@ solar_model/
 
 | Area | Responsibility and entry points |
 | --- | --- |
-| [Planning model](../../solar_model/planning/model.py) | `PlanningInputs` and `build_plan`: in-memory inputs → scenarios → numerical simulation frames. No storage, network or UI imports |
+| [Planning simulation](../../solar_model/planning/optimisation.py) | `simulate_energy_plan`: in-memory device/state/scenarios to `SimulationResult`. The service creates scenarios directly; planning has no storage/network/UI imports |
 | [Forecast models](../../solar_model/planning/forecasts/solar.py) | Pure solar day-ahead/intraday calculations; [house_load.py](../../solar_model/planning/forecasts/house_load.py) predicts the fixed daily load profile |
-| [Optimisation](../../solar_model/planning/optimisation.py) | CVXPY flow variables, constraints, HiGHS solve and energy-balance checks; [system.py](../../solar_model/planning/system.py) derives physical limits; the current cost/battery objective is calculated inline in the optimiser |
+| [Optimisation](../../solar_model/planning/optimisation.py) | CVXPY flow variables, constraints, HiGHS solve and energy-balance checks; [system.py](../../solar_model/planning/system.py) derives physical limits; the standalone `score_simulation` in this script builds the agreed reference-normalised cost/protection objective |
 | [Services](../../solar_model/services) | Collection transactions, forecast scheduling/calibration persistence, and as-of planning input assembly |
 | [Integrations](../../solar_model/integrations) | HTTP provider client; Modbus transport, map parsing/decoding and device specifications. Register-map JSON is packaged beside its loader |
 | [Storage](../../solar_model/storage) | Schema and scaled types; engine/session ownership; migrations; measurement/forecast transactions. `SolarDatabase` composes the two storage mixins |
@@ -50,10 +50,10 @@ The unmounted Hourly tab was removed. Older ORM/pandas query paths remain where 
 runtime.collector → integrations → services.collection / services.forecasting → storage
 storage.queries → dashboard.snapshot / dashboard.tabs → components / formatting
  tools.plan_as_of → services.planning → storage.queries.planning
-                                    → planning.model → scenarios → optimisation → reports
+                                    -> scenarios -> optimisation -> reports
 ```
 
-Production forecasting and offline planning share the house-load prediction helper and train on integrated House Load; planning limits observations to those before its as-of local midnight. The [plan-model design](plan-model.md) describes the future shared next action and protection scoring; this restructure preserves the current independent-scenario solver.
+Production forecasting and offline planning share the house-load prediction helper and train on integrated House Load; planning limits observations to those before its as-of local midnight. The [plan-model design](plan-model.md) describes the future shared next action and protection scoring; the simulation now shares first controls and uses the agreed cost/protection score; forecast/scenario changes and command-response verification remain separate work.
 
 ## Tests and change routing
 

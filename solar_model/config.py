@@ -102,6 +102,7 @@ class EnergyPlanConfig:
     minimum_battery_kwh: tuple[TariffRule, ...] = ()
     maximum_battery_kwh: tuple[TariffRule, ...] = ()
     limit_battery_export_rate_to_grid_kw: tuple[TariffRule, ...] = ()
+    preferred_reserve_kwh: float = 4.0
 
 
 @dataclass(frozen=True)
@@ -218,6 +219,8 @@ def validate_config(config: Config) -> None:
         raise ValueError("forecast timeout must be greater than zero")
 
     energy_plan = config.energy_plan
+    if not math.isfinite(energy_plan.preferred_reserve_kwh) or energy_plan.preferred_reserve_kwh <= 0:
+        raise ValueError("preferred_reserve_kwh must be finite and greater than zero")
     if energy_plan.num_projection_hours <= 0 or energy_plan.projection_resolution_mins <= 0:
         raise ValueError("energy_plan projection duration and resolution must be greater than zero")
     if energy_plan.load_forecast_historical_lookback_window_days <= 0 or energy_plan.load_forecast_historical_lookback_halflife_days <= 0:

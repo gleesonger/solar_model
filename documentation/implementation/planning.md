@@ -1,6 +1,6 @@
 # Planning: database cutoffs, interval objects, solver, and workbook
 
-Sources: [model](../../solar_model/planning/model.py), [input assembly](../../solar_model/services/planning.py), [as-of queries](../../solar_model/storage/queries/planning.py), [optimisation](../../solar_model/planning/optimisation.py), [physical limits](../../solar_model/planning/system.py) and [reports](../../solar_model/tools/reports.py). This is an offline report pipeline with independent scenario decisions, not device control.
+Sources: [input assembly](../../solar_model/services/planning.py), [as-of queries](../../solar_model/storage/queries/planning.py), [optimisation](../../solar_model/planning/optimisation.py), [physical limits](../../solar_model/planning/system.py) and [reports](../../solar_model/tools/reports.py). This is an offline report pipeline with shared first controls and scenario-specific trajectories, without device control.
 
 ## 1. CLI call hierarchy
 
@@ -11,7 +11,6 @@ solar_model.tools.plan_as_of.main()
   SolarDatabase(create_engine_for_database(path))  no schema opener
   delete existing output workbook
   services.planning.plan_as_of()
-    PlanningInputs -> planning.model.build_plan()
     load_device_info_as_of()
   load_battery_state_as_of()
   load_forecast_as_of()
@@ -23,8 +22,8 @@ solar_model.tools.plan_as_of.main()
   create_scenarios()
     _half_hour_intervals() -> _scenario_intervals()
   simulate_energy_plan()
-    Build Model section: system_limits(), _energy_until_soc(), inline score expressions
-    Optimise Model section: construct problem and solve with HiGHS
+    Build Model section: system_limits(), _energy_until_soc(), scenario costs/battery paths
+    Optimise Model section: score_simulation(), reference solves, final HiGHS solve
     Model to Results section: derive action/mode and extract scenario frames
   group_plan(output timestep)
   write_workbook()
@@ -45,7 +44,8 @@ Database observations and forecast vintages use the cutoff. Efficiencies/tariffs
 | `inverter_battery_discharge_power_kw`, `inverter_max_active_power_kw` | Discharge energy limit and combined inverter-flow constraint |
 | `charge_efficiency`, `discharge_efficiency` | Explicit loss expressions |
 | Model/serial/firmware, rated power/apparent power, grid ratings, pack/string/MPPT counts | Required metadata but no direct optimisation constraint |
-| Battery SOC cutoffs and `maximum_pv_input_power_kw` | Required but not enforced; configured kWh bounds govern reserve/ceiling |
+| Battery discharge SOC cutoff | Defines the zero usable-energy point for protection scoring; existing scheduled kWh bounds still govern feasibility |
+| Battery charge SOC cutoff and `maximum_pv_input_power_kw` | Required metadata, not newly imposed as hard bounds by the scoring change |
 
 `load_battery_state_as_of()` reads the latest full electrical ORM row with collection epoch ≤ cutoff. It requires SOC and returns `DeviceState(battery_kwh = nameplate_capacity * SOC /100)`. It does not initialise from plant available-discharge energy or apply SOH to this starting value.
 
@@ -101,7 +101,9 @@ simulate_energy_plan(device_info, state, scenarios, config, projection_start)
     _energy_until_soc -> bounded first-step forced energy
     add scenario constraints and per-scenario score expressions
   Optimise Model
-    construct cp.Problem maximising sum(scenario.probability * scenario score)
+    score_scenario builds each scenario's cost/protection expressions and constraints
+    score_simulation solves common references and combines scenario scores
+    construct cp.Problem maximising reference-normalised cost/protection preference
     solve with HiGHS; reject unsuccessful status
   Model to Results
     derive numeric NextAction and OperatingMode locally
@@ -109,7 +111,9 @@ simulate_energy_plan(device_info, state, scenarios, config, projection_start)
     return SimulationResult(next_action, results)
 ```
 
-These stages are inline sections of one function. Shared variables, constraints, score expressions and reporting data remain local; there are no intermediate model objects or separate build/optimise/result APIs. The return value is `SimulationResult`: `next_action` is the shared action including derived mode, and `results` maps scenario names to DataFrames. Each whole-scenario score is multiplied by `ScenarioData.probability` before summation; probabilities are used as supplied, without an additional scenario-count division or normalisation.
+These stages are inline sections of one function. Shared variables, constraints, score expressions and reporting data remain local; there are no intermediate model objects or separate build/optimise/result APIs. The return value is `SimulationResult`: `next_action` is the shared action including derived mode, and `results` maps scenario names to DataFrames. Whole-scenario cost and average protection are scored on common reference scales, combined using the preference weights, then blended using scenario probabilities. The shared reference solves still use expected cost and protection; probabilities must be finite/non-negative with a positive total and are used as supplied.
+
+`score_scenario(costs, levels, device, config, constraints)` returns one scenario's total net cost and average battery-protection expressions, adding its utility constraints to the shared list. `score_simulation` calls it for each scenario, performs the shared financial/protection reference solves, normalises and mixes the two scores, then sums them using scenario probabilities. The split does not change the scoring curve, constraints or reference scales.
 
 The four shared first-step variables match numeric `NextAction`: forced battery charge/discharge rates and their respective SOC cut-offs. Rates are non-negative kW, with at most one positive. Activation Booleans distinguish zero from positive commands using `MIN_FORCE_RATE_KW = 0.1` (100 W); rates remain continuous above this threshold. SOC cut-offs independently lie in `[0, 100]` and need not be ordered.
 
@@ -166,6 +170,6 @@ No result is written back to SQLite. The existing output path is deleted before 
 
 `planning.types.NextAction` is a frozen dataclass with `force_battery_charge_rate`/`force_battery_discharge_rate` in kW and `charge_cut_off_soc_percent`/`discharge_cut_off_soc_percent`. Timing is implicit. `OperatingMode` remains an `IntEnum` (2/4/5) used for the locally derived mode in `simulate_energy_plan`, but is not an action field or independent solver choice. No device commands are executed.
 
-`PlanningInputs(device_info, device_state, forecast, starts_at)` is a frozen record of the current input objects; contained forecast/device objects are not deeply immutable. `build_plan(inputs, config)` expands the baseline through `create_scenarios` and returns `dict[str, pandas.DataFrame]`. It can run entirely in memory. `services.planning.plan_as_of(database, config, as_of)` supplies the same inputs from cutoff-aware queries. The CLI groups and writes those frames through `tools.reports`.
+`simulate_energy_plan` accepts device metadata/state, `list[ScenarioData]`, configuration and projection start, and returns `SimulationResult(next_action, results)`. It has no database/network/UI dependency. The former `build_plan` wrapper is inlined into `services.planning.plan_as_of`, which loads cutoff-aware inputs and generates scenarios directly. The CLI groups and writes `result.results` through `tools.reports`.
 
-`system_limits()` converts capacity, health, efficiency and inverter power into interval limits. The inline scenario score is probability times the configured weighted negative net cost plus tariff-valued battery objective. The restructure does not implement the shared action, 0.5/1/2 scenario design or normalised protection scoring in the proposed plan-model document.
+`system_limits()` derives interval hardware limits; `score_simulation` owns the agreed probability-weighted, reference-normalised cost/protection objective in `optimisation.py`. Future work remains production forecast reuse, 0.5/1/2 scenario scaling, verified command response and report-level reference diagnostics.

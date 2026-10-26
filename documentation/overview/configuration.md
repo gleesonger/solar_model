@@ -55,3 +55,7 @@ The live collector passes these settings to solar correction and the fixed daily
 - [solar_model/integrations/sigenstor/register_maps/sigen_register_map.json](../../solar_model/integrations/sigenstor/register_maps/sigen_register_map.json) and [solar_model/integrations/sigenstor/register_maps/sigen_device_register_map.json](../../solar_model/integrations/sigenstor/register_maps/sigen_device_register_map.json) are source-relative fixed filenames.
 - Explicit map device IDs override the default. Current maps distinguish plant 247 and inverter 1.
 - Map `scale` is a **divisor** during decoding, separate from database fixed-point scaling.
+
+## Planning score
+
+`energy_plan.preferred_reserve_kwh` is a positive, finite soft reserve of usable energy above the physical discharge cut-off; it defaults to 4 kWh. It affects the diminishing-return protection curve, not feasibility. `optimisation_weights.maximise_profit` and `maximise_battery` now mix reference-normalised financial/protection scores; their normalised battery share is the protection preference (shipped 0.05). They no longer mix currency with tariff-valued stored energy. Approximation error (0.05 score points) and reference tolerance (`1e-6`) are fixed code constants.

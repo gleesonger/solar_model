@@ -120,6 +120,7 @@ forecast:
 energy_plan:
   num_projection_hours: 24
   projection_resolution_mins: 15
+  preferred_reserve_kwh: 4               # Soft reserve above the physical discharge cut-off
 
 
   load_forecast_historical_lookback_window_days: 42

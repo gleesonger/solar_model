@@ -7,6 +7,7 @@ import cvxpy as cp
 import pytest
 
 from solar_model.config import OptimisationWeightsConfig, TariffPeriod, TariffRule, TariffsConfig, load_config
+from solar_model.planning import optimisation
 from solar_model.planning.optimisation import simulate_energy_plan
 from solar_model.planning.types import DeviceInfo, DeviceState, ForecastData, ForecastInterval, NextAction, ScenarioData
 
@@ -32,26 +33,20 @@ def inputs():
 
 
 def simulate(inputs, action=None, extra_constraints=None):
-    original_init = cp.Problem.__init__
-    configured = False
+    original_score = optimisation.score_simulation
 
-    def initialise_problem(problem, objective, constraints=None):
-        nonlocal configured
-        constraints = list(constraints or [])
-        if not configured:
-            variables = {variable.name(): variable for expression in [objective, *constraints]
-                         for variable in expression.variables()}
-            if "next_force_battery_charge_rate" in variables:
-                if action is not None:
-                    constraints.extend(variables["next_" + field.name] == getattr(action, field.name)
-                                       for field in fields(action))
-                if extra_constraints is not None:
-                    constraints.extend(extra_constraints(variables))
-                configured = True
-        original_init(problem, objective, constraints)
+    def score_with_constraints(costs, levels, scenarios, device, config, constraints):
+        variables = {variable.name(): variable for constraint in constraints
+                     for variable in constraint.variables()}
+        if action is not None:
+            constraints.extend(variables["next_" + field.name] == getattr(action, field.name)
+                               for field in fields(action))
+        if extra_constraints is not None:
+            constraints.extend(extra_constraints(variables))
+        return original_score(costs, levels, scenarios, device, config, constraints)
 
-    with patch.object(cp.Problem, "__init__", initialise_problem):
-        return simulate_energy_plan(*inputs)
+    with patch.object(optimisation, "score_simulation", score_with_constraints):
+        return simulate_energy_plan(*inputs).results
 
 
 def solve(inputs, action=None):

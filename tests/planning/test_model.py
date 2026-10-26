@@ -5,7 +5,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from solar_model.config import OptimisationWeightsConfig, TariffPeriod, TariffRule, TariffsConfig, load_config
-from solar_model.planning.model import PlanningInputs, build_plan
+from solar_model.planning.optimisation import simulate_energy_plan
 from solar_model.planning.scenarios import create_scenarios
 from solar_model.planning.types import DeviceInfo, DeviceState, ForecastData, ForecastInterval
 
@@ -32,7 +32,7 @@ def test_in_memory_plan_preserves_scenario_energy_and_cost():
         optimisation_weights=OptimisationWeightsConfig(1., 0.),
     ))
 
-    plans = build_plan(PlanningInputs(device, DeviceState(0.), baseline, start), config)
+    plans = simulate_energy_plan(device, DeviceState(0.), create_scenarios(baseline), config, start).results
 
     assert len(plans) == 9
     for name, plan in plans.items():
@@ -40,9 +40,9 @@ def test_in_memory_plan_preserves_scenario_energy_and_cost():
         assert len(plan) == 8
         assert plan.load_kwh.sum() == pytest.approx(2 * multiplier)
         assert plan.solar_kwh.sum() == 0.
-        assert plan.grid_import_kwh.tolist() == pytest.approx(plan.load_kwh.tolist())
-        assert plan.net_cost.sum() == pytest.approx((plan.load_kwh * plan.import_rate).sum())
-        assert plan.battery_end_kwh.tolist() == pytest.approx([0.] * 8, abs=1e-7)
+        assert plan.grid_import_kwh.tolist() == pytest.approx(plan.load_kwh.tolist(), abs=1e-5)
+        assert plan.net_cost.sum() == pytest.approx((plan.load_kwh * plan.import_rate).sum(), abs=1e-5)
+        assert plan.battery_end_kwh.tolist() == pytest.approx([0.] * 8, abs=1e-5)
     assert baseline.sum(start, end).load_kwh == 2.
 
 

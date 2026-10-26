@@ -17,7 +17,7 @@ Source: [solar_model/tariffs.py](../../solar_model/tariffs.py), `economic_period
 
 Source: [solar_model/planning/optimisation.py](../../solar_model/planning/optimisation.py), `simulate_energy_plan`.
 
-`simulate_energy_plan` contains three inline sections: Build Model, Optimise Model, and Model to Results. It creates local shared first-step battery-rate/SOC variables, scenario score expressions and constraints; maximises the sum of each scenario score multiplied by its probability; then extracts scenario frames. There are no intermediate model dataclasses or separate build/optimise/extract APIs.
+`simulate_energy_plan` contains three inline sections: Build Model, Optimise Model, and Model to Results. It creates local shared first-step battery-rate/SOC variables, constraints; calls the standalone `score_simulation` function in `optimisation.py` to build reserve-utility scoring and solve financial/protection references; maximises their reference-normalised preference score; then extracts scenario frames. There are no intermediate model dataclasses or separate build/optimise/extract APIs.
 
 A positive charge rate forces charging until its charge SOC; a positive discharge rate forces discharging until its discharge SOC. Both cannot be positive. With both zero, self-consumption permits passive PV charging and battery discharge to meet demand, ignoring both action SOC cut-offs; existing physical/scheduled energy bounds still apply. Only `t == 0` uses these shared controls. Rates are kW of AC-equivalent battery input or delivered battery output, with a minimum positive command of 0.1 kW (100 W). Internal Boolean constraints handle activation and SOC stopping. After solving, the function derives a local numeric `NextAction` and `OperatingMode` IntEnum; its return value is `SimulationResult(next_action, results)`, combining the shared action (including its derived mode) and scenario-frame dictionary.
 
@@ -28,8 +28,8 @@ A positive charge rate forces charging until its charge SOC; a positive discharg
 - Energy routes include solar to load/battery/grid/clipping, battery to load/grid, and grid to load/battery.
 - Battery capacity is nameplate capacity × state of health; charge/discharge and inverter/absorption powers become interval kWh limits.
 - Scheduled battery minimum/maximum apply at interval end; maximum is capped by adjusted capacity. Efficiencies add explicit charge/discharge losses.
-- Device SOC cutoff fields and `maximum_pv_input_power_kw` are required metadata but are not enforced by the optimiser; configured kWh schedules set the battery reserve/ceiling.
-- Objective combines average negative net cost with weighted battery-level worth accumulated over the horizon (`battery_end_kwh × import_rate × interval_hours`). It is not solely a terminal reserve value.
+- Device discharge SOC defines usable energy for scoring. Physical/scheduled flow constraints retain their existing kWh bounds; device charge SOC and maximum PV-input metadata are not newly imposed as hard constraints by this scoring change.
+- `score_scenario` builds each scenario's total cost and average battery protection using the agreed reserve curve. `score_simulation` places both on common reference scales, combines them using the cost/battery preference, then blends scenarios using their probabilities. The reference solves and curve approximation are unchanged.
 - Scenarios share first-step control variables; later decisions remain independent. This selects one next action, while the remaining scenario schedules describe possible outcomes.
 - Solver infeasibility raises an error; output solar/load balances are checked to 0.001 kWh.
 
@@ -54,4 +54,4 @@ Source: [solar_model/tools/plan_as_of.py](../../solar_model/tools/plan_as_of.py)
 - [check-tariffs/model_tariffs.py](../../check-tariffs/model_tariffs.py) compares enabled JSON tariffs/plans, includes standing charges, and writes Excel summaries. It uses a separate rule-based model and Wh/cents units.
 - Both execute top-level work on import; run intentionally from their working folder after inspecting paths. Extraction requires the optional `research` package dependencies (`openpyxl`).
 
-The public calculation entry point is `planning.model.build_plan(PlanningInputs(...), config)`. It returns scenario frames; `services.planning.plan_as_of` loads the cutoff-aware inputs and `tools.reports` handles Excel/grouping. `planning/system.py` derives physical limits; the probability-weighted cost/battery score is calculated inline in `simulate_energy_plan`.
+The public calculation entry point is `planning.optimisation.simulate_energy_plan(device_info, device_state, scenarios, config, starts_at)`. It accepts in-memory inputs and returns `SimulationResult`. `services.planning.plan_as_of` loads cutoff-aware inputs and creates scenarios directly; the former `build_plan` wrapper and `PlanningInputs` record have been removed. The CLI passes `SimulationResult.results` to Excel/grouping. `planning/system.py` derives physical limits; the standalone `score_simulation` in `optimisation.py` owns the agreed cost/protection scoring.

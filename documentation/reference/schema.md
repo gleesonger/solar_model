@@ -38,6 +38,7 @@ Primary key: `collected_at_utc`.
 | `plant_pv_total_kwh` | `INTEGER` | scaled number | yes |
 | `plant_pv_total_kwh_period` | `INTEGER` | scaled number | yes |
 | `plant_load_power_kw` | `INTEGER` | scaled number | yes |
+| `house_load_kwh_period` | `INTEGER` | scaled number; derived interval kWh | yes |
 | `plant_load_daily_kwh` | `INTEGER` | scaled number | yes |
 | `plant_load_daily_kwh_period` | `INTEGER` | scaled number | yes |
 | `plant_load_total_kwh` | `INTEGER` | scaled number | yes |
@@ -241,6 +242,8 @@ Declared indexes:
 ## `database_metadata`
 
 Primary key: `key`.
+
+`database_version` is `0.2.0` after the house-load backfill; older `0.1.0` or absent values trigger that migration. `hourly_rollup_initialized_v3` remains a separate hourly-readiness marker.
 
 | Field | SQL type | ORM API | Nullable |
 | --- | --- | --- | --- |

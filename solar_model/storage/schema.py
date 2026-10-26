@@ -72,6 +72,7 @@ class SigenStorModbusSample(Base):
     plant_pv_total_kwh: Mapped[float | None] = mapped_column(Float)
     plant_pv_total_kwh_period: Mapped[float | None] = mapped_column(Float)
     plant_load_power_kw: Mapped[float | None] = mapped_column(Float)
+    house_load_kwh_period: Mapped[float | None] = mapped_column(Float)
     plant_load_daily_kwh: Mapped[float | None] = mapped_column(Float)
     plant_load_daily_kwh_period: Mapped[float | None] = mapped_column(Float)
     plant_load_total_kwh: Mapped[float | None] = mapped_column(Float)

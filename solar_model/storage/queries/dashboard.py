@@ -61,7 +61,7 @@ FORECAST_WATT_HOURS_READERS: dict[str, dict[int, ForecastWattHoursReader]] = {
 }
 IMPORT_COST_TARIFF_PREFIX = "import_cost_tariff__"
 CUSTOM_CHART_ENERGY_METRICS = (
-    "solar", "forecast_total", "forecast_raw_total", "load", "battery", "grid_import",
+    "solar", "forecast_total", "forecast_raw_total", "load", "house_load", "battery", "grid_import",
     "grid_export", "grid_import_cost", "grid_export_revenue", "net_cost",
     "no_solar_battery_import_cost", "import_rate", "export_rate",
 )
@@ -503,6 +503,7 @@ FORECAST_EXPORT_COLUMNS = tuple(
 EXPORT_FIELD_LABELS = {
     "plant_pv_total_kwh_period": "Solar (kWh)",
     "plant_load_total_kwh_period": "Load (kWh)",
+    "house_load_kwh_period": "House Load (kWh)",
     "plant_battery_charge_total_kwh_period": "Battery Charge (kWh)",
     "plant_battery_discharge_total_kwh_period": "Battery Discharge (kWh)",
     "plant_grid_import_total_kwh_period": "Grid Imported (kWh)",
@@ -633,7 +634,7 @@ def load_analysis_range(
     timings = _CustomChartTimings()
     energy_selections = (
         *((metric, None) for metric in (
-            "solar", "load", "grid_import", "grid_export", "grid_import_cost",
+            "solar", "load", "house_load", "grid_import", "grid_export", "grid_import_cost",
             "grid_export_revenue", "net_cost", "no_solar_battery_import_cost",
             IMPORT_COST_TARIFF_PREFIX + "*", "import_rate", "export_rate", "battery_flow",
         )),
@@ -746,7 +747,7 @@ def load_rollup_daily_energy_frames(
             actual = hours.assign(**{
                 column: float("nan")
                 for column in (
-                    "solar", "load", "battery", "grid_import", "grid_export",
+                    "solar", "load", "house_load", "battery", "grid_import", "grid_export",
                     "grid_import_cost", "grid_export_revenue", "net_cost",
                     "no_solar_battery_import_cost", "import_rate", "export_rate",
                 )
@@ -1183,6 +1184,7 @@ def load_historical_minute_energy(
         "forecast_total",
         "forecast_raw_total",
         "load",
+        "house_load",
         "battery",
         "grid_import",
         "grid_export",
@@ -1205,6 +1207,7 @@ def load_historical_minute_energy(
             "forecast_total": None,
             "forecast_raw_total": None,
             "load": sample.plant_load_total_kwh_period,
+            "house_load": sample.house_load_kwh_period,
             "battery": (
                 (sample.plant_battery_charge_total_kwh_period or 0.0)
                 - (sample.plant_battery_discharge_total_kwh_period or 0.0)
@@ -1743,6 +1746,7 @@ def actual_hourly_from_samples(
     columns = (
         ("solar", "plant_pv_total_kwh_period"),
         ("load", "plant_load_total_kwh_period"),
+        ("house_load", "house_load_kwh_period"),
         ("battery_charge", "plant_battery_charge_total_kwh_period"),
         ("battery_discharge", "plant_battery_discharge_total_kwh_period"),
         ("grid_import", "plant_grid_import_total_kwh_period"),
@@ -1854,6 +1858,7 @@ def actual_hourly_from_rollup_samples(
     columns = (
         ("solar", "plant_pv_total_kwh_period"),
         ("load", "plant_load_total_kwh_period"),
+        ("house_load", "house_load_kwh_period"),
         ("battery_charge", "plant_battery_charge_total_kwh_period"),
         ("battery_discharge", "plant_battery_discharge_total_kwh_period"),
         ("grid_import", "plant_grid_import_total_kwh_period"),

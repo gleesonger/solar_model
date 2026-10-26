@@ -23,6 +23,7 @@ Regenerate it from the repository root with `python dashboard/assets/create_sola
 
 - Page uses a centred `max-w-7xl` container, full-width sections, `p-2 md:p-4` spacing, white background, and a sticky topbar (`z-index: 30`).
 - Section titles typically use `text-lg font-semibold`; Recent subsection titles use `text-base`; hints use `text-sm text-gray-600`.
+- Optional chart series selection uses one compact flat text button labelled **Default**, **None** or **All** in the existing bordered toolbar, alongside Split tariff and copy/download/table controls; the toolbar wraps within the header on narrow screens.
 - Charts usually use `w-full h-96`. The desktop custom builder uses a 34rem chart and matching scrollable legend, with a fixed-width legend column.
 - Tables use `dense flat bordered`, right-aligned numeric columns, and fit-content width where appropriate. Global table headers are blue `#0070C0` with white text.
 - Final summary rows use `.summary-total-table`, grey `#f1f3f5`, bold. Only mark tables whose last row really is a total.
@@ -33,6 +34,7 @@ Regenerate it from the repository root with `python dashboard/assets/create_sola
 | --- | --- |
 | Solar | `#F9C74F` |
 | Load | `#0072B2` |
+| Analysis House Load / original counter Load | `#0072B2` / `#6C757D` |
 | Battery | `#56B4E9` |
 | Grid import | `#D1495B` |
 | Grid export | `#009E73` |

@@ -31,7 +31,7 @@ NET_COST_COLOR = "#6C757D"
 NO_SOLAR_COST_COLOR = "#7B2CBF"
 CUSTOM_CHART_UNITS = {
     "solar": "kWh", "forecast_total": "kWh", "forecast_raw_total": "kWh",
-    "load": "kWh", "battery": "kWh", "grid_import": "kWh", "grid_export": "kWh",
+    "load": "kWh", "house_load": "kWh", "battery": "kWh", "grid_import": "kWh", "grid_export": "kWh",
     "grid_import_cost": "€", "grid_export_revenue": "€", "net_cost": "€",
     "no_solar_battery_import_cost": "€", "import_rate": "€/kWh", "export_rate": "€/kWh",
 }
@@ -116,7 +116,7 @@ def custom_chart_metric_unit(metric: str) -> str:
     return CUSTOM_CHART_UNITS.get(metric, "")
 
 ENERGY_TABLE_COLUMNS = (
-    "period", "solar", "forecast_total", "forecast_raw_total", "load", "grid_import", "grid_export",
+    "period", "solar", "forecast_total", "forecast_raw_total", "load", "house_load", "grid_import", "grid_export",
 )
 
 
@@ -130,6 +130,7 @@ def analysis_column_labels(
         "forecast_total": "Solar Forecast",
         "forecast_raw_total": "Solar (Forecast Raw)",
         "load": "Load",
+        "house_load": "House Load",
         "load_forecast": "Load (Forecast)",
         "battery": "Battery",
         "inverter": "Inverter",
@@ -273,6 +274,7 @@ def render_historical_charts(
         column_labels=column_labels,
         table_columns=ENERGY_TABLE_COLUMNS,
         show_total=True,
+        show_series_selection=True,
     )
     power_display = ChartDataDisplay(
         dataframe=power_data,
@@ -288,8 +290,9 @@ def render_historical_charts(
             state.historical_time_zoom_start,
             state.historical_time_zoom_end,
         ),
-        column_labels=column_labels,
+        column_labels={**column_labels, "load": "House Load"},
         show_total=False,
+        show_series_selection=True,
     )
     battery_display = ChartDataDisplay(
         dataframe=battery_data,
@@ -365,6 +368,7 @@ def render_historical_charts(
         ),
         column_labels=money_column_labels,
         show_total=True,
+        show_series_selection=True,
         total_aggregations={column: "mean" for _, column, _ in MONEY_RATE_SERIES},
         header_controls=lambda: ui.checkbox(
             "Split tariff",
@@ -412,10 +416,11 @@ def energy_chart_options(data: pd.DataFrame, category_column: str) -> dict[str, 
                 "Solar (Forecast)",
                 "Solar (Forecast Raw)",
                 "Load",
+                "House Load",
                 "Grid Imported",
                 "Grid Exported",
             ],
-            "selected": {"Solar (Forecast Raw)": False},
+            "selected": {"Solar (Forecast Raw)": False, "Load": False, "House Load": True},
         },
         "xAxis": {"type": "category", "data": dataframe_column(data, category_column).tolist()},
         "yAxis": {"type": "value", "name": "kWh"},
@@ -438,7 +443,8 @@ def energy_chart_options(data: pd.DataFrame, category_column: str) -> dict[str, 
                 "data": chart_values(dataframe_column(data, "forecast_raw_total")),
                 "itemStyle": forecast_item_style("#6C757D"),
             },
-            {"name": "Load", "type": "bar", "data": chart_values(dataframe_column(data, "load")), "itemStyle": {"color": LOAD_COLOR}},
+            {"name": "Load", "type": "bar", "data": chart_values(dataframe_column(data, "load")), "itemStyle": {"color": "#6C757D"}},
+            {"name": "House Load", "type": "bar", "data": chart_values(dataframe_column(data, "house_load")), "itemStyle": {"color": LOAD_COLOR}},
             {"name": "Grid Imported", "type": "bar", "data": chart_values(dataframe_column(data, "grid_import")), "itemStyle": {"color": GRID_IMPORT_COLOR}},
             {"name": "Grid Exported", "type": "bar", "data": chart_values(dataframe_column(data, "grid_export")), "itemStyle": {"color": GRID_EXPORT_COLOR}},
         ],
@@ -510,6 +516,7 @@ def money_chart_options(
     )
     money_series = [*import_cost_series, *MONEY_SERIES[1:]]
     selected = {
+        "Import Cost": True,
         **{label: True for label, _, _ in money_series},
         "Export Revenue": True,
         "Net Cost": False,
@@ -615,7 +622,7 @@ def power_chart_options(
             for index, array in enumerate(forecast_arrays)
             if array.panel_id in mapped_panels
         ],
-        ("Load", "load", LOAD_COLOR),
+        ("House Load", "load", LOAD_COLOR),
         ("Battery", "battery", BATTERY_COLOR),
         ("Inverter", "inverter", INVERTER_COLOR),
         ("Grid Imported", "grid_import", GRID_IMPORT_COLOR),

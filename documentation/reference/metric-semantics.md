@@ -8,6 +8,7 @@ Use this alongside the [exact schema](schema.md). Physical units apply below; ra
 | --- | --- | --- | --- | --- |
 | Plant solar/load/grid lifetime `*_total_kwh` | Cumulative meter, kWh | Maximum observed meter | Energy charts use its `_period` deltas, not the cumulative level | Last non-null reading per output period |
 | Meter `*_kwh_period` | Delta since previous successful sample, kWh | Sum | Sum of measured interval energy; first/reset delta is missing | Sum |
+| `house_load_kwh_period` | Estimated household kWh from trapezoidal integration of consecutive finite load powers; gaps >120 seconds are missing | Sum | House Load energy series, selected by default in Analysis; original Load counter remains available | Sum |
 | `plant_grid_power_kw` | Signed kW: import positive, export negative | Signed sum plus separate import/export magnitude sums and valid count | Import/export means are non-negative magnitudes, split before cancellation | Average signed raw power; not separate sign-series chart values |
 | Solar/load/inverter power | Instantaneous kW | Sum plus each field's valid count | Mean power, never a meaningful summed Total | Average valid raw readings |
 | `plant_battery_power_kw` | Signed device kW, passed through | Sum plus valid count | Mean signed power; do not infer its sign from charge-minus-discharge energy | Average valid raw readings |

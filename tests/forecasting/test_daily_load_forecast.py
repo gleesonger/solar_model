@@ -91,7 +91,8 @@ def test_saved_load_profile_flows_to_past_summaries_and_only_hourly_energy(tmp_p
         assert options["legend"]["selected"]["Load (Forecast)"] is False
         series = {item["name"]: item for item in options["series"]}
         assert series["Load (Forecast)"]["itemStyle"] == charts.forecast_item_style(charts.LOAD_COLOR)
-        assert series["Load"]["itemStyle"] == {"color": charts.LOAD_COLOR}
+        assert series["Load"]["itemStyle"] == {"color": "#6C757D"}
+        assert series["House Load"]["itemStyle"] == {"color": charts.LOAD_COLOR}
         assert series["Load (Forecast)"]["itemStyle"]["decal"] == series["Solar (Forecast)"]["itemStyle"]["decal"]
         daily = data.load_analysis_range(path, "UTC", bounds, "day", 60, (), {}).energy
         assert "load_forecast" not in daily

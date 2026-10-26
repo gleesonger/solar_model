@@ -16,6 +16,9 @@ open_database(path)
     create hourly table if absent
     check database_metadata completion marker
     rebuild uninitialized hourly history and commit marker atomically
+  _migrate_house_load(): BEGIN IMMEDIATE
+    check database_version; backfill house-load intervals and rebuild hourly history
+    commit database_version = "0.2.0" with the derived data
 ```
 
 `SolarDatabase.sessions()` creates a session; `sessions.begin()` owns a committing transaction. `close()` disposes the engine's pooled connections. Cached Engine identity is reused by path, but disposed engines can reconnect; a `SolarDatabase` is not a permanently open cursor.
@@ -87,6 +90,7 @@ All measurement/economics fields are nullable. Only `collected_at_utc` identifie
 
 ### Derived-value rules
 
+- House-load energy uses `house_load_energy(previous_kw, current_kw, elapsed_seconds)` in both collection and migration. Consecutive finite load powers with `0 < elapsed_seconds <= 120` produce trapezoidal kWh; other intervals are null. Previous load power is restored on restart and explicitly cleared when the current reading is missing. Like other stored period fields, energy is attributed to the ending sample, including midnight/hour boundaries; it is not split across buckets. The comparison research script instead splits at local midnight and does not round each interval, so small differences in daily/monthly totals are expected.
 - Meter delta is current minus previous when both are available and current ≥ previous; otherwise null. A decrease is a reset/unknown interval, not zero.
 - Each of four PV powers is `max(V*A, 0)/1000`, or null if either reading is absent.
 - Each PV energy is trapezoidal power × elapsed UTC hours when prior/current powers and a positive elapsed time exist; otherwise null. No maximum-gap cutoff is applied.
@@ -128,6 +132,8 @@ Hourly **energy/cost** is already an aggregate. Hourly **power/rate/SOC/availabl
 `_insert_hourly_rollup()` reproduces sums/maxima and per-field valid counts using SQL grouped by hour and band. Startup `initialize_hourly_rollup()` uses explicit SQLite `BEGIN IMMEDIATE`: table creation (if needed), full replacement and metadata key `hourly_rollup_initialized_v3 = "1"` commit together. Interrupted work rolls back and retries. V3 requires valid counts as well as v2's split grid statistics; earlier markers do not bypass the upgrade. Databases without v3 receive one full rebuild even if hourly rows exist. A present marked table skips reaggregation; a missing table is rebuilt even if a marker survives. The lock serializes initialization with collector writes. This is a readiness marker, not a global schema version.
 
 Manual `backfill_hourly_rollup()` still inserts missing groups with `OR IGNORE`; it does not repair stale existing groups. `rebuild_hourly_rollup(start,end,zone,connection=None)` replaces whole UTC hours overlapping the inclusive local-date range, including neighboring-date samples in boundary hours. It owns a transaction unless a caller supplies one; tariff recalculation supplies its raw-update connection. Adding unrelated columns alone does not backfill derived historical data.
+
+The separate `database_version` metadata key controls the house-load migration: `0.1.0` or absent upgrades to `0.2.0`; unsupported values are rejected before schema changes. After raw/hourly missing-column additions and hourly readiness initialization, `_migrate_house_load()` locks writers, reads ordered raw power samples, computes and rounds interval energy using the same helper as collection, writes only the new raw energy field, replaces hourly aggregates, and updates the version in one transaction. Failure rolls back data/version; already-added nullable columns can remain and are safe on retry. A version of `0.2.0` skips this backfill. This version is independent of the existing v3 hourly readiness marker.
 
 ## 4. Forecast persistence and adjusted writers
 

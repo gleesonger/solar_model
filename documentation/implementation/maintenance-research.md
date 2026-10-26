@@ -2,6 +2,18 @@
 
 These tools sit outside the managed collection/UI loop. Some mutate history; others only read SQLite and produce reports/artifacts. The [operations guide](../operations/runbook.md) contains invocation examples. This guide explains their function hierarchy and intermediate structures.
 
+## House-load comparison investigation
+
+To migrate an existing database and backfill the production house-load series, run `python -m solar_model.tools.migrate_database <database.db>`. The CLI requires an existing file and invokes the same migrations as normal startup. Verify on a copy first. Successful migration stores `database_version = 0.2.0`; repeating it skips the completed house-load backfill. See [storage](storage.md) for transaction and gap semantics.
+
+A read-only analysis on 2026-10-26 compared stored load-counter energy with estimated house-load energy for the 30 complete Europe/Dublin calendar days from 2026-09-26 through 2026-10-25. Counter deltas totalled **774.870 kWh**; integrated house load totalled **702.264 kWh**, a difference of **72.606 kWh (9.37% of counter load)**. Accepted power intervals covered **99.9%** of the elapsed time.
+
+The analysis read raw `plant_load_total_kwh_period` and `plant_load_power_kw`, dividing stored integers by 10,000. Counter deltas retained collection-date attribution. House energy used trapezoidal integration of consecutive non-null power readings, skipped intervals longer than 120 seconds, and split accepted intervals at local midnight with interpolated boundary power. Coverage used actual local-day durations, including the 25-hour DST day. Synthetic checks verified constant-power integration across that DST day, midnight endpoints and gap handling.
+
+The difference is a diagnostic comparison, not a verified loss measurement: sampling, gaps and counter attribution can also contribute. SQLite is opened read-only without application initialization, migrations or backfills. Dashboard metrics and database contents are unchanged.
+
+The [comparison script](../../solar_model/tools/compare_house_load.py) is retained. Run `python -m solar_model.tools.compare_house_load [solar.db]` from the repository root. Options include `--days` (default 30), `--end` (exclusive ISO date, default latest measurement's local date), `--timezone` (default `Europe/Dublin`) and `--max-gap-seconds` (default 120). Temporary verification fixtures were removed.
+
 ## 1. Tariff recalculation
 
 Source: [solar_model/tools/recalculate_economics.py](../../solar_model/tools/recalculate_economics.py), [solar_model/dashboard/tabs/control.py](../../solar_model/dashboard/tabs/control.py).

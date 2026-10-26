@@ -19,6 +19,7 @@ from solar_model.storage.connection import create_engine_for_database
 ACTUAL_COLUMNS = {
     "solar": "plant_pv_total_kwh_period",
     "load": "plant_load_total_kwh_period",
+    "house_load": "house_load_kwh_period",
     "grid_import": "plant_grid_import_total_kwh_period",
     "grid_export": "plant_grid_export_total_kwh_period",
     "grid_import_cost": "grid_import_cost_period",

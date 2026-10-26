@@ -16,9 +16,19 @@ from solar_model.storage.schema import (
     SigenStorHourlySample,
 )
 from solar_model.storage.connection import SolarDatabase, create_engine_for_database
+from solar_model.storage.measurements import house_load_energy
+
+DATABASE_VERSION = "0.2.0"
 
 def open_database(path: str | Path) -> SolarDatabase:
     engine = create_engine_for_database(path)
+    if inspect(engine).has_table(DatabaseMetadata.__tablename__):
+        with engine.connect() as connection:
+            version = connection.exec_driver_sql(
+                "SELECT value FROM database_metadata WHERE key = 'database_version'"
+            ).scalar_one_or_none()
+        if version not in (None, "0.1.0", DATABASE_VERSION):
+            raise RuntimeError(f"Unsupported database version: {version!r}")
     _rename_forecast_solar_raw_columns(engine)
     _rename_sigenstor_battery_available_discharge_column(engine)
     inspector = inspect(engine)
@@ -44,7 +54,43 @@ def open_database(path: str | Path) -> SolarDatabase:
     if not hourly_table_missing:
         _add_missing_columns(engine, SigenStorHourlySample)
     database.initialize_hourly_rollup()
+    _migrate_house_load(database)
     return database
+
+
+def _migrate_house_load(database: SolarDatabase) -> None:
+    """Backfill house energy and publish database version in one transaction."""
+    with database.engine.begin() as connection:
+        connection.exec_driver_sql("BEGIN IMMEDIATE")
+        version = connection.exec_driver_sql(
+            "SELECT value FROM database_metadata WHERE key = 'database_version'"
+        ).scalar_one_or_none()
+        if version == DATABASE_VERSION:
+            return
+        if version not in (None, "0.1.0"):
+            raise RuntimeError(f"Unsupported database version: {version!r}")
+        rows = connection.exec_driver_sql(
+            "SELECT collected_at_utc, plant_load_power_kw FROM sigenstor ORDER BY collected_at_utc"
+        ).fetchall()
+        previous_stamp, previous_power = None, None
+        updates = []
+        for stamp, raw_power in rows:
+            power = raw_power / 10000 if raw_power is not None else None
+            energy = house_load_energy(
+                previous_power, power, stamp - previous_stamp if previous_stamp is not None else 0,
+            )
+            updates.append((round(energy * 10000) if energy is not None else None, stamp))
+            previous_stamp, previous_power = stamp, power
+        if updates:
+            connection.exec_driver_sql(
+                "UPDATE sigenstor SET house_load_kwh_period = ? WHERE collected_at_utc = ?", updates,
+            )
+        connection.execute(SigenStorHourlySample.__table__.delete())
+        database._insert_hourly_rollup(connection)
+        connection.exec_driver_sql(
+            "INSERT INTO database_metadata (key, value) VALUES ('database_version', ?) "
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value", (DATABASE_VERSION,),
+        )
 
 def _add_missing_columns(engine: Engine, model: type[Base]) -> None:
     table = cast(Table, model.__table__)

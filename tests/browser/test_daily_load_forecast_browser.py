@@ -42,6 +42,7 @@ def index():
     day = pd.DataFrame(columns=["solar", "battery", "load", "grid_import", "grid_export", "forecast_total", "forecast_bod_total", "forecast_raw_total"])
     tab.render_recent_tab((day, None, reading, daily, daily))
     baseline = pd.DataFrame({{"period": ["00:00", "01:00"], "solar": [1., 2.], "load": [2., 3.], "grid_import": [0., 0.], "grid_export": [0., 0.], "forecast_total": [1., 2.], "forecast_raw_total": [1., 2.]}})
+    baseline["house_load"] = [1.8, 2.8]
     hourly = baseline.assign(load_forecast=[2.5, 3.5])
     display = ChartDataDisplay(dataframe=baseline, title="Energy by hour (kWh)",
         render_chart=lambda: ui.echart((energy_chart_options(baseline, "period") | {{"animation": False}})).classes("w-full h-96"),
@@ -77,8 +78,14 @@ ui.run(host="127.0.0.1", port={port}, reload=False, show=False)
                 page = browser.new_page()
                 page.goto(url)
                 page.get_by_role("button", name="Hourly", exact=True).wait_for()
+                page.wait_for_function("""() => {
+                    const chart = echarts.getInstanceByDom(document.querySelector('[data-testid=energy-chart]'));
+                    const selected = chart?.getOption().legend[0].selected;
+                    return selected?.['House Load'] === true && selected?.Load === false;
+                }""")
                 for width in (1440, 390, 360):
                     page.set_viewport_size({"width": width, "height": 1000})
+                    assert page.evaluate("""() => echarts.getInstanceByDom(document.querySelector('[data-testid=energy-chart]')).getOption().series.find(s => s.name === 'House Load').data""") == [1.8, 2.8]
                     assert page.locator(".live-today-table").get_by_text("Load (Forecast)", exact=True).count() == 0
                     assert page.get_by_role("columnheader", name="Load (Forecast)", exact=True).count() == 2
                     page.get_by_role("button", name="Hourly", exact=True).click()

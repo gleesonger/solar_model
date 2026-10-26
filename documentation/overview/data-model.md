@@ -15,7 +15,7 @@ For a consolidated comparison of units, signs, missing values, time attribution 
 | `forecast_solar` | `collected_at_utc`, `forecast_time` | One collection vintage and target time; up to four panels' raw/adjusted W and Wh fields |
 | `forecast_load` | `target_day`, `forecast_time` | One fixed hourly load profile per configured-local date; generation timestamp and nullable kWh |
 | `sigenstor_devices` | integer `id` | Append-only valid device-value changes, with variable/name/value/unit and ISO UTC/local timestamps |
-| `database_metadata` | `key` | Key/value storage including hourly-initialization completion; no global database version |
+| `database_metadata` | `key` | Key/value storage including `database_version` and hourly-initialization completion |
 
 ## Units and time
 
@@ -29,6 +29,7 @@ For a consolidated comparison of units, signs, missing values, time attribution 
 
 ## Derived values
 
+- `house_load_kwh_period` estimates household energy from consecutive `plant_load_power_kw` readings using trapezoidal integration. First/missing/non-finite readings and gaps longer than 120 seconds produce null. Intervals use UTC elapsed time and are attributed to their ending sample's hour/date, like existing stored period energy. Raw and hourly values are scaled integers; interval rounding is 0.0001 kWh.
 - Cumulative `_period` values are differences from the previous successful meter value. First readings and decreases/resets produce `NULL`, not negative energy.
 - Restart loads previous cumulatives and PV powers from the latest persisted sample. Gaps therefore span the time since that sample.
 - PV-string power is `max(voltage × current, 0) / 1000`; interval energy uses the trapezoidal average of previous/current power and elapsed UTC hours.
@@ -42,6 +43,7 @@ For a consolidated comparison of units, signs, missing values, time attribution 
 
 ## Migration behavior
 
+- `database_metadata.database_version` advances from `0.1.0` (or absent) to `0.2.0` when the house-load historical backfill and hourly rebuild commit together. Missing columns are added before the backfill; an interrupted backfill retains the old version and retries. Current-version databases skip the backfill; unsupported versions are rejected before schema changes. Normal startup runs migration, or run `python -m solar_model.tools.migrate_database <database-copy.db>` explicitly.
 - `open_database()` renames legacy forecast fields to `_raw_`, renames battery availability to the plant-level name, creates tables, adds missing columns, and drops legacy JSON columns.
 - Conflicting duplicate raw/legacy forecast values cause migration refusal rather than silent data loss.
 - Initial hourly creation/rebuild and `hourly_rollup_initialized_v3` commit together. Older v1/v2 or unmarked history rebuilds once to populate valid counts; interrupted initialization retries. Later marked opens skip the scan. Adding unrelated columns alone does not trigger another rebuild.

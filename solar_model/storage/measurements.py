@@ -27,6 +27,15 @@ from solar_model.storage.schema import (
     SigenStorHourlySample,
 )
 
+def house_load_energy(previous_kw: float | None, current_kw: float | None, elapsed_seconds: float) -> float | None:
+    """Estimated household kWh; do not integrate across missing/long intervals."""
+    if (previous_kw is None or current_kw is None
+            or not math.isfinite(previous_kw) or not math.isfinite(current_kw)
+            or not 0 < elapsed_seconds <= 120):
+        return None
+    return (previous_kw + current_kw) / 2 * elapsed_seconds / 3600
+
+
 class MeasurementStorage:
     """Atomic telemetry, device history and derived hourly rollups."""
 
@@ -41,6 +50,7 @@ class MeasurementStorage:
         if row is not None:
             previous["_collected_at_utc"] = row.collected_at_utc
             previous.update({column: getattr(row, column) for column in PV_ARRAY_POWER_COLUMNS})
+            previous["plant_load_power_kw"] = row.plant_load_power_kw
         return previous
 
     def save_modbus_sample(
@@ -66,12 +76,20 @@ class MeasurementStorage:
             datetime.fromisoformat(collected[1]),
         ))
         self._add_pv_array_measurements(row, previous)
+        previous_stamp = previous.get("_collected_at_utc")
+        row["house_load_kwh_period"] = house_load_energy(
+            previous.get("plant_load_power_kw"), row.get("plant_load_power_kw"),
+            datetime.fromisoformat(collected[0]).timestamp()
+            - datetime.fromisoformat(cast(str, previous_stamp)).timestamp()
+            if previous_stamp is not None else 0,
+        )
         with self.sessions.begin() as session:
             session.add(SigenStorModbusSample(**row))
             self._add_hourly_sample(session, row)
         previous.update({column_name(metric, unit): value for metric, (value, unit, _) in values.items()})
         previous["_collected_at_utc"] = collected[0]
         previous.update({column: row.get(column) for column in PV_ARRAY_POWER_COLUMNS})
+        previous["plant_load_power_kw"] = row.get("plant_load_power_kw")
 
     @staticmethod
     def _add_pv_array_measurements(row: dict[str, Any], previous: dict[str, float]) -> None:

@@ -39,6 +39,7 @@ class ChartDataDisplay:
         show_total: bool = False,
         total_aggregations: Mapping[str, str] | None = None,
         header_controls: Callable[[], None] | None = None,
+        show_series_selection: bool = False,
     ) -> None:
         self.dataframe = dataframe
         self._title = title
@@ -50,6 +51,7 @@ class ChartDataDisplay:
         self._show_total = show_total
         self._total_aggregations = total_aggregations or {}
         self._showing_table = False
+        self._series_selection_state = "Default"
 
         with ui.row().classes("w-full items-center justify-between gap-4 mt-4"):
             self.title = ui.label(self._text(title)).classes("text-lg font-semibold")
@@ -57,6 +59,9 @@ class ChartDataDisplay:
             with ui.row().classes("items-center gap-1 rounded border p-1"):
                 if header_controls is not None:
                     header_controls()
+                if show_series_selection:
+                    self._series_selection_button = ui.button("Default", on_click=self._cycle_series_selection).props("flat dense")
+                    self._series_selection_button.tooltip("Cycle series: None → All → Default")
                 ui.button(icon="content_copy", on_click=self._copy_data).props("flat round dense").tooltip("Copy data for Excel")
                 ui.button(icon="download", on_click=self._download_data).props("flat round dense").tooltip("Download CSV")
                 ui.button(icon="table_chart", on_click=self._toggle_layout).props("flat round dense").tooltip("Show table")
@@ -66,6 +71,7 @@ class ChartDataDisplay:
         with self.chart_container:
             self.chart = render_chart()
         self._known_series_names = {series.get("name") for series in self.chart.options.get("series", [])}
+        self._default_series_selection = dict(self.chart.options.get("legend", {}).get("selected", {}))
         self.table_container = ui.column().classes("w-full overflow-auto")
         self.table = self._render_table()
         self.table_container.set_visibility(False)
@@ -80,6 +86,8 @@ class ChartDataDisplay:
         self.table.update()
         if self._chart_options is not None:
             options = self._chart_options(dataframe)
+            for name, selected in options.get("legend", {}).get("selected", {}).items():
+                self._default_series_selection.setdefault(name, selected)
             self.chart.options.clear()
             self.chart.options.update(options)
             browser_options = deepcopy(options)
@@ -91,6 +99,19 @@ class ChartDataDisplay:
                     legend["selected"] = new_defaults
             self._known_series_names.update(series.get("name") for series in options.get("series", []))
             self.chart.run_chart_method("setOption", browser_options, {"replaceMerge": ["series"]})
+
+    def _cycle_series_selection(self) -> None:
+        self._series_selection_state = {"Default": "None", "None": "All", "All": "Default"}[self._series_selection_state]
+        selection = {
+            series["name"]: (
+                self._default_series_selection.get(series["name"], True)
+                if self._series_selection_state == "Default" else self._series_selection_state == "All"
+            )
+            for series in self.chart.options.get("series", [])
+        }
+        self.chart.options.setdefault("legend", {})["selected"] = selection
+        self.chart.run_chart_method("setOption", {"legend": {"selected": selection}})
+        self._series_selection_button.set_text(self._series_selection_state)
 
     def refresh_chart(self) -> None:
         """Re-render the chart from the current dataframe and chart options."""

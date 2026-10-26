@@ -34,12 +34,12 @@ def load_operational_inputs(database) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Load immutable raw forecast and actual inputs for an operational run."""
     return _load_inputs(database.engine.url.database)
 
-def load_hourly_load(database_path: str | Path, timezone: ZoneInfo, *, start: pd.Timestamp | None = None, end: pd.Timestamp | None = None) -> pd.DataFrame:
+def load_hourly_house_load(database_path: str | Path, timezone: ZoneInfo, *, start: pd.Timestamp | None = None, end: pd.Timestamp | None = None) -> pd.DataFrame:
     connection = sqlite3.connect(database_path)
     try:
         frame = pd.read_sql_query(
-            "SELECT hour_start_utc, SUM(plant_load_total_kwh_period) AS load_scaled "
-            "FROM sigenstor_hourly WHERE plant_load_total_kwh_period IS NOT NULL "
+            "SELECT hour_start_utc, SUM(house_load_kwh_period) AS load_scaled "
+            "FROM sigenstor_hourly WHERE house_load_kwh_period IS NOT NULL "
             "AND hour_start_utc >= :start "
             "AND hour_start_utc < :end "
             "GROUP BY hour_start_utc ORDER BY hour_start_utc",

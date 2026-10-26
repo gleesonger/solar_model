@@ -6,6 +6,7 @@ SUMMARY_LATEST_KEYS = {
     "Solar": "solar",
     "Battery": "battery",
     "Load": "load",
+    "House Load": "house_load",
     "Import": "grid_import",
     "Export": "grid_export",
 }

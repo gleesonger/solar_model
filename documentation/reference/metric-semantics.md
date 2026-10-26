@@ -25,6 +25,8 @@ Use this alongside the [exact schema](schema.md). Physical units apply below; ra
 
 Recent Live/Today may replace database-derived values with live daily meters. Its battery Today value uses inverter daily charge minus discharge; Analysis uses plant lifetime-meter deltas. The common `battery` label therefore requires its view/unit context. See [dashboard presentation](../implementation/dashboard-ui.md).
 
+Recent House Load uses measured load power for Latest and stored integrated house energy for Today, refreshed with the full snapshot rather than integrated again during live polling. Its BoD Forecast is the full saved daily household profile; missing forecasts stay blank, and Latest/Raw Forecast remain blank. The Past tables sum actual House Load only, including their Total/Lifetime rows; they do not contain house forecasts.
+
 ## Missing values and averaging
 
 - Zero is observed; `NULL`/`None` is missing. Hourly telemetry means divide by that field's valid count; 4/NULL → 4, 4/0 → 2, all-null → missing.

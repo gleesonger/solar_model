@@ -42,7 +42,7 @@ def run(database, monkeypatch, now=NOW):
 def test_collection_passes_yaml_model_settings_to_adjustment(database, requests, monkeypatch):
     models = ForecastModelsConfig(solar_intraday=ForecastModelConfig(2., 0.5, 0.5))
     load_adjustment = Mock(return_value=24)
-    monkeypatch.setattr(collector, "refresh_daily_load_forecast", load_adjustment)
+    monkeypatch.setattr(collector, "refresh_daily_house_load_forecast", load_adjustment)
     monkeypatch.setattr(collector, "utc_now", lambda: NOW)
     collector.collect_once(Mock(), database, ARRAYS, "https://example.test/estimate", 10., "Europe/Dublin", INTERVAL, models)
     assert requests[1].call_args.kwargs["models"] is models

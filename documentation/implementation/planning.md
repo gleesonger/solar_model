@@ -17,7 +17,7 @@ solar_model.tools.plan_as_of.main()
   load_forecast_as_of()
     select one forecast vintage
     interval_energies(adjusted) or interval_energies(raw)
-    load_weighted_profile()
+    load_house_load_intervals() -> load_hourly_house_load() -> house_load.predict_day()
     construct solar/load ForecastInterval lists
     ForecastData(solar=..., load=...)
   create_scenarios()
@@ -67,21 +67,11 @@ UTC dictionary keys preserve distinct autumn fold targets; cumulative resets sti
 
 Leading/trailing missing projection coverage is padded with zero solar. This is a caller policy: `ForecastData` itself rejects extrapolation or gaps.
 
-## 4. Load history to weekday/hour profile
+## 4. House-load forecast inputs
 
-`load_weighted_profile()` reads non-null `plant_load_total_kwh_period` samples from the configured number of days before local target-day midnight, strictly excluding that day. It queries raw electrical rows through ORM, so values already are kWh.
+`load_house_load_intervals()` reads hourly `house_load_kwh_period` using `load_hourly_house_load()` and calls the same pure `house_load.predict_day()` helper as daily collection. It uses `forecast.model_calibration_parameters.load`; the older `energy_plan` load-history settings are retained in configuration but no longer control planning. Conversion losses are excluded from forecast demand and applied explicitly by the optimiser.
 
-For each sample, `ends_at - 1 microsecond` determines local date/hour attribution. Samples sum into `(date,hour)` energy. The implementation assigns the whole delta to that bucket; it does not split gaps across hours.
-
-```python
-daily_slots: dict[tuple[date, int], float]      # local day/hour -> kWh
-profile: dict[tuple[int, int], float]          # weekday 0..6/hour -> weighted kWh
-observations: dict[tuple[int, int], int]       # number of contributing day/hour slots
-```
-
-Weight is `0.5 ** (age_days / configured_half_life_days)`; profile is weighted mean by exact weekday/hour. Shipped window/half-life are 42/21 days. Missing slots have no all-days fallback and raise during future-load construction. Each future interval is one hour starting at the chosen as-of sequence, using that interval start's local weekday/hour.
-
-This profile is different from the production weekday/weekend hierarchical load model; planning retains this separate temporary profile.
+History ends at the as-of local day's midnight, so neither current-day nor future database observations can leak into the forecast, including forecasts for later projection days. Each target date gets its weekday/weekend profile from this available history. Planning maps the profile to UTC hours, preserving DST, clips intervals to the projection bounds, and prorates partial edge hours. Missing predictions raise a house-load-specific error rather than falling back to the loss-inclusive counter. The numeric `ForecastData.load` field now means household energy demand.
 
 ## 5. ForecastData and scenario shapes
 

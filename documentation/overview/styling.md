@@ -41,7 +41,7 @@ Regenerate it from the repository root with `python dashboard/assets/create_sola
 | Inverter / net cost | `#6C757D` |
 | No-solar cost comparator | `#7B2CBF` |
 
-- Load (Forecast) shares Load blue `#0072B2` and uses the same diagonal decal as Solar (Forecast); it is initially deselected and appears only in Energy by hour. Energy charts reserve 125px above the plot, keeping the mobile wrapped legend clear of the axis.
+- House Load (Forecast) shares Load blue `#0072B2` and uses the same diagonal decal as Solar (Forecast); it is initially deselected and appears only in Energy by hour. Energy charts reserve 125px above the plot, keeping the mobile wrapped legend clear of the axis.
 - Array palette cycles green, blue, yellow, purple. Actual/forecast array pairs share colour; forecasts add a decal pattern.
 - Standard energy and cost series use bars; rates, telemetry, battery levels, and all custom-chart series use lines. Units appear on axes; different units may require separate axes.
 - Custom charts assign colours to the larger of variable/split dimensions (variables win ties); the other dimension uses dashes/markers.

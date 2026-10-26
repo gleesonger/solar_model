@@ -42,6 +42,7 @@ def summary_rows(
         "solar": float(dataframe_column(data, "solar").sum()),
         "battery": float(dataframe_column(data, "battery").sum()),
         "load": float(dataframe_column(data, "load").sum()),
+        "house_load": data["house_load"].sum(min_count=1) if "house_load" in data else None,
         "grid_import": float(dataframe_column(data, "grid_import").sum()),
         "grid_export": float(dataframe_column(data, "grid_export").sum()),
     }
@@ -64,6 +65,7 @@ def summary_rows(
         "battery": None,
         "inverter": None,
         "load": None,
+        "house_load": data["house_load_forecast"].sum(min_count=1) if "house_load_forecast" in data else None,
         "grid_import": None,
         "grid_export": None,
     }

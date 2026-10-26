@@ -73,7 +73,7 @@ class RecentTab:
 
         latest = self._live_table_values(live_power)
         self.warnings.update_full(full_updated_last_local)
-        self._set_live_today_values(live_power)
+        self._set_live_today_values(live_power, day)
 
         self.elements.live_table = render_live_today_table(
             day,
@@ -101,7 +101,7 @@ class RecentTab:
         day, full_updated_last_local, live_power, recent_daily, recent_monthly = loaded_data
         latest = self._live_table_values(live_power)
         self.warnings.update_full(full_updated_last_local)
-        self._set_live_today_values(live_power)
+        self._set_live_today_values(live_power, day)
         if self.elements.live_table is not None:
             self.elements.live_table.rows = formatting.summary_rows(
                 day,
@@ -142,15 +142,18 @@ class RecentTab:
 
     @staticmethod
     def _live_table_values(live_power: LivePowerData) -> dict[str, float | None]:
-        return live_power.values
+        return {**live_power.values, "house_load": live_power.values.get("load")}
 
     def _set_live_today_values(
         self,
         live_power: LivePowerData,
+        day: pd.DataFrame | None = None,
     ) -> None:
         self._today_values = {
             label: None for label in self._summary_latest_keys
         }
+        if day is not None and "house_load" in day:
+            self._today_values["House Load"] = day["house_load"].sum(min_count=1)
         self._apply_live_today_meters(live_power)
         self._previous_live_for_today = live_power
 
@@ -159,11 +162,12 @@ class RecentTab:
         if table is None:
             return
         rows: list[dict[str, Any]] = []
+        latest = self._live_table_values(live_power)
         for existing_row in table.rows:
             row = dict(existing_row)
             key = str(row.get("latest_key", ""))
-            if key in live_power.values:
-                row["latest"] = formatting.format_dashboard_number(live_power.values[key])
+            if key in latest:
+                row["latest"] = formatting.format_dashboard_number(latest[key])
             metric = str(row.get("metric", ""))
             if metric in self._today_values:
                 row["today"] = formatting.format_dashboard_number(self._today_values[metric])
@@ -251,7 +255,7 @@ def render_energy_summary_table(dataframe: pd.DataFrame, title: str, period_labe
         {"name": "solar_actual", "label": "Solar Actual", "field": "solar_actual", "align": "right"},
         {"name": "solar_forecast", "label": "Solar Forecast", "field": "solar_forecast", "align": "right"},
         {"name": "load", "label": "Load", "field": "load", "align": "right"},
-        {"name": "load_forecast", "label": "Load (Forecast)", "field": "load_forecast", "align": "right"},
+        {"name": "house_load", "label": "House Load", "field": "house_load", "align": "right"},
         {"name": "grid_import", "label": "Grid Import", "field": "grid_import", "align": "right"},
         {"name": "grid_export", "label": "Grid Export", "field": "grid_export", "align": "right"},
         {"name": "grid_import_cost", "label": "Import Cost", "field": "grid_import_cost", "align": "right"},

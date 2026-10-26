@@ -121,7 +121,7 @@ def _build_plan(
     telemetry_metrics = {*telemetry_columns, "power_grid_import", "power_grid_export"}
     supported = {
         *ACTUAL_COLUMNS, *telemetry_metrics, "battery", "battery_flow", "import_rate", "export_rate",
-        "forecast_total", "forecast_raw_total", "load_forecast",
+        "forecast_total", "forecast_raw_total", "house_load_forecast",
         *(f"forecast_panel_{panel}" for panel in configured_panels),
         *(f"actual_panel_{panel}" for panel in actual_panels),
     }
@@ -189,8 +189,8 @@ def _build_plan(
             FROM sigenstor_hourly WHERE hour_start_utc >= :day_start AND hour_start_utc < :day_end
         )""",
         "available_dates AS (SELECT day FROM actual_dates UNION SELECT day FROM first_collections"
-        + (" UNION SELECT target_day FROM forecast_load WHERE forecast_time >= :day_start AND forecast_time < :day_end"
-           if "load_forecast" in metrics else "") + ")",
+        + (" UNION SELECT target_day FROM forecast_house_load WHERE forecast_time >= :day_start AND forecast_time < :day_end"
+           if "house_load_forecast" in metrics else "") + ")",
         """dates AS (
             SELECT day FROM available_dates
             UNION ALL SELECT :first_day WHERE NOT EXISTS(SELECT 1 FROM available_dates)
@@ -308,15 +308,15 @@ def _build_plan(
         )
         joins.append("LEFT JOIN hourly_actuals a ON a.day = g.day AND a.hour = g.hour")
 
-    if "load_forecast" in metrics:
+    if "house_load_forecast" in metrics:
         ctes.append("""load_prediction AS (
             SELECT target_day AS day, chart_local_hour(forecast_time) AS hour,
                 SUM(load_kwh / 10000.0) AS energy
-            FROM forecast_load WHERE forecast_time >= :day_start AND forecast_time < :day_end
+            FROM forecast_house_load WHERE forecast_time >= :day_start AND forecast_time < :day_end
             GROUP BY target_day, hour
         )""")
         joins.append("LEFT JOIN load_prediction lp ON lp.day = g.day AND lp.hour = g.hour")
-        expressions["load_forecast"] = "lp.energy"
+        expressions["house_load_forecast"] = "lp.energy"
 
     forecast_metrics = [metric for metric in metrics if metric.startswith("forecast_")]
     if forecast_metrics:
@@ -411,7 +411,7 @@ def _build_plan(
         column = "value" if is_tariff else identifier(metric)
         if metric in telemetry_metrics:
             value = f"AVG({column})"
-        elif metric == "load_forecast":
+        elif metric == "house_load_forecast":
             value = f"chart_mean({column})" if is_average else f"chart_sum({column})"
         else:
             value = f"chart_mean({column})" if is_average else f"COALESCE(chart_sum({column}), 0)"

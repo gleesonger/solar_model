@@ -10,9 +10,9 @@ Read [storage.md](../implementation/storage.md) for derivations, transaction bou
 - Hourly numeric columns mirror electrical fields, but store sums or cumulative maxima. ORM conversion removes fixed-point scale; it does not convert sums into means.
 - Hybrid `collected_at_local` on electrical/forecast models is not a physical column and is therefore absent here.
 
-## `forecast_load`
+## `forecast_house_load`
 
-Primary key: `target_day`, `forecast_time`; index `idx_load_forecast_time` on `forecast_time`. One immutable daily profile; new table creation does not backfill history.
+Primary key: `target_day`, `forecast_time`; index `idx_house_load_forecast_time` on `forecast_time`. One immutable daily house-load profile; new table creation does not backfill history. Version 0.3.0 removes the previous undeployed `forecast_load` table.
 
 | Field | SQL type | ORM API | Nullable |
 | --- | --- | --- | --- |
@@ -243,7 +243,7 @@ Declared indexes:
 
 Primary key: `key`.
 
-`database_version` is `0.2.0` after the house-load backfill; older `0.1.0` or absent values trigger that migration. `hourly_rollup_initialized_v3` remains a separate hourly-readiness marker.
+`database_version` is `0.3.0` after house-forecast replacement; `0.1.0` or absent versions first run the house-energy backfill to `0.2.0`. `hourly_rollup_initialized_v3` remains a separate hourly-readiness marker.
 
 | Field | SQL type | ORM API | Nullable |
 | --- | --- | --- | --- |

@@ -15,8 +15,8 @@ import pandas as pd
 
 
 from solar_model.config import ForecastModelConfig, load_config
-from solar_model.storage.queries.forecasting import load_hourly_load
-from solar_model.planning.forecasts.load import predict_day
+from solar_model.storage.queries.forecasting import load_hourly_house_load
+from solar_model.planning.forecasts.house_load import predict_day
 
 
 def main() -> None:
@@ -29,7 +29,7 @@ def main() -> None:
     args = parser.parse_args()
     config = load_config(args.config)
     timezone = ZoneInfo(args.timezone or config.timezone)
-    result = evaluate(load_hourly_load(args.database or config.database.path, timezone), args.start, args.end, timezone, config.forecast.model_calibration_parameters.load)
+    result = evaluate(load_hourly_house_load(args.database or config.database.path, timezone), args.start, args.end, timezone, config.forecast.model_calibration_parameters.load)
     if result.empty:
         print("No load observations available for the requested period.")
         return

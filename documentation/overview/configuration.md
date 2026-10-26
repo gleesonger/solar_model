@@ -29,7 +29,7 @@ These are current file values, not universal defaults. Preserve exact configurat
 
 Rename the former `forecast.models` key to `forecast.model_calibration_parameters` in separately deployed configuration files.
 
-The live collector passes these settings to solar correction and the fixed daily load forecast. `python -m solar_model.tools.evaluate_load --config config.yaml ...` and `python -m solar_model.tools.rebuild_forecasts --config config.yaml ...` load the same settings. Both CLIs use the configured database/timezone unless overridden by `--database`/`--timezone`. Existing `energy_plan` load-history fields belong to the separate temporary planning profile.
+The live collector passes these settings to solar correction and the fixed daily load forecast. `python -m solar_model.tools.evaluate_load --config config.yaml ...` and `python -m solar_model.tools.rebuild_forecasts --config config.yaml ...` load the same settings. Both CLIs use the configured database/timezone unless overridden by `--database`/`--timezone`. The retained `load` tuning block now controls house-load forecasting in both collection and planning. Legacy `energy_plan` load-history fields remain accepted but no longer control the planning profile.
 
 ## Validation and parsing
 

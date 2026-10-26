@@ -19,6 +19,7 @@ from solar_model.config import SolarArrayConfig
 from solar_model.storage.schema import (
     HOURLY_VALID_COUNT_COLUMNS,
     ForecastSolarSample,
+    ForecastHouseLoadSample,
     SigenStorDevice,
     SigenStorHourlySample,
     SigenStorModbusSample,
@@ -69,7 +70,7 @@ ENERGY_SUMMARY_COLUMNS = (
     "solar_actual",
     "solar_forecast",
     "load",
-    "load_forecast",
+    "house_load",
     "grid_import",
     "grid_export",
     "grid_import_cost",
@@ -149,6 +150,9 @@ def load_day(
             # assembled below.  Filling them with zero here would make them
             # look like observed zero-PV hours.
             actual = load_actual_hourly(session, day_start, fill_missing=False)
+            house_forecasts = session.scalars(select(ForecastHouseLoadSample).where(
+                ForecastHouseLoadSample.target_day == day_start.date().isoformat(),
+            )).all()
             actual_by_array = load_actual_arrays_hourly(
                 session, day_start, actuals_to_forecast, fill_missing=False,
             )
@@ -183,6 +187,12 @@ def load_day(
         ~actual_mask, hourly["solar"],
     )
     hourly = allocate_solar_energy_to_arrays(hourly, actuals_to_forecast).fillna(0.0)
+    house_prediction = pd.DataFrame([
+        {"hour": parse_time(row.forecast_time, timezone).strftime("%H:00"), "house_load_forecast": row.load_kwh}
+        for row in house_forecasts
+    ], columns=["hour", "house_load_forecast"])
+    house_prediction = house_prediction.groupby("hour", as_index=False).sum(min_count=1)
+    hourly = hourly.merge(house_prediction, on="hour", how="left")
     return hourly
 
 
@@ -641,7 +651,7 @@ def load_analysis_range(
         *((actual_column_name(panel), None) for panel in dict.fromkeys(actuals_to_forecast.values())),
         *((forecast_column_name(array.panel_id), None) for array in forecast_arrays),
         ("forecast_total", None), ("forecast_raw_total", None),
-        *((("load_forecast", None),) if frequency == "hour" else ()),
+        *((("house_load_forecast", None),) if frequency == "hour" else ()),
     )
     requires_minute_samples = bounds.start_date == bounds.end_date
     power_metrics = (

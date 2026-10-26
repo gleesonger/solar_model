@@ -133,11 +133,11 @@ These values are in-memory allocations and never write to SQLite. Polling pauses
 }
 ```
 
-`latest_key` and orientation flag are metadata for updates/style; visible fields are formatted strings. Missing numeric values become empty strings; energy/power format to one decimal, currency summaries to two decimals. Per-orientation forecast cells are not filled just because panel forecast columns exist; the summary forecast maps currently contain site solar totals only.
+`latest_key` and orientation flag are metadata for updates/style; visible fields are formatted strings. Missing numeric values become empty strings; energy/power format to one decimal, currency summaries to two decimals. Per-orientation forecast cells are not filled just because panel forecast columns exist; the solar forecast maps contain site solar totals only. House Load has its own BoD total from the saved daily house profile, with Latest/Raw Forecast left blank.
 
-Initial/full update builds rows from the DB-derived day frame, then `_update_live_table_rows()` overwrites latest/Today from live state. `_today_values` is keyed by display label. `_apply_live_today_meters()` replaces available solar/load/import/export/string daily meters and computes Battery = daily charge − discharge. The tab does not integrate power itself. Day-crossing detection resets its held daily values.
+Initial/full update builds rows from the DB-derived day frame, then `_update_live_table_rows()` overwrites latest/Today from live state. `_today_values` is keyed by display label. `_apply_live_today_meters()` replaces available solar/load/import/export/string daily meters and computes Battery = daily charge − discharge. House Load Today is seeded from the current stored-data frame on full refresh and is retained during faster live polls; its Latest uses the same measured load-power reading as the existing Load row. The tab does not integrate power itself. Day-crossing detection resets its held daily values, including House Load until the next full snapshot.
 
-Daily/monthly DataFrames use `energy_summary_rows()` to format the energy/economics fields including Load (Forecast) and period labels. System Info binds the latest metadata list directly. Full updates replace row lists/label text while retaining the tables and tabs.
+Daily/monthly DataFrames use `energy_summary_rows()` to format the actual energy/economics fields, including House Load, and period labels. They do not contain a house-forecast column. System Info binds the latest metadata list directly. Full updates replace row lists/label text while retaining the tables and tabs.
 
 ## 6. Analysis data to ECharts and reusable controls
 
@@ -171,7 +171,7 @@ Power chart series and table labels override `load` to **House Load**, since the
 
 Single-day telemetry already contains minute points, so its zoom is client-side. Longer-range telemetry remains hourly. Chart/CSV values and Analysis full-data downloads follow different export routes; see below.
 
-Only the hourly Energy frame includes `load_forecast`. `energy_chart_options()` adds a Load (Forecast) bar with `forecast_item_style(LOAD_COLOR)` and defaults its legend selection to false. Switching from a non-hourly grouping applies that default on first appearance; later updates preserve the user's choice. Recent's two Past summary tables add the corresponding column; Live/Today is unchanged.
+Only the hourly Energy frame includes `house_load_forecast`. `energy_chart_options()` adds a House Load (Forecast) bar with `forecast_item_style(LOAD_COLOR)` and defaults its legend selection to false. Switching from a non-hourly grouping applies that default on first appearance; later updates preserve the user's choice. Recent Live/Today reads the saved day profile into House Load's BoD Forecast cell. The two Past tables omit house forecasts.
 
 ## 7. Export bytes and operator actions
 

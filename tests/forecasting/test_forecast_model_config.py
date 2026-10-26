@@ -100,7 +100,7 @@ def test_load_cli_reads_model_database_and_timezone_from_config(tmp_path, config
     history = pd.DataFrame()
     read = Mock(return_value=history)
     evaluate = Mock(return_value=pd.DataFrame())
-    monkeypatch.setattr(load, "load_hourly_load", read)
+    monkeypatch.setattr(load, "load_hourly_house_load", read)
     monkeypatch.setattr(load, "evaluate", evaluate)
     monkeypatch.setattr("sys.argv", ["load-profile", "--config", str(path), "--start", "2026-10-20", "--end", "2026-10-23"])
     load.main()

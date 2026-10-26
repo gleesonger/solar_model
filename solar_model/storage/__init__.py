@@ -8,7 +8,7 @@ from solar_model.storage.schema import (
     SigenStorModbusSample,
     SigenStorDevice,
     DatabaseMetadata,
-    ForecastLoadSample,
+    ForecastHouseLoadSample,
     ForecastSolarSample,
     CUMULATIVE_COLUMNS,
     PV_ARRAY_IDS,

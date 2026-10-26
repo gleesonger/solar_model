@@ -205,9 +205,9 @@ Missing data may remain `None` for means/series gaps; sum paths can coalesce to 
 
 Energy `battery_flow` is renamed `battery`; telemetry `power_*` prefixes are removed. Custom previews use the same query engine but keep dictionaries and round values through `chart_value()` to one decimal before presentation.
 
-The Recent summary SQL also joins saved `forecast_load` profiles by local `target_day`, removes fixed-point scaling, and sums hourly kWh. Today's rows weight each target by its elapsed fraction (clamped to 0..1); previous days use complete hours. Daily/monthly/total/lifetime rows include `load_forecast`. Missing forecasts stay blank. The existing shared SQL aggregation remains one statement.
+Recent summary SQL includes actual `house_load_kwh_period` sums alongside the existing Load counter and has no house-forecast column. Separately, `load_day()` reads the selected local day's saved `forecast_house_load` rows, groups by local clock hour (including repeated DST hours), and merges them after actual/solar filling so unavailable house forecasts remain missing. Live/Today sums these predictions with `min_count=1` for the full-day BoD House Load cell; it does not prorate by current time. Analysis also reads these saved household predictions.
 
-For standard Analysis Energy by hour only, the batch SQL requests `load_forecast`, groups saved UTC target energy by configured-local clock hour (summing repeated autumn hours), and joins it into the energy frame. Load-only dates participate without requiring solar vintages. Other standard chart datasets/groupings and the custom-variable picker do not request this metric. Missing hourly predictions remain null rather than becoming zeros.
+For standard Analysis Energy by hour only, the batch SQL requests `house_load_forecast`, groups saved UTC target energy by configured-local clock hour (summing repeated autumn hours), and joins it into the energy frame. Load-only dates participate without requiring solar vintages. Other standard chart datasets/groupings and the custom-variable picker do not request this metric. Missing hourly predictions remain null rather than becoming zeros.
 
 ## 7. Export and compatibility paths
 

@@ -8,7 +8,7 @@ The favicon is the amber sun/panel in `solar_model/dashboard/assets/solar_power.
 
 ## Current tabs
 
-- **Recent:** Live/Today table; latest kW, daily meters, latest/BoD/raw forecast totals; past 7 days and past 12 months energy/economics, including the saved daily Load (Forecast).
+- **Recent:** Live/Today table; latest kW, daily meters, latest/BoD/raw forecast totals; past 7 days and past 12 months energy/economics.
 - **Analysis:** lazily loaded energy, power, battery, per-array and money charts; range/grouping/Sum–Average controls; custom chart builder and downloads.
 - **System Info:** newest valid metadata value per variable.
 - **Control:** confirmed tariff recalculation and managed restart actions.
@@ -24,15 +24,16 @@ The favicon is the amber sun/panel in `solar_model/dashboard/assets/solar_power.
 - The live table remains blank until successful data. Device daily meters drive solar/load/battery totals; grid totals subtract the first persisted same-day lifetime-meter reading or first live reading.
 - Per-string voltage/current gives PV proportions. Live PV kW and daily array energy are allocated from plant solar totals using those proportions/integrals; they are not direct independent meters.
 - Available battery energy comes from plant availability telemetry; SOC is shown separately.
+- All three Recent tables include actual House Load. Live/Today uses measured load power for Latest, stored integrated house energy for Today (updated on full snapshot refresh), and the full saved daily house profile for BoD Forecast. Its Latest Forecast and Raw Forecast cells remain blank; the house forecaster has no separate versions for those columns. House Load Today resets on local date change. Past tables include house actual totals only, without a house-forecast column.
 
 ## Queries, charts, exports
 
 - [query adapters](../../solar_model/storage/queries/dashboard.py) owns summary/calendar/forecast helpers and adapters. [analysis SQL](../../solar_model/storage/queries/analysis.py) aggregates requested chart fields in SQLite and batches shared sources.
 - Recent daily/monthly/lifetime summaries share one native SQLite aggregation of hourly actuals and selected forecasts. Python prepares calendar/timezone boundaries and formats the final small tables; it does not aggregate source measurements.
-- Only Energy by hour includes Load (Forecast), initially deselected, with the Load blue and the same hatching as Solar Forecast. Live/Today and all other chart types/groupings omit the load forecast.
+- Analysis Energy by hour includes House Load (Forecast), initially deselected, in House Load blue with the same hatching as Solar Forecast. Recent Live/Today shows the saved full-day house forecast only in its House Load row's BoD Forecast cell; the two Past tables omit house forecasts.
 - Energy/cost charts normally use hourly rollups. Single-day telemetry retains minute points; longer ranges use hourly telemetry. Custom battery-level charts can query minute data.
-- Analysis Energy includes **House Load** (estimated from load power), selected by default, and the original **Load** device counter, initially deselected. Both remain available in the legend/table/CSV; house load is also selectable in custom energy charts. Missing/long power intervals remain unavailable at storage level, though chart aggregation can display missing energy as zero. Recent summaries, forecasts and economic calculations retain their existing load-counter inputs.
-- Analysis Power labels the measured household-demand series **House Load** in its legend and table; its internal DataFrame/CSV column remains `load`. Energy **Load** and **Load (Forecast)** still refer to the device energy-counter basis, not the integrated house-load series.
+- Analysis Energy includes **House Load** (estimated from load power), selected by default, and the original **Load** device counter, initially deselected. Both remain available in the legend/table/CSV; house load is also selectable in custom energy charts. Missing/long power intervals remain unavailable at storage level, though chart aggregation can display missing energy as zero. Recent actual summaries and economic calculations retain their existing load-counter inputs; forecasting now uses House Load.
+- Analysis Power labels the measured household-demand series **House Load** in its legend and table; its internal DataFrame/CSV column remains `load`. Energy **Load** remains the device energy counter; **House Load (Forecast)** predicts household demand in Analysis and supplies the Recent House Load BoD cell.
 - Import/export power is averaged from separately accumulated grid sign magnitudes, so alternating import/export cannot cancel both series. Meter-energy totals remain separate.
 - Energy is summed; telemetry and rates use averages where appropriate. Custom `battery` means available energy level with a no-minute-record fallback; Analysis energy `battery_flow` means charge minus discharge.
 - [ChartDataDisplay](../../solar_model/dashboard/components/chart_display.py) shares chart/table toggle, clipboard, CSV, labels, and totals. It preserves user legend state during normal updates.

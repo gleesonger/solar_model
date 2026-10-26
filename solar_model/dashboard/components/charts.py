@@ -116,7 +116,7 @@ def custom_chart_metric_unit(metric: str) -> str:
     return CUSTOM_CHART_UNITS.get(metric, "")
 
 ENERGY_TABLE_COLUMNS = (
-    "period", "solar", "forecast_total", "forecast_raw_total", "load", "house_load", "grid_import", "grid_export",
+    "period", "solar", "forecast_total", "forecast_raw_total", "load", "house_load", "house_load_forecast", "grid_import", "grid_export",
 )
 
 
@@ -131,7 +131,7 @@ def analysis_column_labels(
         "forecast_raw_total": "Solar (Forecast Raw)",
         "load": "Load",
         "house_load": "House Load",
-        "load_forecast": "Load (Forecast)",
+        "house_load_forecast": "House Load (Forecast)",
         "battery": "Battery",
         "inverter": "Inverter",
         "grid_import": "Grid Imported",
@@ -450,12 +450,12 @@ def energy_chart_options(data: pd.DataFrame, category_column: str) -> dict[str, 
         ],
     }
 
-    if "load_forecast" in data:
-        options["legend"]["data"].insert(4, "Load (Forecast)")
-        options["legend"]["selected"]["Load (Forecast)"] = False
+    if "house_load_forecast" in data:
+        options["legend"]["data"].insert(4, "House Load (Forecast)")
+        options["legend"]["selected"]["House Load (Forecast)"] = False
         options["series"].insert(4, {
-            "name": "Load (Forecast)", "type": "bar",
-            "data": chart_values(data["load_forecast"]),
+            "name": "House Load (Forecast)", "type": "bar",
+            "data": chart_values(data["house_load_forecast"]),
             "itemStyle": forecast_item_style(LOAD_COLOR),
         })
     return options

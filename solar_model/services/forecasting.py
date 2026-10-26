@@ -11,9 +11,9 @@ from sqlalchemy.exc import SQLAlchemyError
 from solar_model.config import ForecastModelsConfig, SolarArrayConfig
 from solar_model.integrations.forecast_solar import fetch_array
 from solar_model.logging_setup import LOGGER, heavy_work
-from solar_model.planning.forecasts.load import predict_day
+from solar_model.planning.forecasts.house_load import predict_day
 from solar_model.planning.forecasts.solar import PANEL_IDS, _day_bounds, calculate_adjusted_forecast
-from solar_model.storage.queries.forecasting import load_adjusted_snapshot, load_hourly_load, load_operational_inputs
+from solar_model.storage.queries.forecasting import load_adjusted_snapshot, load_hourly_house_load, load_operational_inputs
 from solar_model.time_utils import timestamps, utc_now
 
 
@@ -74,18 +74,18 @@ def refresh_adjusted_forecast(database, as_of: datetime | str | pd.Timestamp, ti
     _recalculate_energy(database, current_snapshot, timezone)
     return len(values)
 
-def refresh_daily_load_forecast(database, as_of: datetime | str | pd.Timestamp, timezone_name: str = "Europe/Dublin", *, models: ForecastModelsConfig | None = None) -> int:
+def refresh_daily_house_load_forecast(database, as_of: datetime | str | pd.Timestamp, timezone_name: str = "Europe/Dublin", *, models: ForecastModelsConfig | None = None) -> int:
     """Freeze today's profile once, using history strictly before local midnight."""
     timestamp = pd.Timestamp(as_of)
     if timestamp.tzinfo is None:
         timestamp = timestamp.tz_localize("UTC")
     zone = ZoneInfo(timezone_name)
     day = timestamp.tz_convert(zone).date()
-    if database.has_load_forecast(day.isoformat()):
+    if database.has_house_load_forecast(day.isoformat()):
         return 0
     settings = (models or ForecastModelsConfig()).load
     start, end = _day_bounds(day, zone)
-    history = load_hourly_load(database.engine.url.database, zone,
+    history = load_hourly_house_load(database.engine.url.database, zone,
                                start=start - pd.Timedelta(days=settings.lookback), end=start)
     prediction = predict_day(history, day, zone, settings).set_index("hour").prediction_kwh
     # UTC targets preserve both repeated autumn hours and the missing spring hour.
@@ -94,7 +94,7 @@ def refresh_daily_load_forecast(database, as_of: datetime | str | pd.Timestamp, 
              "load_kwh": float(prediction.loc[target.tz_convert(zone).hour])
                  if pd.notna(prediction.loc[target.tz_convert(zone).hour]) else None}
             for target in targets]
-    return database.save_daily_load_forecast(day.isoformat(), timestamp.isoformat(), rows)
+    return database.save_daily_house_load_forecast(day.isoformat(), timestamp.isoformat(), rows)
 
 
 @heavy_work("solar forecast collection update")
@@ -116,10 +116,10 @@ def collect_once(session: requests.Session, database, arrays: tuple[SolarArrayCo
         return
     collected = timestamps(now, timezone_name=timezone_name)
     try:
-        count = refresh_daily_load_forecast(database, collected[0], timezone_name, models=models)
-        LOGGER.info("saved %s daily load forecast rows", count)
+        count = refresh_daily_house_load_forecast(database, collected[0], timezone_name, models=models)
+        LOGGER.info("saved %s daily house-load forecast rows", count)
     except Exception:
-        LOGGER.exception("daily load forecast failed; will retry at the next scheduled forecast run")
+        LOGGER.exception("daily house-load forecast failed; will retry at the next scheduled forecast run")
     for array in arrays:
         try:
             count = database.save_forecast(array, fetch_array(session, array, endpoint, timeout_seconds), collected)

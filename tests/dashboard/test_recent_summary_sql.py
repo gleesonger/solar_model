@@ -42,6 +42,7 @@ def reference_daily(engine, zone, first, last, arrays, now):
         forecasts = list(session.scalars(select(ForecastSolarSample).order_by(ForecastSolarSample.collected_at_utc)))
     fields = {
         "solar_actual": "plant_pv_total_kwh_period", "load": "plant_load_total_kwh_period",
+        "house_load": "house_load_kwh_period",
         "grid_import": "plant_grid_import_total_kwh_period", "grid_export": "plant_grid_export_total_kwh_period",
         "grid_import_cost": "grid_import_cost_period", "grid_export_revenue": "grid_export_revenue_period",
         "net_cost": "net_cost_period", "no_solar_battery_import_cost": "no_solar_battery_import_cost_period",
@@ -59,7 +60,7 @@ def reference_daily(engine, zone, first, last, arrays, now):
         for name, field in fields.items():
             present = [getattr(row, field) for row in actual if getattr(row, field) is not None]
             values[name] = sum(present) if present else np.nan
-        rows.append({"date": day.isoformat(), **values, "load_forecast": np.nan, "solar_forecast": forecast["forecast_total"].sum(min_count=1)})
+        rows.append({"date": day.isoformat(), **values, "solar_forecast": forecast["forecast_total"].sum(min_count=1)})
     return pd.DataFrame(rows)[["date", *data.ENERGY_SUMMARY_COLUMNS]]
 
 

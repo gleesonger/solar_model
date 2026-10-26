@@ -1,17 +1,19 @@
 from __future__ import annotations
 import logging
-import math
 import re
 from collections import defaultdict
 from dataclasses import asdict
 from datetime import datetime, time, timedelta
 from zoneinfo import ZoneInfo
+import pandas as pd
 from sqlalchemy import inspect, select
 from solar_model.config import Config
 from solar_model.time_utils import add_elapsed, utc_instant
 from solar_model.storage.schema import ForecastSolarSample, SigenStorDevice, SigenStorModbusSample
 from solar_model.storage.connection import SolarDatabase
 from solar_model.planning.types import DeviceInfo, DeviceState, ForecastData, ForecastInterval
+from solar_model.planning.forecasts.house_load import predict_day
+from solar_model.storage.queries.forecasting import load_hourly_house_load
 
 
 LOGGER = logging.getLogger(__name__)
@@ -37,29 +39,30 @@ def interval_energies(rows: list[ForecastSolarSample], panel_ids: tuple[int, ...
             previous_by_day[day] = current
     return dict(totals)
 
-def load_weighted_profile(database: SolarDatabase, timezone: ZoneInfo, now: datetime, config: Config) -> tuple[dict[tuple[int, int], float], dict[tuple[int, int], int]]:
-    """Return local weekday/hour kWh averages using configured history settings."""
-    local_now = now.astimezone(timezone)
-    today_start = datetime.combine(local_now.date(), time.min, tzinfo=timezone)
-    start_at = today_start - timedelta(days=config.energy_plan.load_forecast_historical_lookback_window_days)
-    with database.sessions() as session:
-        samples = list(session.scalars(select(SigenStorModbusSample).where(SigenStorModbusSample.collected_at_utc >= start_at.isoformat()).where(SigenStorModbusSample.collected_at_utc < today_start.isoformat()).where(SigenStorModbusSample.plant_load_total_kwh_period.is_not(None)).order_by(SigenStorModbusSample.collected_at_utc)).all())
-    daily_slots: dict[tuple[datetime.date, int], float] = defaultdict(float)
-    for sample in samples:
-        ends_at = datetime.fromisoformat(sample.collected_at_utc).astimezone(timezone)
-        interval_start = add_elapsed(ends_at, -timedelta(microseconds=1))
-        daily_slots[(interval_start.date(), interval_start.hour)] += float(sample.plant_load_total_kwh_period)
-    totals: dict[tuple[int, int], float] = defaultdict(float)
-    weights: dict[tuple[int, int], float] = defaultdict(float)
-    observations: dict[tuple[int, int], int] = defaultdict(int)
-    for (day, hour), load_kwh in daily_slots.items():
-        age_days = (today_start.date() - day).days
-        weight = math.pow(0.5, age_days / config.energy_plan.load_forecast_historical_lookback_halflife_days)
-        slot = (day.weekday(), hour)
-        totals[slot] += load_kwh * weight
-        weights[slot] += weight
-        observations[slot] += 1
-    return ({slot: totals[slot] / weights[slot] for slot in totals if weights[slot] > 0}, dict(observations))
+def load_house_load_intervals(database: SolarDatabase, as_of: datetime, config: Config) -> list[ForecastInterval]:
+    """Feed the production house forecaster into planning without future observations."""
+    zone = ZoneInfo(config.timezone)
+    settings = config.forecast.model_calibration_parameters.load
+    cutoff = pd.Timestamp(datetime.combine(as_of.astimezone(zone).date(), time.min, zone))
+    history = load_hourly_house_load(database.engine.url.database, zone,
+        start=cutoff - pd.Timedelta(days=settings.lookback), end=cutoff)
+    start = pd.Timestamp(utc_instant(as_of))
+    end = start + pd.Timedelta(hours=config.energy_plan.num_projection_hours)
+    predictions = {}
+    intervals = []
+    for hour in pd.date_range(start.floor("h"), end, freq="h", inclusive="left"):
+        local = hour.tz_convert(zone)
+        day = local.date()
+        if day not in predictions:
+            predictions[day] = predict_day(history, day, zone, settings).set_index("hour").prediction_kwh
+        energy = predictions[day].loc[local.hour]
+        if pd.isna(energy):
+            raise ValueError(f"no historical house-load profile exists for {local.isoformat()}")
+        left, right = max(start, hour), min(end, hour + pd.Timedelta(hours=1))
+        intervals.append(ForecastInterval(left.to_pydatetime(), right.to_pydatetime(),
+            float(energy) * (right - left).total_seconds() / 3600))
+    return intervals
+
 
 def load_forecast_as_of(database: SolarDatabase, as_of: datetime, config: Config) -> ForecastData:
     """Build a forecast from the newest snapshot collected by the as-of time."""
@@ -82,7 +85,6 @@ def load_forecast_as_of(database: SolarDatabase, as_of: datetime, config: Config
     if not solar_intervals:
         raise ValueError("the as-of forecast contains no usable solar values")
 
-    load_profile, _ = load_weighted_profile(database, timezone, as_of, config)
     solar: list[ForecastInterval] = []
     previous_ends_at: datetime | None = None
     for ends_at, solar_kwh in sorted(solar_intervals.items()):
@@ -100,14 +102,7 @@ def load_forecast_as_of(database: SolarDatabase, as_of: datetime, config: Config
     if utc_instant(solar[-1].ends_at) < utc_instant(projection_end):
         solar.append(ForecastInterval(solar[-1].ends_at, projection_end, 0.0))
 
-    load: list[ForecastInterval] = []
-    starts_at = as_of.astimezone(timezone)
-    while utc_instant(starts_at) < utc_instant(projection_end):
-        expected_load_kwh = load_profile.get((starts_at.weekday(), starts_at.hour))
-        if expected_load_kwh is None:
-            raise ValueError(f"no historical load profile exists for {starts_at.isoformat()}")
-        load.append(ForecastInterval(starts_at, add_elapsed(starts_at, timedelta(hours=1)), float(expected_load_kwh)))
-        starts_at = add_elapsed(starts_at, timedelta(hours=1))
+    load = load_house_load_intervals(database, as_of, config)
 
     return ForecastData(solar=solar, load=load)
 

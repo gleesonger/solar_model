@@ -1,4 +1,4 @@
-"""Daily load forecast; trained on earlier days and frozen once per local day."""
+"""Daily house-load forecast, excluding separately modelled conversion losses."""
 from __future__ import annotations
 from datetime import date, datetime
 from zoneinfo import ZoneInfo

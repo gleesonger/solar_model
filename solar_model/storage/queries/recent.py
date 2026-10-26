@@ -13,6 +13,7 @@ from solar_model.storage.queries.exports import _timezone_segments
 ACTUAL_COLUMNS = {
     "solar_actual": "plant_pv_total_kwh_period",
     "load": "plant_load_total_kwh_period",
+    "house_load": "house_load_kwh_period",
     "grid_import": "plant_grid_import_total_kwh_period",
     "grid_export": "plant_grid_export_total_kwh_period",
     "grid_import_cost": "grid_import_cost_period",
@@ -106,16 +107,9 @@ def load_energy_summaries(
                  WHEN hour = :hour THEN :fraction ELSE 0 END
             ELSE 0 END) AS solar_forecast FROM energy GROUP BY day
     ),
-    load_forecast AS (
-        SELECT c.day, SUM(l.load_kwh / 10000.0 *
-            MIN(MAX((:now - l.forecast_time) / 3600.0, 0), 1)) AS load_forecast
-        FROM calendar c JOIN forecast_load l ON l.target_day = c.day
-        GROUP BY c.day
-    ),
     daily AS MATERIALIZED (
-        SELECT c.day AS date, {','.join('a.' + name for name in ACTUAL_COLUMNS)}, f.solar_forecast, l.load_forecast
+        SELECT c.day AS date, {','.join('a.' + name for name in ACTUAL_COLUMNS)}, f.solar_forecast
         FROM calendar c LEFT JOIN actual a ON a.day = c.day LEFT JOIN forecast f ON f.day = c.day
-        LEFT JOIN load_forecast l ON l.day = c.day
     )"""
     fields = ",".join(ENERGY_SUMMARY_COLUMNS)
     sums = ",".join(f"SUM({column}) AS {column}" for column in ENERGY_SUMMARY_COLUMNS)

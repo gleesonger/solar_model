@@ -1,5 +1,5 @@
 from solar_model.dashboard import formatting
-from datetime import datetime
+from datetime import date, datetime
 from types import SimpleNamespace
 from zoneinfo import ZoneInfo
 
@@ -226,3 +226,40 @@ def test_summary_rows_exposes_live_forecast_blended_from_actuals_and_latest_fore
     assert solar_row["latest_forecast"] == "3.0"
     assert solar_row["forecast"] == "7.0"
     assert solar_row["forecast_raw"] == "9.0"
+
+
+def test_recent_house_load_actuals_and_bod_forecast(tmp_path, monkeypatch):
+    from solar_model.dashboard.tabs.recent import RecentTab
+    from solar_model.storage.migrations import open_database
+    from solar_model.storage.schema import ForecastHouseLoadSample, SigenStorHourlySample
+    from solar_model.storage.queries.types import LivePowerData
+    path = tmp_path / "house-recent.db"
+    database = open_database(path)
+    class Clock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return datetime(2026, 10, 26, 10, tzinfo=ZoneInfo("UTC")).astimezone(tz)
+    monkeypatch.setattr(data, "datetime", Clock)
+    try:
+        with database.sessions.begin() as session:
+            session.add(SigenStorHourlySample(hour_start_utc="2026-10-26T00:00Z", import_tariff_band="day",
+                sample_count=1, house_load_kwh_period=.337, plant_load_total_kwh_period=.7))
+            for hour in range(24):
+                session.add(ForecastHouseLoadSample(target_day="2026-10-26",
+                    forecast_time=f"2026-10-26T{hour:02d}:00Z", collected_at_utc="2026-10-26T00:00Z", load_kwh=1.))
+        frame = data.load_day(str(path), "UTC", (), {})
+        live = LivePowerData("2026-10-26T10:00Z", "2026-10-26T10:00Z", {"load": .35})
+        rows = formatting.summary_rows(frame, RecentTab._live_table_values(live))
+        house = next(row for row in rows if row["metric"] == "House Load")
+        assert (house["latest"], house["today"], house["forecast"]) == ("0.3", "0.3", "24.0")
+        assert house["latest_forecast"] == house["forecast_raw"] == ""
+        daily, monthly = data.load_recent_energy_summaries(str(path), "UTC", date(2026, 10, 26), ())
+        assert daily.loc[daily.period == "2026-10-26", "house_load"].iloc[0] == pytest.approx(.337)
+        assert monthly.loc[monthly.period == "Oct 2026", "house_load"].iloc[0] == pytest.approx(.337)
+        assert "house_load_forecast" not in daily and "house_load_forecast" not in monthly
+        with database.sessions.begin() as session:
+            session.query(ForecastHouseLoadSample).delete()
+        missing = formatting.summary_rows(data.load_day(str(path), "UTC", (), {}), RecentTab._live_table_values(live))
+        assert next(row for row in missing if row["metric"] == "House Load")["forecast"] == ""
+    finally:
+        database.close()

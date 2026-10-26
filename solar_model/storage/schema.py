@@ -141,15 +141,16 @@ class DatabaseMetadata(Base):
     key: Mapped[str] = mapped_column(String, primary_key=True)
     value: Mapped[str] = mapped_column(String, nullable=False)
 
-class ForecastLoadSample(Base):
-    """One immutable, hourly load profile per configured local day."""
+class ForecastHouseLoadSample(Base):
+    """One immutable hourly house-demand forecast per configured local day."""
 
-    __tablename__ = "forecast_load"
-    __table_args__ = (Index("idx_load_forecast_time", "forecast_time"),)
+    __tablename__ = "forecast_house_load"
+    __table_args__ = (Index("idx_house_load_forecast_time", "forecast_time"),)
     target_day: Mapped[str] = mapped_column(String, primary_key=True)
     forecast_time: Mapped[str] = mapped_column(EpochSeconds, primary_key=True)
     collected_at_utc: Mapped[str] = mapped_column(EpochSeconds, nullable=False)
     load_kwh: Mapped[float | None] = mapped_column(Float, nullable=True)
+
 
 class ForecastSolarSample(Base):
     __tablename__ = "forecast_solar"

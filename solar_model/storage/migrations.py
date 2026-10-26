@@ -10,7 +10,7 @@ from solar_model.storage.schema import (
     SigenStorModbusSample,
     SigenStorDevice,
     DatabaseMetadata,
-    ForecastLoadSample,
+    ForecastHouseLoadSample,
     ForecastSolarSample,
     PV_ARRAY_IDS,
     SigenStorHourlySample,
@@ -18,7 +18,7 @@ from solar_model.storage.schema import (
 from solar_model.storage.connection import SolarDatabase, create_engine_for_database
 from solar_model.storage.measurements import house_load_energy
 
-DATABASE_VERSION = "0.2.0"
+DATABASE_VERSION = "0.3.0"
 
 def open_database(path: str | Path) -> SolarDatabase:
     engine = create_engine_for_database(path)
@@ -27,7 +27,7 @@ def open_database(path: str | Path) -> SolarDatabase:
             version = connection.exec_driver_sql(
                 "SELECT value FROM database_metadata WHERE key = 'database_version'"
             ).scalar_one_or_none()
-        if version not in (None, "0.1.0", DATABASE_VERSION):
+        if version not in (None, "0.1.0", "0.2.0", DATABASE_VERSION):
             raise RuntimeError(f"Unsupported database version: {version!r}")
     _rename_forecast_solar_raw_columns(engine)
     _rename_sigenstor_battery_available_discharge_column(engine)
@@ -42,7 +42,6 @@ def open_database(path: str | Path) -> SolarDatabase:
             SigenStorDevice.__table__,
             DatabaseMetadata.__table__,
             ForecastSolarSample.__table__,
-            ForecastLoadSample.__table__,
         ),
     )
     _add_missing_columns(engine, SigenStorModbusSample)
@@ -55,6 +54,7 @@ def open_database(path: str | Path) -> SolarDatabase:
         _add_missing_columns(engine, SigenStorHourlySample)
     database.initialize_hourly_rollup()
     _migrate_house_load(database)
+    _migrate_house_load_forecast(database)
     return database
 
 
@@ -65,7 +65,7 @@ def _migrate_house_load(database: SolarDatabase) -> None:
         version = connection.exec_driver_sql(
             "SELECT value FROM database_metadata WHERE key = 'database_version'"
         ).scalar_one_or_none()
-        if version == DATABASE_VERSION:
+        if version in ("0.2.0", DATABASE_VERSION):
             return
         if version not in (None, "0.1.0"):
             raise RuntimeError(f"Unsupported database version: {version!r}")
@@ -87,6 +87,22 @@ def _migrate_house_load(database: SolarDatabase) -> None:
             )
         connection.execute(SigenStorHourlySample.__table__.delete())
         database._insert_hourly_rollup(connection)
+        connection.exec_driver_sql(
+            "INSERT INTO database_metadata (key, value) VALUES ('database_version', ?) "
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value", ("0.2.0",),
+        )
+
+
+def _migrate_house_load_forecast(database: SolarDatabase) -> None:
+    """Replace the undeployed counter-based forecast table with house forecasts."""
+    with database.engine.begin() as connection:
+        connection.exec_driver_sql("BEGIN IMMEDIATE")
+        ForecastHouseLoadSample.__table__.create(connection, checkfirst=True)
+        if connection.exec_driver_sql(
+            "SELECT value FROM database_metadata WHERE key = 'database_version'"
+        ).scalar_one_or_none() == DATABASE_VERSION:
+            return
+        connection.exec_driver_sql("DROP TABLE IF EXISTS forecast_load")
         connection.exec_driver_sql(
             "INSERT INTO database_metadata (key, value) VALUES ('database_version', ?) "
             "ON CONFLICT(key) DO UPDATE SET value = excluded.value", (DATABASE_VERSION,),

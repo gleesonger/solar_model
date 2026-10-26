@@ -6,22 +6,22 @@ from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from solar_model.config import SolarArrayConfig
 from solar_model.time_utils import utc_instant
 
-from solar_model.storage.schema import DatabaseMetadata, ForecastLoadSample, ForecastSolarSample, PV_ARRAY_IDS
+from solar_model.storage.schema import DatabaseMetadata, ForecastHouseLoadSample, ForecastSolarSample, PV_ARRAY_IDS
 
 class ForecastStorage:
 
-    def has_load_forecast(self, target_day: str) -> bool:
+    def has_house_load_forecast(self, target_day: str) -> bool:
         with self.sessions() as session:
-            return session.scalar(select(ForecastLoadSample.target_day).where(
-                ForecastLoadSample.target_day == target_day,
+            return session.scalar(select(ForecastHouseLoadSample.target_day).where(
+                ForecastHouseLoadSample.target_day == target_day,
             ).limit(1)) is not None
 
-    def save_daily_load_forecast(self, target_day: str, collected_at: str, values: list[dict]) -> int:
+    def save_daily_house_load_forecast(self, target_day: str, collected_at: str, values: list[dict]) -> int:
         # Serialize the check and entire profile write. A restart/concurrent
         # collector must never overwrite or partially extend a frozen day.
         with self.engine.connect() as connection:
             connection.exec_driver_sql("BEGIN IMMEDIATE")
-            table = ForecastLoadSample.__table__
+            table = ForecastHouseLoadSample.__table__
             if connection.scalar(select(table.c.target_day).where(table.c.target_day == target_day).limit(1)) is not None:
                 connection.rollback()
                 return 0

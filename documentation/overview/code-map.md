@@ -9,7 +9,7 @@ solar_model/
   config.py, tariffs.py, time_utils.py, logging_setup.py, paths.py, utils.py
   planning/
     model.py, types.py, scenarios.py, optimisation.py, system.py
-    forecasts/solar.py, load.py
+    forecasts/solar.py, house_load.py
   services/collection.py, forecasting.py, planning.py
   integrations/
     forecast_solar.py
@@ -32,7 +32,7 @@ solar_model/
 | Area | Responsibility and entry points |
 | --- | --- |
 | [Planning model](../../solar_model/planning/model.py) | `PlanningInputs` and `build_plan`: in-memory inputs → scenarios → numerical simulation frames. No storage, network or UI imports |
-| [Forecast models](../../solar_model/planning/forecasts/solar.py) | Pure solar day-ahead/intraday calculations; [load.py](../../solar_model/planning/forecasts/load.py) predicts the fixed daily load profile |
+| [Forecast models](../../solar_model/planning/forecasts/solar.py) | Pure solar day-ahead/intraday calculations; [house_load.py](../../solar_model/planning/forecasts/house_load.py) predicts the fixed daily load profile |
 | [Optimisation](../../solar_model/planning/optimisation.py) | CVXPY flow variables, constraints, HiGHS solve and energy-balance checks; [system.py](../../solar_model/planning/system.py) derives physical limits; the current cost/battery objective is calculated inline in the optimiser |
 | [Services](../../solar_model/services) | Collection transactions, forecast scheduling/calibration persistence, and as-of planning input assembly |
 | [Integrations](../../solar_model/integrations) | HTTP provider client; Modbus transport, map parsing/decoding and device specifications. Register-map JSON is packaged beside its loader |
@@ -53,7 +53,7 @@ storage.queries → dashboard.snapshot / dashboard.tabs → components / formatt
                                     → planning.model → scenarios → optimisation → reports
 ```
 
-Production forecasting and offline planning share the package but have different current input policies: the as-of loader still uses its historical load profile. The [plan-model design](plan-model.md) describes the future shared next action and protection scoring; this restructure preserves the current independent-scenario solver.
+Production forecasting and offline planning share the house-load prediction helper and train on integrated House Load; planning limits observations to those before its as-of local midnight. The [plan-model design](plan-model.md) describes the future shared next action and protection scoring; this restructure preserves the current independent-scenario solver.
 
 ## Tests and change routing
 

@@ -279,7 +279,10 @@ def test_database_planning_loader_covers_four_elapsed_dst_hours(database, monkey
             session.add(ForecastSolarSample(collected_at_utc=start.isoformat(),
                         forecast_time=add_elapsed(start, timedelta(hours=hour)).isoformat(),
                         **{f"panel_{panel}_adj_watt_hours": hour * 1000.}))
-    monkeypatch.setattr(planner, "load_weighted_profile", lambda *args: ({(d, h): 1. for d in range(7) for h in range(24)}, {}))
+    with database.sessions.begin() as session:
+        for stamp in pd.date_range(pd.Timestamp(start) - pd.Timedelta(days=2), pd.Timestamp(start), freq="h", inclusive="left"):
+            session.add(SigenStorHourlySample(hour_start_utc=stamp.isoformat(), import_tariff_band="day",
+                        sample_count=1, house_load_kwh_period=1., plant_load_total_kwh_period=2.))
     forecast = planner.load_forecast_as_of(database, start, cfg)
     assert len(forecast.load) == 4
     point = forecast.sum(start, add_elapsed(start, timedelta(hours=4)))

@@ -41,7 +41,7 @@ Source: [solar_model/tools/plan_as_of.py](../../solar_model/tools/plan_as_of.py)
 - The cutoff applies to database observations and forecast vintages. Efficiencies, tariffs, and planning settings come from the supplied configuration; retain that configuration to reproduce a historical run.
 - Starting battery uses nameplate capacity × SOC, unlike dashboard available-discharge energy.
 - Forecast prefers adjusted cumulative Wh. If any configured panel has no adjusted points, all panels fall back to raw from the same collection; it does not mix sources or search older collections. Missing leading/trailing coverage is padded with zero solar.
-- Load profile uses previous local days only, exact weekday/hour averages, configured recency weights (shipped 42-day window/21-day half-life). Missing slots raise an error.
+- Household demand uses the shared house-load forecaster trained on integrated House Load before the as-of local midnight. It uses the production weekday/weekend shrinkage model and its forecast tuning settings; missing slots raise an error. Conversion losses are applied separately by the optimiser.
 - Creates nine low/base/high load×solar combinations, multipliers 0.5/1/1.5. High solar shifts paired half-hours to 25%/75%; high load uses 80%/20%.
 - Durations, overlap and projection steps use UTC elapsed time across DST; tariff interpretation remains local and repeated output hours retain their offsets.
 - Writes one sheet per scenario and a Summary. Coarser output sums energy/costs, preserves opening/closing battery levels, and combines limits conservatively.

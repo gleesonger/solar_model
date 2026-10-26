@@ -13,7 +13,7 @@ For a consolidated comparison of units, signs, missing values, time attribution 
 | `sigenstor` | `collected_at_utc` | One successful electrical sample; telemetry, cumulative meters, interval energy/costs, derived PV-string values |
 | `sigenstor_hourly` | `hour_start_utc`, `import_tariff_band` | UTC-hour aggregates, split by import tariff band; missing band becomes `Unknown` |
 | `forecast_solar` | `collected_at_utc`, `forecast_time` | One collection vintage and target time; up to four panels' raw/adjusted W and Wh fields |
-| `forecast_load` | `target_day`, `forecast_time` | One fixed hourly load profile per configured-local date; generation timestamp and nullable kWh |
+| `forecast_house_load` | `target_day`, `forecast_time` | One fixed hourly house-load profile per configured-local date; generation timestamp and nullable household kWh |
 | `sigenstor_devices` | integer `id` | Append-only valid device-value changes, with variable/name/value/unit and ISO UTC/local timestamps |
 | `database_metadata` | `key` | Key/value storage including `database_version` and hourly-initialization completion |
 
@@ -43,7 +43,9 @@ For a consolidated comparison of units, signs, missing values, time attribution 
 
 ## Migration behavior
 
-- `database_metadata.database_version` advances from `0.1.0` (or absent) to `0.2.0` when the house-load historical backfill and hourly rebuild commit together. Missing columns are added before the backfill; an interrupted backfill retains the old version and retries. Current-version databases skip the backfill; unsupported versions are rejected before schema changes. Normal startup runs migration, or run `python -m solar_model.tools.migrate_database <database-copy.db>` explicitly.
+- Version `0.3.0` creates `forecast_house_load` and drops the undeployed `forecast_load` table and its local predictions. The version update and forecast-table replacement share a transaction. Version `0.2.0` databases retain their already-backfilled house energy without another raw/hourly rebuild. Current startup version is `0.3.0`.
+
+- `database_metadata.database_version` advances from `0.1.0` (or absent) to `0.2.0` when the house-load historical backfill and hourly rebuild commit together. Missing columns are added before the backfill; an interrupted backfill retains the old version and retries. Versions `0.2.0` and `0.3.0` skip this energy backfill; unsupported versions are rejected before schema changes. Normal startup runs migration, or run `python -m solar_model.tools.migrate_database <database-copy.db>` explicitly.
 - `open_database()` renames legacy forecast fields to `_raw_`, renames battery availability to the plant-level name, creates tables, adds missing columns, and drops legacy JSON columns.
 - Conflicting duplicate raw/legacy forecast values cause migration refusal rather than silent data loss.
 - Initial hourly creation/rebuild and `hourly_rollup_initialized_v3` commit together. Older v1/v2 or unmarked history rebuilds once to populate valid counts; interrupted initialization retries. Later marked opens skip the scan. Adding unrelated columns alone does not trigger another rebuild.

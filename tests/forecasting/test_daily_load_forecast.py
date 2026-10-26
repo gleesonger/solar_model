@@ -157,6 +157,6 @@ def test_migration_discards_old_forecasts_and_does_not_rebackfill_house_energy(t
             assert connection.exec_driver_sql("SELECT name FROM sqlite_master WHERE name='forecast_load'").scalar() is None
             assert connection.exec_driver_sql("SELECT COUNT(*) FROM forecast_house_load").scalar() == 0
             assert connection.exec_driver_sql("SELECT house_load_kwh_period FROM sigenstor").scalar() == 1234
-            assert connection.exec_driver_sql("SELECT value FROM database_metadata WHERE key='database_version'").scalar() == "0.3.0"
+            assert connection.exec_driver_sql("SELECT value FROM database_metadata WHERE key='database_version'").scalar() == "0.3.1"
     finally:
         db.close()

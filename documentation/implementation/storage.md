@@ -22,6 +22,9 @@ open_database(path)
   _migrate_house_load_forecast(): BEGIN IMMEDIATE
     create forecast_house_load; drop undeployed forecast_load
     commit database_version = "0.3.0" with the forecast-table replacement
+  _migrate_no_solar_cost(): BEGIN IMMEDIATE
+    overwrite No Solar Cost from house_load_kwh_period and stored import_rate
+    rebuild hourly aggregates; commit database_version = "0.3.1"
 ```
 
 `SolarDatabase.sessions()` creates a session; `sessions.begin()` owns a committing transaction. `close()` disposes the engine's pooled connections. Cached Engine identity is reused by path, but disposed engines can reconnect; a `SolarDatabase` is not a permanently open cursor.
@@ -45,8 +48,9 @@ Electrical/forecast `collected_at_local` is a hybrid expression/property, not a 
 save_modbus_sample(values, previous, collected, tariffs)
   normalise metric/unit to ORM column name
   calculate cumulative period deltas
-  economic_period_values(..., collected local time)
   _add_pv_array_measurements(row, previous)
+  derive house_load_kwh_period
+  economic_period_values(..., house_load_kwh_period, collected local time)
   transaction:
     add SigenStorModbusSample(**row)
     _add_hourly_sample(session, row)
@@ -97,7 +101,7 @@ All measurement/economics fields are nullable. Only `collected_at_utc` identifie
 - Meter delta is current minus previous when both are available and current ≥ previous; otherwise null. A decrease is a reset/unknown interval, not zero.
 - Each of four PV powers is `max(V*A, 0)/1000`, or null if either reading is absent.
 - Each PV energy is trapezoidal power × elapsed UTC hours when prior/current powers and a positive elapsed time exist; otherwise null. No maximum-gap cutoff is applied.
-- Economics receives grid import/export/load deltas, picks the tariff for the sample's local end time, and writes physical money/rate values. Net cost is null unless both import cost and export revenue are known.
+- Economics receives grid import/export deltas and integrated House Load, picks the tariff for the sample's local end time, and writes physical money/rate values. Net cost is null unless both import cost and export revenue are known.
 - `previous` reloads the newest row's cumulative fields, timestamp, and PV powers after restart. During operation it is expanded from decoded values after each successful transaction.
 
 ## 3. Hourly rollup structure
@@ -136,7 +140,7 @@ Hourly **energy/cost** is already an aggregate. Hourly **power/rate/SOC/availabl
 
 Manual `backfill_hourly_rollup()` still inserts missing groups with `OR IGNORE`; it does not repair stale existing groups. `rebuild_hourly_rollup(start,end,zone,connection=None)` replaces whole UTC hours overlapping the inclusive local-date range, including neighboring-date samples in boundary hours. It owns a transaction unless a caller supplies one; tariff recalculation supplies its raw-update connection. Adding unrelated columns alone does not backfill derived historical data.
 
-The separate `database_version` metadata key controls the house-load migration: `0.1.0` or absent upgrades to `0.2.0`; startup then replaces the undeployed forecast table and advances to `0.3.0`. Unsupported values are rejected before schema changes. After raw/hourly missing-column additions and hourly readiness initialization, `_migrate_house_load()` locks writers, reads ordered raw power samples, computes and rounds interval energy using the same helper as collection, writes only the new raw energy field, replaces hourly aggregates, and updates the version in one transaction. Failure rolls back data/version; already-added nullable columns can remain and are safe on retry. Versions `0.2.0` and `0.3.0` skip this backfill. This version is independent of the existing v3 hourly readiness marker.
+The separate `database_version` metadata key controls the house-load migration: `0.1.0` or absent upgrades to `0.2.0`; startup then replaces the undeployed forecast table and advances to `0.3.0`. Unsupported values are rejected before schema changes. After raw/hourly missing-column additions and hourly readiness initialization, `_migrate_house_load()` locks writers, reads ordered raw power samples, computes and rounds interval energy using the same helper as collection, writes only the new raw energy field, replaces hourly aggregates, and updates the version in one transaction. Failure rolls back data/version; already-added nullable columns can remain and are safe on retry. Versions `0.2.0`, `0.3.0` and `0.3.1` skip this energy backfill. This version is independent of the existing v3 hourly readiness marker.
 
 ## 4. Forecast persistence and adjusted writers
 
@@ -196,3 +200,7 @@ Next: [forecast correction](forecasting.md), [dashboard queries](dashboard-data.
 `schema.py` declares the ORM tables and scaling types. `connection.py` owns cached engines, SQL timing and `SolarDatabase`; its measurement and forecast methods come from `measurements.py` and `forecasts.py`. `migrations.py` owns `open_database` and legacy upgrades. This split preserves the same transactions and migration/backfill order.
 
 `queries/forecasting.py` loads calibration frames; `queries/planning.py` selects as-of planning inputs; `queries/recent.py`, `analysis.py` and `exports.py` own native dashboard aggregation. `queries/dashboard.py` retains dataframe adapters and reference calculations. `queries/types.py` defines data records without importing NiceGUI. Presentation helpers live in `dashboard/formatting.py`.
+
+## No Solar Cost migration (0.3.1)
+
+`_migrate_no_solar_cost()` overwrites every raw `no_solar_battery_import_cost_period` with `ROUND(house_load_kwh_period * import_rate / 10000.0)` in stored units, using each reading's recorded historical import tariff. Missing house energy or tariff produces null, including intervals skipped by house integration; zero remains zero. It replaces hourly aggregates and publishes `database_version = 0.3.1` in the same `BEGIN IMMEDIATE` transaction. A failure rolls back raw values, hourly rows and version; repeat opening skips the completed migration. Other raw costs, tariff fields and measurements are unchanged. Collection derives house energy before calculating economics; later tariff recalculation uses the same house-load basis.

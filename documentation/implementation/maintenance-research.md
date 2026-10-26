@@ -2,9 +2,13 @@
 
 These tools sit outside the managed collection/UI loop. Some mutate history; others only read SQLite and produce reports/artifacts. The [operations guide](../operations/runbook.md) contains invocation examples. This guide explains their function hierarchy and intermediate structures.
 
+## No Solar Cost conversion
+
+Run `python -m solar_model.tools.migrate_database <database.db>` to apply the 0.3.0 → 0.3.1 migration explicitly; normal app startup runs it too. It overwrites the existing No Solar Cost series using integrated House Load and each sample's stored import tariff, then rebuilds hourly aggregates. Missing inputs become null. Repeating the command skips completed work. Raw values, hourly history and the version update commit together; failed conversion retries on the next run. See [storage](storage.md#no-solar-cost-migration-031).
+
 ## House-load comparison investigation
 
-To migrate an existing database and backfill the production house-load series, run `python -m solar_model.tools.migrate_database <database.db>`. The CLI requires an existing file and invokes the same migrations as normal startup. Verify on a copy first. Successful migration stores `database_version = 0.3.0`; repeating it skips the completed house-load backfill. See [storage](storage.md) for transaction and gap semantics.
+To migrate an existing database and backfill the production house-load series, run `python -m solar_model.tools.migrate_database <database.db>`. The CLI requires an existing file and invokes the same migrations as normal startup. Verify on a copy first. Successful migration stores `database_version = 0.3.1`; repeating it skips the completed house-load backfill. See [storage](storage.md) for transaction and gap semantics.
 
 A read-only analysis on 2026-10-26 compared stored load-counter energy with estimated house-load energy for the 30 complete Europe/Dublin calendar days from 2026-09-26 through 2026-10-25. Counter deltas totalled **774.870 kWh**; integrated house load totalled **702.264 kWh**, a difference of **72.606 kWh (9.37% of counter load)**. Accepted power intervals covered **99.9%** of the elapsed time.
 

@@ -44,6 +44,8 @@ Original documentation review: 2026-10-14. The lists below reflect remaining ite
 
 ## Application fixes completed
 
+- **2026-10-26, No Solar Cost:** collection and tariff recalculation now use House Load only. Migration 0.3.1 overwrites the existing raw comparator using stored house energy and historical import rates, rebuilds hourly aggregates, and commits the version atomically. The deferred request is resolved.
+
 - **2026-10-24, package restructure:** split planning, services, integrations, storage and dashboard responsibilities; retained launch commands and numerical behaviour. Removed the superseded lab sketch and unmounted Hourly component. Packaged assets/register maps, declared HiGHS and corrected Docker port metadata to 8090.
 
 - **2026-10-19, browser freshness:** short tab switches keep a fresh heartbeat. The three-dot live-update indicator expires through finite CSS with wall-clock/lifecycle checks, clears on unhealthy status, and has a reduced-motion variant. A small light-grey collection timestamp remains below Live / Today, including in static copies.

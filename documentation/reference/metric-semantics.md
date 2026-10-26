@@ -17,6 +17,7 @@ Use this alongside the [exact schema](schema.md). Physical units apply below; ra
 | `plant_battery_soc_percent` | State-of-charge level, % | Sum plus valid count | Mean SOC; no summed Total | Average valid raw readings |
 | PV-string `*_power_kw` / `*_energy_kwh_period` | V×A power / trapezoidal interval energy | Power sum/count; energy sum | Live string power and chart allocations are not independent plant energy meters | Power average; period energy sum |
 | Import/export rates | Configured money per kWh at sample time | Sum plus each rate's valid count | Sample means; not an energy-weighted effective price | Average valid raw readings |
+| `no_solar_battery_import_cost_period` | House Load kWh × import rate; missing house energy means missing cost | Sum | No Solar Cost / Net Cost if No Solar; excludes conversion losses and standing charges | Sum |
 | Cost/revenue `*_period` | Interval money; net = import cost − export revenue | Sum | Sum, including negative net values when export revenue exceeds cost | Sum |
 | `import_tariff_band` | Import-rule label, not a number | Part of hourly primary key; missing becomes `Unknown` | May split import costs into band series | Distinct non-null raw labels in reading order, joined with ` / ` |
 | Forecast `panel_n_*_watts` | Instantaneous provider/model W | No electrical rollup | Operational calibration uses kW helpers; these are distinct from chart forecast energy | Average stored W |

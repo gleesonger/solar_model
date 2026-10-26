@@ -68,13 +68,6 @@ class MeasurementStorage:
             row[name] = value
             if cumulative:
                 row[f"{name}_period"] = value - previous[name] if name in previous and value >= previous[name] else None
-        row.update(economic_period_values(
-            row.get("plant_grid_import_total_kwh_period"),
-            row.get("plant_grid_export_total_kwh_period"),
-            row.get("plant_load_total_kwh_period"),
-            tariffs,
-            datetime.fromisoformat(collected[1]),
-        ))
         self._add_pv_array_measurements(row, previous)
         previous_stamp = previous.get("_collected_at_utc")
         row["house_load_kwh_period"] = house_load_energy(
@@ -83,6 +76,13 @@ class MeasurementStorage:
             - datetime.fromisoformat(cast(str, previous_stamp)).timestamp()
             if previous_stamp is not None else 0,
         )
+        row.update(economic_period_values(
+            row.get("plant_grid_import_total_kwh_period"),
+            row.get("plant_grid_export_total_kwh_period"),
+            row.get("house_load_kwh_period"),
+            tariffs,
+            datetime.fromisoformat(collected[1]),
+        ))
         with self.sessions.begin() as session:
             session.add(SigenStorModbusSample(**row))
             self._add_hourly_sample(session, row)

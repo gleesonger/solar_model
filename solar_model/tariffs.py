@@ -62,7 +62,7 @@ def tariff_rule(rules: tuple[TariffRule, ...], timestamp: datetime) -> TariffRul
 def economic_period_values(
     grid_import_kwh: float | None,
     grid_export_kwh: float | None,
-    load_kwh: float | None,
+    house_load_kwh: float | None,
     tariffs: TariffsConfig,
     collected_at_local: datetime,
 ) -> dict[str, float | str | None]:
@@ -89,6 +89,6 @@ def economic_period_values(
             else None
         ),
         "no_solar_battery_import_cost_period": (
-            load_kwh * import_rate if load_kwh is not None else None
+            house_load_kwh * import_rate if house_load_kwh is not None else None
         ),
     }

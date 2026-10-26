@@ -68,7 +68,7 @@ def test_old_schema_backfill_and_repeat_open(tmp_path, monkeypatch):
     with database.engine.connect() as connection:
         assert connection.exec_driver_sql("SELECT house_load_kwh_period FROM sigenstor ORDER BY collected_at_utc").scalars().all() == [None, 333, None]
         assert connection.exec_driver_sql("SELECT SUM(house_load_kwh_period) FROM sigenstor_hourly").scalar() == 333
-        assert connection.exec_driver_sql("SELECT value FROM database_metadata WHERE key='database_version'").scalar() == "0.3.0"
+        assert connection.exec_driver_sql("SELECT value FROM database_metadata WHERE key='database_version'").scalar() == "0.3.1"
     database.close()
     monkeypatch.setattr(SolarDatabase, "_insert_hourly_rollup", lambda *args: pytest.fail("repeated backfill"))
     open_database(path).close()
@@ -89,7 +89,7 @@ def test_failed_backfill_keeps_old_version_and_retries(tmp_path, monkeypatch):
         assert connection.exec_driver_sql("SELECT COUNT(house_load_kwh_period) FROM sigenstor").scalar() == 0
     database = open_database(path)
     with database.sessions() as session:
-        assert session.get(DatabaseMetadata, "database_version").value == "0.3.0"
+        assert session.get(DatabaseMetadata, "database_version").value == "0.3.1"
     database.close()
 
 

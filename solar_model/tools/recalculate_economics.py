@@ -111,7 +111,7 @@ def main(argv: list[str] | None = None) -> int:
                        export_rate = matched.export_rate,
                        grid_import_cost_period = ROUND(sample.plant_grid_import_total_kwh_period * matched.import_rate / 10000.0),
                        grid_export_revenue_period = ROUND(sample.plant_grid_export_total_kwh_period * matched.export_rate / 10000.0),
-                       no_solar_battery_import_cost_period = ROUND(sample.plant_load_total_kwh_period * matched.import_rate / 10000.0),
+                       no_solar_battery_import_cost_period = ROUND(sample.house_load_kwh_period * matched.import_rate / 10000.0),
                        net_cost_period = ROUND((sample.plant_grid_import_total_kwh_period * matched.import_rate - sample.plant_grid_export_total_kwh_period * matched.export_rate) / 10000.0)
                   FROM matched
                  WHERE sample.collected_at_utc = matched.collected_at_utc

@@ -9,7 +9,7 @@ Source: [solar_model/tariffs.py](../../solar_model/tariffs.py), `economic_period
 - Import cost = interval grid-import kWh × import rate.
 - Export revenue = interval grid-export kWh × export rate.
 - Net cost = import cost − export revenue.
-- No-solar/battery comparator = measured load kWh × import rate; it excludes standing charges.
+- No-solar/battery comparator = House Load kWh × import rate; it excludes conversion losses and standing charges. Missing House Load produces a missing comparator, with no fallback to the device Load counter.
 - Collection stores rates/band/costs at that time. Editing YAML does not retroactively change stored history.
 - [solar_model/tools/recalculate_economics.py](../../solar_model/tools/recalculate_economics.py) replaces selected historical values and rebuilds hourly aggregates; see [operations.md](../operations/runbook.md).
 

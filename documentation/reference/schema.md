@@ -243,7 +243,7 @@ Declared indexes:
 
 Primary key: `key`.
 
-`database_version` is `0.3.0` after house-forecast replacement; `0.1.0` or absent versions first run the house-energy backfill to `0.2.0`. `hourly_rollup_initialized_v3` remains a separate hourly-readiness marker.
+`database_version` is `0.3.1` after No Solar Cost conversion to House Load; `0.3.0` introduced house-forecast replacement; `0.1.0` or absent versions first run the house-energy backfill to `0.2.0`. `hourly_rollup_initialized_v3` remains a separate hourly-readiness marker.
 
 | Field | SQL type | ORM API | Nullable |
 | --- | --- | --- | --- |

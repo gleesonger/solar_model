@@ -41,7 +41,8 @@ def inputs():
 def simulate(inputs, action=None, extra_constraints=None):
     original_score = optimisation.score_simulation
 
-    def score_with_constraints(costs, levels, scenarios, device, config, constraints, projection_starts_at, durations):
+    def score_with_constraints(costs, levels, scenarios, device, config, constraints,
+                               projection_starts_at, durations):
         variables = {variable.name(): variable for constraint in constraints
                      for variable in constraint.variables()}
         if action is not None:
@@ -49,7 +50,8 @@ def simulate(inputs, action=None, extra_constraints=None):
                                for field in fields(action) if field.name != "mode")
         if extra_constraints is not None:
             constraints.extend(extra_constraints(variables))
-        return original_score(costs, levels, scenarios, device, config, constraints, projection_starts_at, durations)
+        return original_score(costs, levels, scenarios, device, config, constraints,
+                              projection_starts_at, durations)
 
     with patch.object(optimisation, "score_simulation", score_with_constraints):
         return simulate_energy_plan(*inputs).results

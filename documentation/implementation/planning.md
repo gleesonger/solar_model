@@ -28,9 +28,11 @@ solar_model.tools.plan_as_of.main()
   create_scenarios()
     _half_hour_intervals() -> _scenario_intervals()
   simulate_energy_plan()
-    Build Model section: mixed periods, per-period system_limits(), _energy_until_soc(), explicit battery-state variables
-    Optimise Model section: score_simulation(), single HiGHS solve
+    validate inputs, compute periods, log start/projection
+    Build Model: fresh variables/constraints and numeric inputs
+    Optimise Model: score_simulation(), log complexity, compile and solve with HiGHS
     Model to Results section: derive action/mode and extract scenario frames
+    log end and elapsed time
   group_plan(output timestep)
   write_workbook()
 ```
@@ -101,23 +103,25 @@ Output contract: `list[ScenarioData]`, where the frozen dataclass has `name: str
 
 ```text
 simulate_energy_plan(device_info, state, scenarios, config, projection_start)
+  wrapper: overall start/end timing and logging, try/except
+  _simulate_energy_plan: validate names/probabilities, normalise start to UTC, calculate intervals
   Build Model
-    validate names/duration/efficiencies/capacity
-    create mixed intervals, flow/state variables and shared first-step rate/SOC variables
-    _energy_until_soc -> bounded first-step forced energy
-    assemble numeric inputs and add matrix constraints across time/scenarios
+    create fresh flow/state variables and shared first-step rates/SOC constraints
+    assemble numeric forecasts, tariffs, limits and initial battery state
   Optimise Model
-    score_scenario builds each scenario's cost/protection expressions and constraints
-    score_simulation calculates the tariff-scaled reward and averages scenario scores
-    construct cp.Problem maximising protection reward minus net cost
-    solve with HiGHS; reject unsuccessful status
+    score_simulation builds probability-weighted protection reward minus cost
+    construct a new cp.Problem, log complexity, compile and solve directly with HiGHS
   Model to Results
-    derive numeric NextAction and OperatingMode locally
-    extract flow/battery values, calculate costs and check energy balances
+    derive numeric NextAction/OperatingMode, extract values and check balances
     return SimulationResult(next_action, results)
+  log successful end; exceptions log a failed end and are re-raised
 ```
 
-These stages are inline sections of one function. Shared variables, constraints, score expressions and reporting data remain local; there are no intermediate model objects or separate build/optimise/result APIs. The return value is `SimulationResult`: `next_action` is the shared action including derived mode, and `results` maps scenario names to DataFrames. Whole-scenario net cost is subtracted from a tariff-scaled reward for average protection, then scenario scores are probability-weighted. Probabilities must be finite/non-negative with a positive total and are normalised in the score.
+Every call rebuilds and recompiles the problem. There are no cached models, CVXPY input parameters, parameter-update closures or global model locks. Input durations can change on each replanning call without a cache-compatibility check. Solver warm starts are disabled. Result frames are newly allocated, so later solves do not mutate earlier reports.
+
+The public wrapper owns overall `perf_counter` timing, start/end logging and the try/except. `_simulate_energy_plan` directly calls HiGHS, logs projection/complexity and reports compilation/solve timing from CVXPY solver statistics. There is no solve callback or separate solve timer. INFO logging reports `plan_model start`, period/scenario counts, compact minute runs such as `time_steps=[15*1, 10*1, 15*22, 60*18, 5*1]`, scalar variable/Boolean/explicit constraint/parameter counts (zero parameters), status/objective and compile/solve timing, then success/failure and elapsed seconds at `plan_model end`.
+
+The return value is `SimulationResult`: `next_action` is the shared action including derived mode, and `results` maps scenario names to DataFrames. Whole-scenario net cost is subtracted from a tariff-scaled reward for average protection, then scenario scores are probability-weighted. Probabilities must be finite/non-negative with a positive total and are normalised in the score.
 
 `score_scenario(costs, levels, device, config, constraints, durations)` returns total net cost and duration-weighted average battery protection, adding concave piecewise-linear utility bounds to the shared constraints. Costs and levels accept either lists of scalar expressions or a vector expression; the simulation passes scenario columns directly without rebuilding scalar expression lists. Stored energy is scored from zero, without a discharge-floor offset or the extra floor-clamping Boolean variables. `score_simulation(..., projection_starts_at, durations)` calculates `V = X/100 * R * reference_import_rate * projection_hours/24` (using the sum of supplied interval durations for `projection_hours`, or the configured hours when durations are omitted), then returns the weighted average of `-cost + V * protection/100`. It does not invoke the solver.
 
@@ -129,9 +133,9 @@ The four shared first-step variables match numeric `NextAction`: forced battery 
 
 The Model to Results section creates a local numeric `NextAction` and derives a local `OperatingMode` IntEnum from the solved rates. The derived mode is stored in `NextAction`, which is returned alongside the scenario dictionary in `SimulationResult`. Minimum/maximum report columns retain scheduled bounds.
 
-`_projection_intervals` keeps the first action at `projection_resolution_mins` (15 minutes by default), then aligns subsequent fine periods to UTC clock boundaries until the next whole UTC hour. Six half-hours follow, then hourly periods, ending `num_projection_hours` after the preceding full UTC hour. Starting on a whole hour gives `[15] * 4 + [30] * 6 + [60] * 20` for 24 hours. Starting at 10:05 UTC gives 10:05-10:20 (the intact next action), 10:20-10:30, 10:30-10:45 and 10:45-11:00, followed by six half-hours to 14:00, hourly periods to 10:00 the next day, without a final five-minute period. If the first action crosses the hour, fine periods continue to the following whole hour.
+`_projection_intervals` keeps the first action at `projection_resolution_mins` (15 minutes by default), aligns later fine periods to the UTC clock through six hours measured from the preceding full UTC hour, then uses hourly periods to `starts_at + num_projection_hours`. A partial final period preserves the full elapsed horizon. Starting on a whole hour gives `[15] * 24 + [60] * 18` (42 periods); 10:05 gives `[15, 10] + [15] * 22 + [60] * 18 + [5]` (43 periods). Fine blocks displaced by later starting minutes are dropped. A shorter configured horizon clips the grid to its endpoint, including the first action when the entire horizon is shorter than that action.
 
-The grid does not inspect tariffs, battery-limit schedules or midnight, and these do not add splits. Every interval uses its start-time tariff and limits; changes inside an interval are deliberately approximated. The shipped Dublin whole-hour tariffs align with the UTC clock grid after the first action; schedules in timezones with non-whole-hour UTC offsets may change inside an interval. The function defines the timestep array at the top (`[resolution] * 4 + [30] * 6 + [60] * ceil(horizon_hours)`) and normalises the supplied start to UTC once. It adjusts the fine prefix to finish on a whole hour, then iterates through the array, shortening clock-alignment intervals after the intact first action. An elapsed-duration remainder tracks the full-hour-aligned endpoint; no remainder period is added to restore the original starting minute. Plain timedelta addition is sufficient in UTC; the model and scenario generator no longer use `add_elapsed`. Projection output stays UTC, including through repeated local hours.
+The grid does not inspect tariffs, battery-limit schedules or midnight, and these do not add splits. Every interval uses its start-time tariff and limits; changes inside an interval are deliberately approximated. The shipped Dublin whole-hour tariffs align with hourly UTC periods; schedules in timezones with non-whole-hour UTC offsets may change inside an interval. The timestep array is defined at the top as `[resolution] * ceil(360 / resolution) + [60] * ceil(horizon_hours)`. The function normalises the supplied start to UTC once and uses plain timedelta arithmetic, shortening clock-alignment periods after the intact first action and retaining the final partial period. Projection output stays UTC, including through repeated local hours.
 
 Every interval has its own `theta_hrs` and charging/discharging/inverter energy limits. The first-step forced rates and SOC clipping use only the first interval's duration. ForecastData integrates energy over each actual interval. Battery end levels are a `(T,S)` variable matrix with local balance equalities referring only to the previous state variable; scoring and results reuse these states. This avoids the expanding expression chains found in the earlier implementation.
 

@@ -2,6 +2,9 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 from typing import cast
+from itertools import groupby
+from time import perf_counter
+import logging
 import math
 import cvxpy as cp
 import numpy as np
@@ -15,13 +18,25 @@ from solar_model.planning.system import system_limits
 
 MIN_FORCE_RATE_KW = 0.1  # Minimum positive command: 100 watts.
 PROTECTION_APPROXIMATION_ERROR = 0.05  # Protection score points.
+LOGGER = logging.getLogger(__name__)
 
 
 def simulate_energy_plan(device_info: DeviceInfo, device_state: DeviceState, scenarios: list[ScenarioData], config: Config, projection_starts_at: datetime) -> SimulationResult:
-    """Build, optimise and report scenarios sharing the next action."""
+    """Run the model with performance and failure logging around the calculation."""
+    begin = perf_counter()
+    LOGGER.info("plan_model start: starts_at=%s scenarios=%d", projection_starts_at, len(scenarios))
 
-    # #### Build Model
+    try:
+        result = _simulate_energy_plan(device_info, device_state, scenarios, config, projection_starts_at)
+        LOGGER.info("plan_model end: status=success elapsed_seconds=%.3f", perf_counter() - begin)
+        return result
+    except Exception:
+        LOGGER.exception("plan_model end: status=failed elapsed_seconds=%.3f", perf_counter() - begin)
+        raise
 
+
+def _simulate_energy_plan(device_info: DeviceInfo, device_state: DeviceState, scenarios: list[ScenarioData], config: Config, projection_starts_at: datetime) -> SimulationResult:
+    """Build a fresh model, solve it and extract the scenario results."""
     if not scenarios:
         raise ValueError("at least one scenario is required")
 
@@ -34,13 +49,12 @@ def simulate_energy_plan(device_info: DeviceInfo, device_state: DeviceState, sce
 
     projection_starts_at = utc_instant(projection_starts_at)
     periods = _projection_intervals(config, projection_starts_at)
-    num_time_periods, scenario_count = len(periods), len(scenarios)
-    durations = [(end - start).total_seconds() / 3600 for start, end in periods]
+    durations = tuple((end - start).total_seconds() / 3600 for start, end in periods)
+    # #### Build Model
+    num_time_periods, scenario_count = len(durations), len(scenarios)
     theta_hrs = durations[0]
-
     plan_columns = ["starts_at", "ends_at", "minimum_battery_kwh", "maximum_battery_kwh", "tariff_name", "import_rate", "export_rate", "limit_battery_export_rate_to_grid_kw", "load_kwh", "solar_kwh"]
-    dict_df_results = {scenario.name: pd.DataFrame(index=range(num_time_periods), columns=plan_columns) for scenario in scenarios}
-
+    initial_battery = device_state.battery_kwh
     limits = system_limits(device_info, theta_hrs)
     capacity_kwh = limits.capacity_kwh
     max_charge_kwh = limits.max_charge_kwh
@@ -81,22 +95,22 @@ def simulate_energy_plan(device_info: DeviceInfo, device_state: DeviceState, sce
         next_action_charge_cut_off_soc_percent <= 100,
     ]
     # Shared first-step energy, clipped at the relevant SOC stopping point.
-    big_m = (capacity_kwh + abs(device_state.battery_kwh)) / min(device_info.charge_efficiency, device_info.discharge_efficiency) + max(max_charge_kwh, max_discharge_kwh)
+    big_m = (capacity_kwh + abs(initial_battery)) / min(device_info.charge_efficiency, device_info.discharge_efficiency) + max(max_charge_kwh, max_discharge_kwh)
     forced_charge_energy = _energy_until_soc(
         next_action_force_battery_charge_rate * theta_hrs,
-        (capacity_kwh * next_action_charge_cut_off_soc_percent / 100 - device_state.battery_kwh) / device_info.charge_efficiency,
+        (capacity_kwh * next_action_charge_cut_off_soc_percent / 100 - initial_battery) / device_info.charge_efficiency,
         big_m, constraints,
     )
     forced_discharge_energy = _energy_until_soc(
         next_action_force_battery_discharge_rate * theta_hrs,
-        (device_state.battery_kwh - capacity_kwh * next_action_discharge_cut_off_soc_percent / 100) * device_info.discharge_efficiency,
+        (initial_battery - capacity_kwh * next_action_discharge_cut_off_soc_percent / 100) * device_info.discharge_efficiency,
         big_m, constraints,
     )
     battery_level_eop = cp.Variable((num_time_periods, scenario_count), nonneg=True, name="battery_level_eop")
 
-    # Assemble numeric inputs before building matrix constraints (Time x Scenario).
     period_limits = [system_limits(device_info, duration) for duration in durations]
     tariff_zone = ZoneInfo(config.timezone)
+    dict_df_results = {scenario.name: pd.DataFrame(index=range(num_time_periods), columns=plan_columns) for scenario in scenarios}
     for t, (starts_at, ends_at) in enumerate(periods):
         local = starts_at.astimezone(tariff_zone)
         import_rules, export_rules = tariff_rules_for_timestamp(config.tariffs, local)
@@ -108,7 +122,6 @@ def simulate_energy_plan(device_info: DeviceInfo, device_state: DeviceState, sce
         for scenario in scenarios:
             forecast_point = scenario.forecast_data.sum(starts_at, ends_at)
             dict_df_results[scenario.name].loc[t] = {"starts_at": starts_at, "ends_at": ends_at, "tariff_name": cast(str, import_rule.name), "import_rate": import_rule.rate, "export_rate": export_rate, "limit_battery_export_rate_to_grid_kw": limit_battery_export_rate_to_grid_kw, "minimum_battery_kwh": minimum_battery_kwh, "maximum_battery_kwh": maximum_battery_kwh, "load_kwh": forecast_point.load_kwh, "solar_kwh": forecast_point.solar_kwh}
-
     inputs = {column: np.column_stack([df[column].to_numpy(dtype=float) for df in dict_df_results.values()])
               for column in plan_columns if column not in ("starts_at", "ends_at", "tariff_name")}
     hours = np.broadcast_to(np.array(durations)[:, None], solar_to_load.shape)
@@ -118,8 +131,8 @@ def simulate_energy_plan(device_info: DeviceInfo, device_state: DeviceState, sce
     inverter_flows_ac_to_dc = grid_to_battery + grid_to_battery_loss
     battery_charge_input = solar_to_battery + solar_to_battery_loss + inverter_flows_ac_to_dc
     battery_discharge_output = battery_to_load + battery_to_grid
-    battery_level_bop = (cp.vstack([np.full((1, scenario_count), device_state.battery_kwh), battery_level_eop[:-1, :]])
-                         if num_time_periods > 1 else np.full((1, scenario_count), device_state.battery_kwh))
+    battery_level_bop = (cp.vstack([np.full((1, scenario_count), initial_battery), battery_level_eop[:-1, :]])
+                         if num_time_periods > 1 else np.full((1, scenario_count), initial_battery))
     constraints += [
         battery_charging[0, :] >= forcing[0], battery_charging[0, :] <= 1 - forcing[1],
         grid_to_battery[0, :] <= max_charge[0, :] * forcing[0],
@@ -134,7 +147,7 @@ def simulate_energy_plan(device_info: DeviceInfo, device_state: DeviceState, sce
         battery_discharge_output <= cp.multiply(max_discharge, 1 - battery_charging),
         inverter_flows_dc_to_ac + inverter_flows_ac_to_dc <= device_info.inverter_max_active_power_kw * hours,
         inverter_flows_ac_to_dc <= device_info.inverter_max_absorption_power_kw * hours,
-        battery_to_grid <= inputs["limit_battery_export_rate_to_grid_kw"] * hours,
+        battery_to_grid <= cp.multiply(inputs["limit_battery_export_rate_to_grid_kw"], hours),
         battery_level_eop == battery_level_bop + solar_to_battery + grid_to_battery - battery_to_load - battery_to_grid - battery_to_ac_loss,
         inputs["minimum_battery_kwh"] <= battery_level_eop,
         battery_level_eop <= inputs["maximum_battery_kwh"],
@@ -146,11 +159,24 @@ def simulate_energy_plan(device_info: DeviceInfo, device_state: DeviceState, sce
 
     # #### Optimise Model
 
-    score = score_simulation(net_cost_flows, battery_levels, scenarios, device_info, config, constraints, projection_starts_at, durations)
+    score = score_simulation(net_cost_flows, battery_levels, scenarios, device_info, config, constraints,
+                             projection_starts_at, durations)
     problem = cp.Problem(cp.Maximize(score), constraints)
 
-    problem.solve(solver=cp.HIGHS)
-
+    steps = [(end - start).total_seconds() / 60 for start, end in periods]
+    summary = ", ".join(f"{minutes:g}*{sum(1 for _ in group)}" for minutes, group in groupby(steps))
+    LOGGER.info("plan_model projection: periods=%d scenarios=%d time_steps=[%s]",
+                len(periods), len(scenarios), summary)
+    metrics = problem.size_metrics
+    booleans = sum(variable.size for variable in problem.variables() if variable.attributes["boolean"])
+    LOGGER.info("plan_model complexity: variables=%d booleans=%d constraints=%d parameters=%d",
+                metrics.num_scalar_variables, booleans,
+                metrics.num_scalar_eq_constr + metrics.num_scalar_leq_constr,
+                sum(parameter.size for parameter in problem.parameters()))
+    problem.solve(solver=cp.HIGHS, warm_start=False)
+    LOGGER.info("plan_model solve: status=%s compile_seconds=%.3f solver_seconds=%.3f objective=%s",
+                problem.status, problem.compilation_time,
+                problem.solver_stats.solve_time or 0., problem.value)
     if problem.status not in (cp.OPTIMAL, cp.OPTIMAL_INACCURATE):
         raise ValueError(f"unable to find a feasible energy plan: {problem.status}")
 
@@ -159,16 +185,16 @@ def simulate_energy_plan(device_info: DeviceInfo, device_state: DeviceState, sce
     mode = (OperatingMode.CHARGE_PV_FIRST if next_action_force_battery_charge_rate.value >= MIN_FORCE_RATE_KW / 2
             else OperatingMode.DISCHARGE_PV_FIRST if next_action_force_battery_discharge_rate.value >= MIN_FORCE_RATE_KW / 2
             else OperatingMode.SELF_CONSUMPTION)
-    
+
     next_action = NextAction(
         mode = mode,
         force_battery_charge_rate=float(next_action_force_battery_charge_rate.value),
         force_battery_discharge_rate=float(next_action_force_battery_discharge_rate.value),
         charge_cut_off_soc_percent=float(next_action_charge_cut_off_soc_percent.value),
         discharge_cut_off_soc_percent=float(next_action_discharge_cut_off_soc_percent.value),
-    
+
     )
-    
+
     flows = {
         "solar_to_load": solar_to_load,
         "solar_to_battery": solar_to_battery,
@@ -209,46 +235,37 @@ def simulate_energy_plan(device_info: DeviceInfo, device_state: DeviceState, sce
         invalid_periods = df.index[((df["solar_kwh"] - solar_accounted_kwh).abs() > 0.001) | ((df["load_kwh"] - load_accounted_kwh).abs() > 0.001)].tolist()
         if invalid_periods:
             raise ValueError(f"energy balance check failed for {scenario_name} periods: {invalid_periods}")
-        
+
     return SimulationResult(
         next_action=next_action,
         results=dict_df_results,
     )
 
 
-def _projection_intervals(config: Config, starts_at: datetime) -> list[tuple[datetime, datetime]]:
-    """Keep the next action intact, then follow UTC-clock-aligned timestep lengths."""
-    
-    s = config.energy_plan
-    
-    timesteps = [s.projection_resolution_mins] * 4 + [30] * 6 + [60] * math.ceil(s.num_projection_hours)
 
+def _projection_intervals(config: Config, starts_at: datetime) -> list[tuple[datetime, datetime]]:
+    """Six hours of fine steps, then hourly, preserving the full elapsed horizon."""
+    s = config.energy_plan
     if s.num_projection_hours <= 0 or s.projection_resolution_mins <= 0:
         raise ValueError("projection duration and resolution must be greater than zero")
-    
+    fine_steps = math.ceil(360 / s.projection_resolution_mins)
+    timesteps = [s.projection_resolution_mins] * fine_steps + [60] * math.ceil(s.num_projection_hours)
     cursor = utc_instant(starts_at)
-
-    projection_end = cursor.replace(minute=0, second=0, microsecond=0) + timedelta(hours=s.num_projection_hours)
-    remaining = projection_end - cursor
-    
-    first_end = cursor + timedelta(minutes=timesteps[0])
-    until_hour = (-timedelta(minutes=first_end.minute, seconds=first_end.second,
-                             microseconds=first_end.microsecond)) % timedelta(hours=1)
-    
-    # Adjust only the fine portion so half-hour steps begin on a whole hour.
-    timesteps[:4] = [timesteps[0]] * (1 + math.ceil(until_hour / timedelta(minutes=timesteps[0])))
-    
+    projection_end = cursor + timedelta(hours=s.num_projection_hours)
+    fine_end = cursor.replace(minute=0, second=0, microsecond=0) + timedelta(hours=6)
     periods = []
     for index, minutes in enumerate(timesteps):
+        if index < fine_steps and cursor >= fine_end:
+            continue  # Drop fine blocks displaced by the starting minute.
         step = timedelta(minutes=minutes)
         if index:
             step -= timedelta(minutes=cursor.minute, seconds=cursor.second, microseconds=cursor.microsecond) % step
-        step = min(step, remaining)
-        next_end = cursor + step
+            if index < fine_steps:
+                step = min(step, fine_end - cursor)
+        next_end = min(cursor + step, projection_end)
         periods.append((cursor, next_end))
         cursor = next_end
-        remaining -= step
-        if not remaining:
+        if cursor == projection_end:
             break
     return periods
 
@@ -261,7 +278,7 @@ def score_simulation(
         config: Config,
         constraints: list[cp.Constraint],
         projection_starts_at: datetime,
-        durations: list[float] | None = None,
+        durations: list[float] | tuple[float, ...] | None = None,
     ) -> cp.Expression:
     """Maximise protection reward minus electricity cost, averaged over scenarios.
 
@@ -282,6 +299,7 @@ def score_simulation(
     for scenario, costs, levels in zip(scenarios, net_cost_flows, battery_levels):
         cost, protection = score_scenario(costs, levels, device, config, constraints, durations)
         scores.append(scenario.probability * (-cost + protection_value * protection / 100))
+
     return cp.sum(scores) / sum(s.probability for s in scenarios)
 
 
@@ -367,9 +385,9 @@ def _protection_segments(capacity: float, reserve: float) -> list[tuple[float, f
     return segments
 
 
-def _energy_until_soc(requested: cp.Expression, headroom: cp.Expression, big_m: float,constraints: list[cp.Constraint]) -> cp.Variable:
+def _energy_until_soc(requested: cp.Expression, headroom: cp.Expression, big_m: float | cp.Expression, constraints: list[cp.Constraint]) -> cp.Variable:
     """Exact min(requested, max(0, headroom)): stop at or beyond the SOC cut-off."""
-    
+
     energy = cp.Variable(nonneg=True)
     stopped, at_soc, full_rate = cp.Variable(3, boolean=True)
     constraints += [

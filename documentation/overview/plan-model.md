@@ -20,7 +20,7 @@ One joint optimisation evaluates nine solar/load scenarios. All share the next 1
 
 ### 2.1 Overview
 
-The plan model chooses the next 15-minute battery-control action to implement, considering its consequences over a rolling 24-hour horizon. The first action remains 15 minutes. Subsequent quarter-hours align to the UTC clock until a whole UTC hour, then six half-hours and hourly intervals follow. The projection ends 24 hours after the preceding full UTC hour; for example, 10:05 today to 10:00 tomorrow, without a final five-minute period. Tariffs, battery-limit schedules and midnight do not add periods; rates and limits are selected at each interval start. Forecast energy and hardware limits follow each interval duration; protection is averaged using elapsed time. Forecast intervals, scenarios and simulation results use UTC; local-time conversion is limited to tariff/scheduled-limit lookup and external reporting.
+The plan model chooses the next 15-minute battery-control action to implement, considering its consequences over a rolling 24-hour horizon. The first action remains 15 minutes. Subsequent quarter-hours align to the UTC clock through six hours measured from the preceding full UTC hour, then hourly intervals follow. The projection covers 24 elapsed hours from its starting instant; a final partial period preserves this horizon. A 10:05 start produces 43 periods: `[15*1, 10*1, 15*22, 60*18, 5*1]`. A whole-hour start produces 42 periods. Tariffs, battery-limit schedules and midnight do not add periods; rates and limits are selected at each interval start. Forecast energy and hardware limits follow each interval duration; protection is averaged using elapsed time. Forecast intervals, scenarios and simulation results use UTC; local-time conversion is limited to tariff/scheduled-limit lookup and external reporting.
 
 It evaluates nine combinations of low, medium and high solar and load forecasts. Every scenario shares the same next action. Scenario-specific outcomes and subsequent decisions can vary, subject to the system's physical constraints and command behaviour.
 
@@ -66,7 +66,7 @@ Alongside the action, return a possible day plan for each scenario, weighted exp
 
 ### 2.4 Replanning and Execution
 
-Only the next action is implemented. At each 15-minute update, initialise from measured battery state, refresh available inputs, rebuild the scenarios and solve again. Replanning does not imply refitting the fixed daily load forecast.
+Only the next action is implemented. At each 15-minute update, initialise from measured battery state, refresh available inputs, rebuild the scenarios and solve again. Each call builds and compiles a fresh problem using the current inputs; solver warm starts are disabled. Replanning does not imply refitting the fixed daily load forecast.
 
 A separate controller applies the command, checks acknowledgement/read-back and monitors actual behaviour. It retains remote EMS control between updates. Returning to normal operation must also reconcile changed global limits; changing mode alone is insufficient. Stale inputs, failed solves or failed writes must be visible and trigger a defined handover policy rather than silently extending an old action.
 
@@ -277,7 +277,7 @@ Represent the grid meter's net-flow behaviour so simultaneous import/export cann
 
 Planning uses physical kWh, kW, hours, EUR/kWh and EUR. Database measurements are integers scaled by 10,000; ORM reads remove that scale, while raw SQL must divide explicitly. Forecast.Solar W/Wh also require their own unit conversion.
 
-Use aware UTC instants and explicit start/end intervals, treating energy as belonging to `[start, end)`. Local dates, tariffs and daily forecast issuance use the configured timezone. The nominal 24-hour projection ends 24 elapsed hours after the preceding full UTC hour, so an off-hour start covers slightly less than 24 hours. A local day can contain 23 or 25 hours. Resampling must conserve energy and preserve distinct repeated hours.
+Use aware UTC instants and explicit start/end intervals, treating energy as belonging to `[start, end)`. Local dates, tariffs and daily forecast issuance use the configured timezone. The 24-hour projection ends 24 elapsed hours after its starting instant, including a final partial period when necessary. A local day can contain 23 or 25 hours. Resampling must conserve energy and preserve distinct repeated hours.
 
 Only observations and forecast vintages available at the planning cutoff are eligible. Keep raw and adjusted history separate and preserve cumulative-counter reset handling. Unknown data must not silently become observed zero. Validate coverage, freshness, finite values and non-negative solar/load before constructing scenarios; any fallback must be explicit in the output.
 

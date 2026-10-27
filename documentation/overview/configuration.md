@@ -16,7 +16,7 @@ Source: [config.yaml](../../config.yaml), [solar_model/config.py](../../solar_mo
 | `forecast` | Endpoint, timeout, collection interval 3600 seconds, array definitions and model tuning under `model_calibration_parameters` |
 | `dashboard` | Host `0.0.0.0`, port 8090, PV-string-to-panel mapping |
 | `tariffs.periods` | Effective-dated import/export schedules |
-| `energy_plan` | 24-hour projection, intact 15-minute action, UTC-clock-aligned fine intervals, six half-hours, then hourly intervals, load-history settings, reserve/protection preference, scheduled battery limits |
+| `energy_plan` | 24-hour projection, intact 15-minute action, six hours of UTC-clock-aligned fine intervals, then hourly intervals, load-history settings, reserve/protection preference, scheduled battery limits |
 | `additional_device_info` | Charge/discharge efficiencies, both shipped as 0.95 |
 
 These are current file values, not universal defaults. Preserve exact configuration spellings, including `data_retrival_schedule` and `full_updated_interval_seconds`.
@@ -36,7 +36,7 @@ The live collector passes these settings to solar correction and the fixed daily
 - YAML is deserialised through dacite into frozen dataclasses; lists become tuples. Required dataclass fields must be present.
 - Unknown keys are currently ignored: `dacite.Config` does **not** enable strict mode. This permits descriptive `comment`/period `name` keys but can hide misspellings.
 - Optional planning-rule tuples default empty; minimum battery also accepts `{comment: ..., rules: [...]}`. The optimiser currently still requires usable minimum/maximum rules.
-- Intervals/timeouts/history lengths must be positive. Projection resolution controls the intact first action and the fine intervals that follow until a whole UTC hour; six half-hours and then hourly steps follow. UTC clock alignment may shorten intervals after the first action. The endpoint is the preceding full UTC hour plus `num_projection_hours`; no final short interval is added to recover the starting minute. Tariff, battery-limit and midnight boundaries do not add splits.
+- Intervals/timeouts/history lengths must be positive. Projection resolution controls the intact first action and subsequent fine intervals through six hours measured from the preceding full UTC hour; hourly steps follow. UTC clock alignment may shorten intervals after the first action and displace fine blocks. The endpoint is the starting instant plus `num_projection_hours`; a final partial interval preserves the full elapsed horizon. At the shipped 15-minute resolution, 10:05 produces 43 periods. Tariff, battery-limit and midnight boundaries do not add splits.
 - Protection preference must be finite and between 0 and 100; efficiencies must be in `(0, 1]`.
 - Validation checks timezone/log level, URL shape, ports/device ID, coordinates/orientation, supported PV strings, and mapped panel IDs.
 - Array IDs are unique integers 1–4; names are labels. Empty arrays/mapping and non-positive `peak_kw` are not explicitly rejected.

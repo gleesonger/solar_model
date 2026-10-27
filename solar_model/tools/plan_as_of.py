@@ -5,6 +5,7 @@ import logging
 from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
+import pandas as pd
 from solar_model.config import load_config
 from solar_model.storage.connection import SolarDatabase, create_engine_for_database
 
@@ -38,6 +39,9 @@ def main() -> None:
         
         LOGGER.info("Loading planning inputs and solving scenarios")
         plans = plan_as_of(database, config, as_of).results
+        for plan in plans.values():
+            for column in ("starts_at", "ends_at"):
+                plan[column] = pd.to_datetime(plan[column], utc=True).dt.tz_convert(config.timezone)
 
         if args.output_timestep_min is not None:
             if args.output_timestep_min <= 0:

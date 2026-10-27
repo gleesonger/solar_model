@@ -1,6 +1,5 @@
 from __future__ import annotations
 from datetime import datetime, timedelta
-from solar_model.time_utils import add_elapsed, utc_instant
 from solar_model.planning.types import ForecastData, ForecastInterval, ScenarioData
 
 # Scenario name -> (energy multiplier, optional first/second half-hour split).
@@ -37,11 +36,11 @@ def _half_hour_intervals(intervals: tuple[ForecastInterval, ...]) -> list[tuple[
     """Sample one forecast series into contiguous half-hour energy intervals without extrapolation."""
     starts_at = intervals[0].starts_at
     ends_at = intervals[-1].ends_at
-    if starts_at.minute % 30 or starts_at.second or starts_at.microsecond or (utc_instant(ends_at) - utc_instant(starts_at)).total_seconds() % (30 * 60):
+    if starts_at.minute % 30 or starts_at.second or starts_at.microsecond or (ends_at - starts_at).total_seconds() % (30 * 60):
         raise ValueError("forecast coverage must start and end on a 30-minute boundary")
     half_hours = []
-    while utc_instant(starts_at) < utc_instant(ends_at):
-        ends_at_half_hour = add_elapsed(starts_at, timedelta(minutes=30))
+    while starts_at < ends_at:
+        ends_at_half_hour = starts_at + timedelta(minutes=30)
         half_hours.append((starts_at, ForecastData._sum_intervals(intervals, starts_at, ends_at_half_hour)))
         starts_at = ends_at_half_hour
     return half_hours
@@ -57,5 +56,5 @@ def _scenario_intervals(half_hours: list[tuple[datetime, float]], multiplier: fl
         if stress_split:
             total_kwh = first_kwh + second_kwh
             first_kwh, second_kwh = total_kwh * stress_split[0], total_kwh * stress_split[1]
-        intervals.extend((ForecastInterval(first_starts_at, add_elapsed(first_starts_at, timedelta(minutes=30)), first_kwh), ForecastInterval(second_starts_at, add_elapsed(second_starts_at, timedelta(minutes=30)), second_kwh)))
+        intervals.extend((ForecastInterval(first_starts_at, first_starts_at + timedelta(minutes=30), first_kwh), ForecastInterval(second_starts_at, second_starts_at + timedelta(minutes=30), second_kwh)))
     return intervals

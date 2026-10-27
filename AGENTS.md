@@ -13,4 +13,5 @@
 - `open_database()` can migrate and backfill a database. Use temporary databases or copies for development; do not use the user's `solar.db` for destructive verification.
 - Run commands from the repository root unless a guide specifies otherwise. Configuration and relative database paths resolve from the working directory.
 - Standard check: `python -m pytest -q`. Full collection is restored; do not exclude the legacy-named migration regression. Browser checks need a separate Playwright/browser installation and may otherwise skip.
+- Performance experiments must kill any simulation taking longer than five seconds, skip the remaining runs for that test case, and continue with other cases. Report timed-out cases as N/A unless the user explicitly sets a different limit.
 - For styling changes, follow [styling.md](documentation/overview/styling.md) and check desktop/mobile layouts, chart legends, and loading/stale states.

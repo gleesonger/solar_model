@@ -49,6 +49,8 @@ Keep concise explanations in `overview/`, detailed code/data contracts in `imple
 | [Documentation development trial](reviews/documentation-development-trial.md) | Fresh-agent proposals tested against source, and resulting documentation gaps |
 | [Download performance](reviews/download-performance.md) | Profiling findings, SQL/Excel optimisations, measured timings, and regression coverage |
 | [Recent summary performance](reviews/recent-summary-performance.md) | Native SQL implementation, profiling, before/after timings and parity checks |
+| [Planning setup performance](reviews/planning-it-performance.md) | Independent setup optimisations, remote timings, parameter reuse and validation |
+| [Planning alignment investigation](reviews/planning-alignment-investigation.md) | Controlled grid/forecast comparisons, solver-input equality and auxiliary MIP work |
 | [Schema reference](reference/schema.md) | Every declared database column, key, type, and index |
 | [Metric semantics](reference/metric-semantics.md) | Units, signs, missing values, time attribution and chart/download aggregation differences |
 

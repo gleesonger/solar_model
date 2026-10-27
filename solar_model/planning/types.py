@@ -61,9 +61,14 @@ class ForecastPoint:
 
 @dataclass(frozen=True)
 class ForecastInterval:
+    """Forecast energy over an aware interval, normalised to UTC at entry."""
     starts_at: datetime
     ends_at: datetime
     kwh: float
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "starts_at", utc_instant(self.starts_at))
+        object.__setattr__(self, "ends_at", utc_instant(self.ends_at))
 
 class ForecastData:
     def __init__(self, solar: Iterable[ForecastInterval], load: Iterable[ForecastInterval]) -> None:
@@ -80,25 +85,24 @@ class ForecastData:
 
     @staticmethod
     def _validate_intervals(intervals: Iterable[ForecastInterval], name: str) -> tuple[ForecastInterval, ...]:
-        ordered = tuple(sorted(intervals, key=lambda interval: utc_instant(interval.starts_at)))
+        ordered = tuple(sorted(intervals, key=lambda interval: interval.starts_at))
         if not ordered:
             raise ValueError(f"{name} forecast must contain at least one interval")
         for previous, current in zip(ordered, ordered[1:]):
-            if utc_instant(current.starts_at) < utc_instant(previous.ends_at):
+            if current.starts_at < previous.ends_at:
                 raise ValueError(f"{name} forecast intervals must not overlap")
-            if utc_instant(current.starts_at) > utc_instant(previous.ends_at):
+            if current.starts_at > previous.ends_at:
                 raise ValueError(f"{name} forecast intervals contain a gap")
-        if any(utc_instant(interval.ends_at) <= utc_instant(interval.starts_at) for interval in ordered):
+        if any(interval.ends_at <= interval.starts_at for interval in ordered):
             raise ValueError(f"{name} forecast intervals must end after they start")
         return ordered
 
     @staticmethod
     def _sum_intervals(intervals: tuple[ForecastInterval, ...], start: datetime, end: datetime) -> float:
-        start, end = utc_instant(start), utc_instant(end)
         cursor = start
         total_kwh = 0.0
         for interval in intervals:
-            interval_start, interval_end = utc_instant(interval.starts_at), utc_instant(interval.ends_at)
+            interval_start, interval_end = interval.starts_at, interval.ends_at
             if interval_end <= cursor:
                 continue
             if interval_start > cursor:

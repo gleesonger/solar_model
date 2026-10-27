@@ -176,11 +176,14 @@ def test_reference_range_rejects_empty_or_reversed_range(offset):
         _reference_import_rate(config, start, start + timedelta(hours=offset))
 
 
-def test_protection_is_weighted_by_interval_duration():
+@pytest.mark.parametrize("vector", [False, True])
+def test_protection_is_weighted_by_interval_duration(vector):
     _, device, config, _ = scoring_inputs()
     constraints = []
-    _, protection = score_scenario([cp.Constant(0.), cp.Constant(0.)],
-        [cp.Constant(4.), cp.Constant(0.)], device, config, constraints, [.25, 1.])
+    costs = [cp.Constant(0.), cp.Constant(0.)]
+    levels = [cp.Constant(4.), cp.Constant(0.)]
+    _, protection = score_scenario(cp.hstack(costs) if vector else costs,
+        cp.hstack(levels) if vector else levels, device, config, constraints, [.25, 1.])
     problem = cp.Problem(cp.Maximize(protection), constraints)
     problem.solve(solver=cp.HIGHS)
     assert problem.value == pytest.approx(70 * .25 / 1.25)

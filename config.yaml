@@ -119,7 +119,7 @@ forecast:
 
 energy_plan:
   num_projection_hours: 24
-  projection_resolution_mins: 15         # First action interval; later intervals are hourly
+  projection_resolution_mins: 15         # First action and fine grid; align to hour, then six half-hours, then hourly
   preferred_reserve_kwh: 4               # Target stored kWh measured from zero
 
 

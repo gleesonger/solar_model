@@ -28,7 +28,7 @@ def simulate_energy_plan(device_info: DeviceInfo, device_state: DeviceState, sce
 
     try:
         result = _simulate_energy_plan(device_info, device_state, scenarios, config, projection_starts_at)
-        LOGGER.info("plan_model end: status=success elapsed_seconds=%.3f", perf_counter() - begin)
+        print(f"plan_model end: status=success elapsed_seconds={perf_counter() - begin:.3f}", flush=True)
         return result
     except Exception:
         LOGGER.exception("plan_model end: status=failed elapsed_seconds=%.3f", perf_counter() - begin)
@@ -174,9 +174,8 @@ def _simulate_energy_plan(device_info: DeviceInfo, device_state: DeviceState, sc
                 metrics.num_scalar_eq_constr + metrics.num_scalar_leq_constr,
                 sum(parameter.size for parameter in problem.parameters()))
     problem.solve(solver=cp.HIGHS, warm_start=False)
-    LOGGER.info("plan_model solve: status=%s compile_seconds=%.3f solver_seconds=%.3f objective=%s",
-                problem.status, problem.compilation_time,
-                problem.solver_stats.solve_time or 0., problem.value)
+    print(f"plan_model solve: status={problem.status} compile_seconds={problem.compilation_time:.3f} "
+          f"solver_seconds={problem.solver_stats.solve_time or 0.:.3f} objective={problem.value}", flush=True)
     if problem.status not in (cp.OPTIMAL, cp.OPTIMAL_INACCURATE):
         raise ValueError(f"unable to find a feasible energy plan: {problem.status}")
 
@@ -244,29 +243,28 @@ def _simulate_energy_plan(device_info: DeviceInfo, device_state: DeviceState, sc
 
 
 def _projection_intervals(config: Config, starts_at: datetime) -> list[tuple[datetime, datetime]]:
-    """Six hours of fine steps, then hourly, preserving the full elapsed horizon."""
+    """Align configured steps from the preceding UTC hour; keep the first intact."""
     s = config.energy_plan
-    if s.num_projection_hours <= 0 or s.projection_resolution_mins <= 0:
+    timesteps = s.projection_resolution_mins
+    if s.num_projection_hours <= 0 or not timesteps or any(minutes <= 0 for minutes in timesteps):
         raise ValueError("projection duration and resolution must be greater than zero")
-    fine_steps = math.ceil(360 / s.projection_resolution_mins)
-    timesteps = [s.projection_resolution_mins] * fine_steps + [60] * math.ceil(s.num_projection_hours)
     cursor = utc_instant(starts_at)
     projection_end = cursor + timedelta(hours=s.num_projection_hours)
-    fine_end = cursor.replace(minute=0, second=0, microsecond=0) + timedelta(hours=6)
-    periods = []
-    for index, minutes in enumerate(timesteps):
-        if index < fine_steps and cursor >= fine_end:
-            continue  # Drop fine blocks displaced by the starting minute.
-        step = timedelta(minutes=minutes)
-        if index:
-            step -= timedelta(minutes=cursor.minute, seconds=cursor.second, microseconds=cursor.microsecond) % step
-            if index < fine_steps:
-                step = min(step, fine_end - cursor)
-        next_end = min(cursor + step, projection_end)
-        periods.append((cursor, next_end))
-        cursor = next_end
+    boundary = cursor.replace(minute=0, second=0, microsecond=0)
+    first_end = min(cursor + timedelta(minutes=timesteps[0]), projection_end)
+    periods = [(cursor, first_end)]
+    cursor = first_end
+    for minutes in timesteps:
+        boundary += timedelta(minutes=minutes)
         if cursor == projection_end:
             break
+        if boundary <= cursor:
+            continue  # Drop boundaries overtaken by the intact first action.
+        next_end = min(boundary, projection_end)
+        periods.append((cursor, next_end))
+        cursor = next_end
+    if cursor < projection_end:
+        periods.append((cursor, projection_end))
     return periods
 
 

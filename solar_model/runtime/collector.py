@@ -55,9 +55,9 @@ def main() -> None:
                     client = None
 
                 collect_forecast_once(
-                    session, database, config.forecast.arrays, config.forecast.endpoint,
-                    config.forecast.timeout_seconds, config.timezone, config.forecast.interval_seconds,
-                    config.forecast.model_calibration_parameters,
+                    session, database, config.forecast.solar.arrays, config.forecast.solar.endpoint,
+                    config.forecast.solar.timeout_seconds, config.timezone, config.forecast.solar.interval_seconds,
+                    config.forecast.models,
                 )
                 sleep_until_next_interval(data_retrival_schedule.full_updated_interval_seconds)
     finally:

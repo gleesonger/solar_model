@@ -33,6 +33,7 @@ If either child launch fails, `start_processes()` terminates and reaps any child
 ```text
 load_config(path='config.yaml')
   yaml.safe_load(file) -> Python mapping/lists/scalars
+  expand projection_resolution_mins repetitions (e.g. 15*24)
   normalise minimum_battery_kwh wrapper if supplied
   rename each tariff period's import key to import_
   dacite.from_dict(Config, cast=[tuple])
@@ -46,17 +47,18 @@ The intermediate YAML object is mutable. The normalisation steps alter it before
 # Abbreviated raw YAML-derived mapping
 {
     "timezone": "Europe/Dublin",
-    "forecast": {"arrays": [{"panel_id": 1, "name": "East", ...}], ...},
+    "forecast": {"solar": {"arrays": [{"panel_id": 1, "name": "East", ...}], ...}, "load": {...}},
     "tariffs": {"periods": [{"effective_from": "2000-01-01",
                              "import": [...], "export": [...]}]},
     ...,
 }
 
 # Corresponding typed relationships
-config.forecast.arrays                 # tuple[SolarArrayConfig, ...]
+config.forecast.solar.arrays                 # tuple[SolarArrayConfig, ...]
 config.tariffs.periods                 # tuple[TariffPeriod, ...]
 config.tariffs.periods[0].import_       # tuple[TariffRule, ...]
-config.dashboard.actuals_to_forecast   # dict[str, int], e.g. {'pv1': 1}
+config.dashboard.actuals_to_forecast   # dict[str, str], e.g. {'pv1': 'East'}
+config.actuals_to_forecast_panel_ids   # resolves names to IDs for queries/charts
 ```
 
 | `Config` branch | Important nested types and consumers |
@@ -73,7 +75,7 @@ config.dashboard.actuals_to_forecast   # dict[str, int], e.g. {'pv1': 1}
 
 Validation checks complete weekday/minute tariff coverage, effective-date ordering, positive timing/history settings, projection divisibility, weights, efficiencies, mappings, URL shape and connection values. See [configuration overview](../overview/configuration.md) for rules and gaps; this guide does not duplicate every range check.
 
-`config.forecast.model_calibration_parameters` adds three frozen model blocks (`solar_day_ahead`, `solar_intraday`, `load`), each with `lookback`, `halflife`, and `prior_effective_observations`. Dataclass defaults preserve older YAML without these blocks; model constructors validate finite positive times and decimal fraction ranges. The collector forwards the loaded blocks to solar correction and fixed daily load forecasting, while the load and rebuild CLIs load `--config` themselves. No forecast model reads YAML per observation. See [configuration](../overview/configuration.md) for units, null semantics and decimal fraction interpretation.
+`ForecastConfig` contains `solar: SolarForecastConfig` and `load: LoadForecastConfig`. Solar owns provider scheduling/connection settings, arrays and day-ahead/intraday calibration. Load owns house-load calibration. `config.forecast.models` assembles the unchanged `ForecastModelsConfig` bundle passed to calculation/services APIs. Validation checks model-specific constraints while loading. Omitted calibration blocks within the nested layout retain defaults; the old flat YAML layout must be updated. No forecast model reads YAML per observation.
 
 ## 3. Collector-owned objects
 

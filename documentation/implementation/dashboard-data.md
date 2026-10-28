@@ -240,3 +240,5 @@ Native `SUM`/`AVG` handle numeric fields. For each last-reading field, `MAX(CASE
 The retained `load_analysis_source_data()`/`AnalysisSourceData` and pandas export helpers serve older/reference paths and regression comparisons; current downloads do not materialise those source-row lists. Logs report the native SQL/read duration, data preparation, and file-generation time. See the [performance investigation](../reviews/download-performance.md) for measured results and limits.
 
 Older `load_telemetry`, historical ORM/pandas frame helpers and `custom_chart_preview_from_frames` remain in `storage/queries/dashboard.py` for current consumers and independent SQL test comparisons. The mounted `AnalysisTab` uses `load_analysis_range` and shared SQL. The unmounted Hourly component and its unused range/navigation helpers have been removed.
+
+`dashboard.actuals_to_forecast` maps PV strings to unique forecast array names, such as `pv1: East`. Recent live labels use these names directly; `Config.actuals_to_forecast_panel_ids` resolves them for ID-based storage queries, allocation and chart columns. This configuration change needs no database migration.

@@ -35,12 +35,11 @@ class RecentTab:
         self.live_collector = live_collector
         self.warnings = warnings
         self.timezone = ZoneInfo(config.timezone)
-        array_names = {array.panel_id: array.name for array in config.forecast.arrays}
         self._summary_latest_keys = {
             "Solar": "solar",
             **{
-                f" - {array_names[panel_id]}": pv_string
-                for pv_string, panel_id in config.dashboard.actuals_to_forecast.items()
+                f" - {array_name}": pv_string
+                for pv_string, array_name in config.dashboard.actuals_to_forecast.items()
             },
             **{label: key for label, key in SUMMARY_LATEST_KEYS.items() if label not in {"Solar", "Load"}},
         }

@@ -29,7 +29,7 @@ def main() -> None:
     args = parser.parse_args()
     config = load_config(args.config)
     timezone = ZoneInfo(args.timezone or config.timezone)
-    result = evaluate(load_hourly_house_load(args.database or config.database.path, timezone), args.start, args.end, timezone, config.forecast.model_calibration_parameters.load)
+    result = evaluate(load_hourly_house_load(args.database or config.database.path, timezone), args.start, args.end, timezone, config.forecast.load.model_calibration_parameters)
     if result.empty:
         print("No load observations available for the requested period.")
         return

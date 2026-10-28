@@ -18,7 +18,7 @@ Set `actuals.data_retrival_schedule.full_updated_interval_seconds` in `config.ya
 
 Set `actuals.data_retrival_schedule.live_update_interval_seconds` to change the live Modbus polling and browser refresh interval; the shipped value is `1` second.
 The dashboard polls live power once per second only while at least one browser is connected.
-Set `forecast.interval_seconds` in `config.yaml` to change the minimum elapsed time between forecast scans; it is configured for `3600` seconds.
+Set `forecast.solar.interval_seconds` in `config.yaml` to change the minimum elapsed time between forecast scans; it is configured for `3600` seconds.
 
 Configuration loading checks required fields, types, and supported values during startup. Unknown YAML keys are currently ignored. See [configuration](documentation/overview/configuration.md) for validation and optional fields.
 
@@ -74,7 +74,7 @@ Compare raw and adjusted forecast power against actual plant PV output with the 
 python -m solar_model.tools.evaluate_forecasts --database solar.db --date 2026-09-15
 ```
 
-Each forecast array requires a unique integer `panel_id` from `1` through `4`; its `name` is only used as a display label. `dashboard.actuals_to_forecast` associates inverter PV inputs with those panel IDs. For example, `pv1: 1` compares inverter string PV1 with the forecast configured with `panel_id: 1`.
+Each forecast array requires a unique integer `panel_id` from `1` through `4` and a unique `name`. `dashboard.actuals_to_forecast` associates inverter PV inputs with array names. For example, `pv1: East` compares inverter string PV1 with the forecast array named `East`. Names must match exactly; storage and chart columns continue to use panel IDs internally.
 
 ## Modbus register map
 

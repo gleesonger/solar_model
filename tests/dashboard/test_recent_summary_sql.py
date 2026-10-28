@@ -158,7 +158,7 @@ def test_snapshot_shares_the_two_summary_tables(monkeypatch):
     monkeypatch.setattr(data, "load_day", lambda *args: pd.DataFrame())
     monkeypatch.setattr(data, "load_latest_collection_local", lambda *args: None)
     config = SimpleNamespace(timezone="UTC", database=SimpleNamespace(path="unused"),
-        forecast=SimpleNamespace(arrays=ARRAYS), dashboard=SimpleNamespace(actuals_to_forecast={}))
+        forecast=SimpleNamespace(solar=SimpleNamespace(arrays=ARRAYS)), actuals_to_forecast_panel_ids={}, dashboard=SimpleNamespace(actuals_to_forecast={}))
     result = snapshot.load_recent_data(config, SimpleNamespace(snapshot=lambda: None))
     assert len(calls) == 1
     assert result[3] is daily

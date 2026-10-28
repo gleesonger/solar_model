@@ -202,7 +202,7 @@ Forecasts supply interval solar and load energy for the planning horizon. Produc
 
 Combine all solar/load pairs. Under the initial independence assumption, $w_{ij}=w_i^{solar}w_j^{load}$, giving each of nine scenarios weight $1/9$. Validate non-negative weights and normalise each dimension to one. These are adjustable planning weights, not calibrated probabilities or confidence intervals. There is no timing redistribution in this initial scenario model.
 
-The existing forecast parameter names are `lookback`, `halflife`, and `prior_effective_observations`, under `forecast.model_calibration_parameters`. Despite its name, the last parameter is a decimal influence fraction $f$, not an observation count. Derived prior strength is $a=1/f-1$; evidence $n$ receives influence $n/(n+a)$.
+The existing forecast parameter names are `lookback`, `halflife`, and `prior_effective_observations`, under `forecast.solar.model_calibration_parameters.day_ahead`/`intraday` and `forecast.load.model_calibration_parameters`. Despite its name, the last parameter is a decimal influence fraction $f$, not an observation count. Derived prior strength is $a=1/f-1$; evidence $n$ receives influence $n/(n+a)$.
 
 ### 4.2 Solar Day-ahead Forecast
 

@@ -70,28 +70,50 @@ class ForecastModelsConfig:
 
     def __post_init__(self) -> None:
         if self.solar_day_ahead.lookback is None or self.solar_day_ahead.prior_effective_observations is not None:
-            raise ValueError("forecast.model_calibration_parameters.solar_day_ahead requires lookback and a null prior_effective_observations")
+            raise ValueError("forecast.solar.model_calibration_parameters.day_ahead requires lookback and a null prior_effective_observations")
         if self.load.lookback is None or self.load.prior_effective_observations is None:
-            raise ValueError("forecast.model_calibration_parameters.load requires lookback and prior_effective_observations")
+            raise ValueError("forecast.load.model_calibration_parameters requires lookback and prior_effective_observations")
         if self.solar_intraday.prior_effective_observations is None:
-            raise ValueError("forecast.model_calibration_parameters.solar_intraday requires prior_effective_observations")
+            raise ValueError("forecast.solar.model_calibration_parameters.intraday requires prior_effective_observations")
 
 
 @dataclass(frozen=True)
-class ForecastConfig:
+class SolarForecastModelsConfig:
+    day_ahead: ForecastModelConfig = field(default_factory=lambda: ForecastModelConfig(56., 21., None))
+    intraday: ForecastModelConfig = field(default_factory=lambda: ForecastModelConfig(None, 1., 1.0 / 3.0))
+
+
+@dataclass(frozen=True)
+class SolarForecastConfig:
     interval_seconds: int
     timeout_seconds: float
     endpoint: str
     arrays: tuple[SolarArrayConfig, ...]
-    model_calibration_parameters: ForecastModelsConfig = field(default_factory=ForecastModelsConfig)
+    model_calibration_parameters: SolarForecastModelsConfig = field(default_factory=SolarForecastModelsConfig)
+
+
+@dataclass(frozen=True)
+class LoadForecastConfig:
+    model_calibration_parameters: ForecastModelConfig = field(default_factory=lambda: ForecastModelConfig(42., 14., 0.2))
+
+
+@dataclass(frozen=True)
+class ForecastConfig:
+    solar: SolarForecastConfig
+    load: LoadForecastConfig = field(default_factory=LoadForecastConfig)
+
+    @property
+    def models(self) -> ForecastModelsConfig:
+        """Supply the model bundle shared by forecasting calculations and services."""
+        return ForecastModelsConfig(self.solar.model_calibration_parameters.day_ahead,
+                                    self.solar.model_calibration_parameters.intraday,
+                                    self.load.model_calibration_parameters)
 
 
 @dataclass(frozen=True)
 class EnergyPlanConfig:
     num_projection_hours: int
-    projection_resolution_mins: int
-    load_forecast_historical_lookback_window_days: int
-    load_forecast_historical_lookback_halflife_days: int
+    projection_resolution_mins: tuple[int, ...]
     protection_preference: float
     minimum_battery_kwh: tuple[TariffRule, ...] = ()
     maximum_battery_kwh: tuple[TariffRule, ...] = ()
@@ -109,7 +131,7 @@ class AdditionalDeviceInfoConfig:
 class DashboardConfig:
     port: int
     host: str
-    actuals_to_forecast: dict[str, int]
+    actuals_to_forecast: dict[str, str]
 
 
 @dataclass(frozen=True)
@@ -167,6 +189,12 @@ class Config:
     tariffs: TariffsConfig
     actuals: ActualsConfig
 
+    @property
+    def actuals_to_forecast_panel_ids(self) -> dict[str, int]:
+        """Resolve configured array names for ID-based storage and chart columns."""
+        panel_ids = {array.name: array.panel_id for array in self.forecast.solar.arrays}
+        return {pv: panel_ids[name] for pv, name in self.dashboard.actuals_to_forecast.items()}
+
 
 def load_config(path: str | Path = "config.yaml") -> Config:
     with open(path, encoding="utf-8") as file:
@@ -175,6 +203,20 @@ def load_config(path: str | Path = "config.yaml") -> Config:
     try:
         energy_plan_data = raw_config.get("energy_plan") if isinstance(raw_config, dict) else None
         if isinstance(energy_plan_data, dict):
+            resolutions = energy_plan_data.get("projection_resolution_mins")
+            if isinstance(resolutions, list):
+                expanded = []
+                for entry in resolutions:
+                    if isinstance(entry, str):
+                        minutes_text, separator, count_text = entry.partition("*")
+                        minutes = int(minutes_text)
+                        count = int(count_text) if separator else 1
+                        if minutes <= 0 or count <= 0:
+                            raise ValueError("projection_resolution_mins repetitions must be positive")
+                        expanded.extend([minutes] * count)
+                    else:
+                        expanded.append(entry)
+                energy_plan_data["projection_resolution_mins"] = expanded
             backup_data = energy_plan_data.get("minimum_battery_kwh")
             if isinstance(backup_data, dict):
                 # This is documentation for people editing config.yaml, not configuration.
@@ -205,20 +247,22 @@ def validate_config(config: Config) -> None:
     if (
         config.actuals.data_retrival_schedule.live_update_interval_seconds <= 0
         or config.actuals.data_retrival_schedule.full_updated_interval_seconds <= 0
-        or config.forecast.interval_seconds <= 0
+        or config.forecast.solar.interval_seconds <= 0
     ):
         raise ValueError("scheduler, live, and forecast intervals must be greater than zero")
 
-    if config.forecast.timeout_seconds <= 0:
+    if config.forecast.solar.timeout_seconds <= 0:
         raise ValueError("forecast timeout must be greater than zero")
 
+    config.forecast.models  # Validate model-specific requirements across both sections.
     energy_plan = config.energy_plan
     if not math.isfinite(energy_plan.preferred_reserve_kwh) or energy_plan.preferred_reserve_kwh <= 0:
         raise ValueError("preferred_reserve_kwh must be finite and greater than zero")
-    if energy_plan.num_projection_hours <= 0 or energy_plan.projection_resolution_mins <= 0:
-        raise ValueError("energy_plan projection duration and resolution must be greater than zero")
-    if energy_plan.load_forecast_historical_lookback_window_days <= 0 or energy_plan.load_forecast_historical_lookback_halflife_days <= 0:
-        raise ValueError("energy_plan load forecast history settings must be greater than zero")
+    if (energy_plan.num_projection_hours <= 0 or not energy_plan.projection_resolution_mins
+            or any(minutes <= 0 for minutes in energy_plan.projection_resolution_mins)):
+        raise ValueError("energy_plan projection duration and resolution entries must be greater than zero")
+    if sum(energy_plan.projection_resolution_mins) < energy_plan.num_projection_hours * 60:
+        raise ValueError("projection_resolution_mins must cover num_projection_hours")
     if not math.isfinite(energy_plan.protection_preference) or not 0 <= energy_plan.protection_preference <= 100:
         raise ValueError("energy_plan.protection_preference must be finite and between 0 and 100")
     additional_device_info = config.additional_device_info
@@ -259,11 +303,11 @@ def validate_config(config: Config) -> None:
         validate_tariff_rules(f"period {period.effective_from} import", period.import_)
         validate_tariff_rules(f"period {period.effective_from} export", period.export)
 
-    endpoint = urlparse(config.forecast.endpoint)
+    endpoint = urlparse(config.forecast.solar.endpoint)
     if endpoint.scheme not in {"http", "https"} or not endpoint.netloc:
-        raise ValueError("forecast.endpoint must be an HTTP or HTTPS URL")
+        raise ValueError("forecast.solar.endpoint must be an HTTP or HTTPS URL")
 
-    panel_ids = [array.panel_id for array in config.forecast.arrays]
+    panel_ids = [array.panel_id for array in config.forecast.solar.arrays]
     supported_panel_ids = {1,2,3,4}
     invalid_panel_ids = set(panel_ids) - supported_panel_ids
     if invalid_panel_ids:
@@ -273,7 +317,7 @@ def validate_config(config: Config) -> None:
     if len(panel_ids) != len(set(panel_ids)):
         raise ValueError("forecast panels must be unique")
 
-    for array in config.forecast.arrays:
+    for array in config.forecast.solar.arrays:
         if not -90 <= array.latitude <= 90:
             raise ValueError(f"forecast panel {array.panel_id} latitude must be between -90 and 90")
 
@@ -296,10 +340,12 @@ def validate_config(config: Config) -> None:
     if invalid_pv_strings:
         raise ValueError(f"unsupported PV strings: {', '.join(sorted(invalid_pv_strings))}")
 
-    unknown_panel_ids = set(config.dashboard.actuals_to_forecast.values()) - set(panel_ids)
-    if unknown_panel_ids:
-        unknown = ", ".join(str(panel_id) for panel_id in sorted(unknown_panel_ids))
-        raise ValueError(f"dashboard mappings use unknown panel IDs: {unknown}")
+    array_names = [array.name for array in config.forecast.solar.arrays]
+    if len(array_names) != len(set(array_names)):
+        raise ValueError("forecast array names must be unique")
+    unknown_names = set(config.dashboard.actuals_to_forecast.values()) - set(array_names)
+    if unknown_names:
+        raise ValueError(f"dashboard mappings use unknown array names: {', '.join(sorted(unknown_names))}")
 
     if not 1 <= config.actuals.modbus.port <= 65535:
         raise ValueError("Modbus port must be between 1 and 65535")

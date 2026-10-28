@@ -118,7 +118,7 @@ def test_failed_profile_insert_rolls_back_and_can_retry(tmp_path):
         db.close()
 
 
-def test_planning_uses_the_same_house_forecaster_and_prorates_edges(tmp_path):
+def test_planning_house_forecast_covers_whole_hours_for_scenarios(tmp_path):
     from dataclasses import replace
     from solar_model.config import load_config
     from solar_model.storage.queries.planning import load_house_load_intervals
@@ -134,7 +134,13 @@ def test_planning_uses_the_same_house_forecaster_and_prorates_edges(tmp_path):
         model.refresh_daily_house_load_forecast(db, as_of, "UTC")
         assert [row[1] for row in read_profile(db)] == [1.] * 24
         intervals = load_house_load_intervals(db, as_of, config)
-        assert [interval.kwh for interval in intervals] == [.5, 1., .5]
+        assert [interval.kwh for interval in intervals] == [1., 1., 1.]
+        from solar_model.planning.types import ForecastData
+        from solar_model.planning.scenarios import create_scenarios
+        forecast = ForecastData(intervals, intervals)
+        scenarios = create_scenarios(forecast)
+        assert len(scenarios) == 9
+        assert forecast.sum(as_of, as_of + timedelta(hours=2)).load_kwh == 2.
     finally:
         db.close()
 

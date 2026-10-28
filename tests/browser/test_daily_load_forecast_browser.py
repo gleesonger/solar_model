@@ -33,8 +33,8 @@ from solar_model.storage.queries.dashboard import ENERGY_SUMMARY_COLUMNS
 @ui.page('/')
 def index():
     render_dashboard_styles()
-    config = SimpleNamespace(timezone="UTC", forecast=SimpleNamespace(arrays=()),
-        dashboard=SimpleNamespace(actuals_to_forecast={{}}))
+    config = SimpleNamespace(timezone="UTC", forecast=SimpleNamespace(solar=SimpleNamespace(arrays=())),
+        actuals_to_forecast_panel_ids={{}}, dashboard=SimpleNamespace(actuals_to_forecast={{}}))
     reading = LivePowerData("2026-10-26T00:30:00Z", "2026-10-26T00:30:00Z", {{"load": .35, "battery_available_energy_kwh": 5., "battery_soc_percent": 50.}})
     tab = RecentTab(config, SimpleNamespace(), DashboardElements(), SimpleNamespace(snapshot=lambda: reading),
         SimpleNamespace(update_full=lambda *args: None, update_live=lambda *args: None))

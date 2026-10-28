@@ -93,7 +93,7 @@ tuple[pd.Timestamp, dict[str, dict[str, float]]] | None
 # inner mapping: adjusted-field names in physical units
 ```
 
-Model settings are passed as `ForecastModelsConfig` from `config.forecast.model_calibration_parameters`; its three `ForecastModelConfig` children share `lookback`, `halflife`, and `prior_effective_observations`. The collector passes the startup configuration through `refresh_adjusted_forecast()` into `calculate_adjusted_forecast()`. The rebuild CLI also loads and passes YAML settings. Direct pure-helper calls without settings retain the original defaults, defined in `solar_model/config.py`.
+Model settings are passed as `ForecastModelsConfig` from `config.forecast.models`; its three `ForecastModelConfig` children share `lookback`, `halflife`, and `prior_effective_observations`. The collector passes the startup configuration through `refresh_adjusted_forecast()` into `calculate_adjusted_forecast()`. The rebuild CLI also loads and passes YAML settings. Direct pure-helper calls without settings retain the original defaults, defined in `solar_model/config.py`.
 
 ## 4. Calibration structures
 
@@ -130,7 +130,7 @@ prior_strength = 1 / intraday.prior_effective_observations - 1
 strength = effective / (effective + prior_strength)
 ```
 
-`forecast.model_calibration_parameters.solar_intraday.prior_effective_observations` is a decimal influence fraction: `0.3333` in the shipped YAML gives derived strength about 2.0003. The code default of one-third preserves the previous strength of 2 when settings are omitted. Derived strengths are not rounded. Settings are validated when YAML is loaded. `lookback: null` retains all eligible completed observations from the current day; a positive numeric lookback adds an inclusive UTC-age limit in hours. The configured `halflife` controls residual recency in hours. The derived strength is evidence, not a time duration.
+`forecast.solar.model_calibration_parameters.intraday.prior_effective_observations` is a decimal influence fraction: `0.3333` in the shipped YAML gives derived strength about 2.0003. The code default of one-third preserves the previous strength of 2 when settings are omitted. Derived strengths are not rounded. Settings are validated when YAML is loaded. `lookback: null` retains all eligible completed observations from the current day; a positive numeric lookback adds an inclusive UTC-age limit in hours. The configured `halflife` controls residual recency in hours. The derived strength is evidence, not a time duration.
 
 It returns `(weighted residual score, strength, observation count)`, or three zeros if none qualify. Current/open-hour actuals are excluded by the strict hour cutoff. For a future local target day, residual and strength are explicitly zero.
 
@@ -187,3 +187,5 @@ The operational solar rebuild command rebuilds solar fields only. It does not cr
 - Performance evaluation reads raw storage, normalises W to kW, joins target-hour observations, and evaluates vintage/target pairs.
 - Planning selects one collection at the as-of cutoff and converts cumulative Wh into its own end-labelled intervals; see [planning.md](planning.md).
 - Raw values are never changed by adjusted writers. Raw collection itself can merge/update panel fields at the same composite key; “immutable raw” describes model ownership, not a database immutability constraint.
+
+Forecast configuration is grouped into `forecast.solar` (provider endpoint, timeout, scan interval, arrays, day-ahead/intraday calibration) and `forecast.load` (house-load calibration). Collector and replay callers use `config.forecast.models` to assemble the unchanged calculation bundle; planning and load evaluation read `config.forecast.load.model_calibration_parameters` directly. Grouping changes neither model values nor stored forecast semantics.

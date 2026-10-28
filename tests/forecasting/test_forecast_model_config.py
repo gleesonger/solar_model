@@ -24,18 +24,20 @@ def write_config(tmp_path, data):
     return path
 
 
-def test_yaml_model_settings_and_legacy_defaults(tmp_path, config_data):
+def test_nested_yaml_model_settings_and_omitted_defaults(tmp_path, config_data):
     custom = ForecastModelsConfig(
         solar_day_ahead=ForecastModelConfig(7., 2., None),
         solar_intraday=ForecastModelConfig(2., 0.5, 0.5),
         load=ForecastModelConfig(14., 3., 0.25),
     )
-    config_data["forecast"]["model_calibration_parameters"] = asdict(custom)
+    config_data["forecast"]["solar"]["model_calibration_parameters"] = {"day_ahead": asdict(custom.solar_day_ahead), "intraday": asdict(custom.solar_intraday)}
+    config_data["forecast"]["load"]["model_calibration_parameters"] = asdict(custom.load)
     config = load_config(write_config(tmp_path, config_data))
-    assert config.forecast.model_calibration_parameters == custom
-    assert config.forecast.model_calibration_parameters.load.prior_strength == 3.
-    del config_data["forecast"]["model_calibration_parameters"]
-    legacy = load_config(write_config(tmp_path, config_data)).forecast.model_calibration_parameters
+    assert config.forecast.models == custom
+    assert config.forecast.load.model_calibration_parameters.prior_strength == 3.
+    del config_data["forecast"]["solar"]["model_calibration_parameters"]
+    del config_data["forecast"]["load"]["model_calibration_parameters"]
+    legacy = load_config(write_config(tmp_path, config_data)).forecast.models
     assert legacy == ForecastModelsConfig()
     assert legacy.load.prior_strength == 4.
     assert legacy.solar_intraday.prior_strength == 2.
@@ -52,7 +54,8 @@ def test_yaml_model_settings_and_legacy_defaults(tmp_path, config_data):
     ("solar_day_ahead", "lookback", None),
 ])
 def test_invalid_yaml_model_settings_rejected(tmp_path, config_data, model, key, value):
-    config_data["forecast"]["model_calibration_parameters"][model][key] = value
+    settings = config_data["forecast"]["load"]["model_calibration_parameters"] if model == "load" else config_data["forecast"]["solar"]["model_calibration_parameters"][model.removeprefix("solar_")]
+    settings[key] = value
     with pytest.raises(ValueError, match="invalid configuration"):
         load_config(write_config(tmp_path, config_data))
 
@@ -95,7 +98,7 @@ def test_intraday_lookback_and_halflife(halflife, expected):
 def test_load_cli_reads_model_database_and_timezone_from_config(tmp_path, config_data, monkeypatch):
     config_data["database"]["path"] = "configured.db"
     config_data["timezone"] = "Asia/Kolkata"
-    config_data["forecast"]["model_calibration_parameters"]["load"] = {"lookback": 9., "halflife": 3., "prior_effective_observations": 0.5}
+    config_data["forecast"]["load"]["model_calibration_parameters"] = {"lookback": 9., "halflife": 3., "prior_effective_observations": 0.5}
     path = write_config(tmp_path, config_data)
     history = pd.DataFrame()
     read = Mock(return_value=history)
@@ -125,7 +128,7 @@ def test_replay_cli_reads_configured_models(tmp_path, config_data, monkeypatch):
 
     config_data["database"]["path"] = "configured-replay.db"
     config_data["timezone"] = "UTC"
-    config_data["forecast"]["model_calibration_parameters"]["solar_intraday"] = {"lookback": 2., "halflife": 0.5, "prior_effective_observations": 0.5}
+    config_data["forecast"]["solar"]["model_calibration_parameters"]["intraday"] = {"lookback": 2., "halflife": 0.5, "prior_effective_observations": 0.5}
     path = write_config(tmp_path, config_data)
     database = MagicMock()
     opener = Mock(return_value=database)

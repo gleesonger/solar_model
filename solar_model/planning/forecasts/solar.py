@@ -4,7 +4,7 @@ Day-ahead learns recency-weighted hourly scalars from historical actuals.
 Intraday adjusts future hours using today's completed-hour residuals, shrinking
 sparse evidence toward no correction. Raw provider inputs are never changed.
 The fixed daily load model is in load.py; calibration settings are in
-forecast.model_calibration_parameters.
+forecast.solar.model_calibration_parameters.
 """
 from __future__ import annotations
 from datetime import date, datetime

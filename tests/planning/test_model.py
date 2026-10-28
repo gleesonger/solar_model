@@ -28,7 +28,7 @@ def test_in_memory_plan_preserves_scenario_energy_and_cost(resolution, expected_
     tariffs = TariffsConfig((TariffPeriod("2000-01-01",
         (replace(minimum, rate=.4, name="flat"),), (replace(minimum, rate=.1),)),))
     config = replace(config, tariffs=tariffs, energy_plan=replace(
-        config.energy_plan, num_projection_hours=2, projection_resolution_mins=resolution,
+        config.energy_plan, num_projection_hours=2, projection_resolution_mins=(resolution,) * (120 // resolution),
         minimum_battery_kwh=(minimum,), maximum_battery_kwh=(maximum,),
         protection_preference=0.,
     ))
@@ -67,7 +67,7 @@ def test_generated_scenarios_separate_names_and_probabilities_from_forecasts():
     assert not hasattr(forecast, "name")
 
 
-def test_each_call_builds_a_fresh_model_with_current_inputs(monkeypatch, caplog):
+def test_each_call_builds_a_fresh_model_with_current_inputs(monkeypatch, caplog, capsys):
     import cvxpy as cp
     from solar_model.planning import optimisation
 
@@ -112,7 +112,10 @@ def test_each_call_builds_a_fresh_model_with_current_inputs(monkeypatch, caplog)
     assert second.starts_at.iloc[0] == start + timedelta(days=1)
     assert "plan_model complexity:" in caplog.text
     assert "time_steps=[15*1, 10*1, 15*2, 5*1]" in caplog.text
-    assert "plan_model end: status=success" in caplog.text
+    timings = capsys.readouterr().out
+    assert "plan_model end: status=success elapsed_seconds=" in timings
+    assert "plan_model solve: status=optimal compile_seconds=" in timings
+    assert "solver_seconds=" in timings
 
 
 def test_discharge_power_limit_scales_with_each_mixed_interval():
@@ -127,7 +130,7 @@ def test_discharge_power_limit_scales_with_each_mixed_interval():
     config = load_config()
     flat = TariffRule(("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"), "00:00", "24:00", .4, "flat")
     config = replace(config, tariffs=TariffsConfig((TariffPeriod("2000-01-01", (flat,), (replace(flat, rate=0.),)),)),
-        energy_plan=replace(config.energy_plan, num_projection_hours=2, projection_resolution_mins=15,
+        energy_plan=replace(config.energy_plan, num_projection_hours=2, projection_resolution_mins=(15,) * 24 + (60,) * 18,
                             minimum_battery_kwh=(replace(flat, rate=0.),), maximum_battery_kwh=(replace(flat, rate=10.),),
                             limit_battery_export_rate_to_grid_kw=(replace(flat, rate=0.),), protection_preference=0.))
     frame = simulate_energy_plan(device, DeviceState(10.), [ScenarioData("base", forecast, 1.)], config, start).results["base"]
@@ -136,12 +139,24 @@ def test_discharge_power_limit_scales_with_each_mixed_interval():
     assert frame.battery_end_kwh.tolist() == pytest.approx([10 - energy / .9 for energy in [.5 * index for index in range(1, 9)]])
 
 
+def test_custom_projection_vector_aligns_after_intact_first_action():
+    config = load_config()
+    config = replace(config, energy_plan=replace(
+        config.energy_plan, num_projection_hours=3,
+        projection_resolution_mins=(15, 15, 30, 60, 60),
+    ))
+    start = datetime(2026, 10, 27, 10, 5, tzinfo=timezone.utc)
+    periods = _projection_intervals(config, start)
+    assert [(end - begin).total_seconds() / 60 for begin, end in periods] == [15, 10, 30, 60, 60, 5]
+    assert periods[-1][1] == start + timedelta(hours=3)
+
+
 def test_mixed_projection_grid_ignores_tariff_and_battery_schedule_boundaries():
     config = load_config()
     start = datetime(2026, 10, 26, tzinfo=timezone.utc)
     days = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
     flat = TariffRule(days, "00:00", "24:00", .3, "flat")
-    settings = replace(config.energy_plan, num_projection_hours=24, projection_resolution_mins=15,
+    settings = replace(config.energy_plan, num_projection_hours=24, projection_resolution_mins=(15,) * 24 + (60,) * 18,
                        minimum_battery_kwh=(replace(flat, rate=0.),),
                        maximum_battery_kwh=(replace(flat, rate=18.),), limit_battery_export_rate_to_grid_kw=())
     config = replace(config, timezone="UTC", energy_plan=settings,

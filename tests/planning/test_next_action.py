@@ -31,7 +31,7 @@ def inputs():
     config = load_config()
     config = replace(config, tariffs=TariffsConfig((TariffPeriod("2000-01-01",
         (replace(rule, rate=.4),), (replace(rule, rate=.1),)),)),
-        energy_plan=replace(config.energy_plan, num_projection_hours=1, projection_resolution_mins=30,
+        energy_plan=replace(config.energy_plan, num_projection_hours=1, projection_resolution_mins=(30, 30),
             minimum_battery_kwh=(rule,), maximum_battery_kwh=(replace(rule, rate=10.),),
             limit_battery_export_rate_to_grid_kw=(), protection_preference=0.))
     scenarios = [ScenarioData("base", ForecastData([ForecastInterval(start, end, 0.)], [ForecastInterval(start, end, 1.)]), 1.)]

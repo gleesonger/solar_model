@@ -164,8 +164,8 @@ class AnalysisTab:
                         bounds,
                         frequency,
                         self.state.historical_power_interval_minutes,
-                        self.config.forecast.arrays,
-                        self.config.dashboard.actuals_to_forecast,
+                        self.config.forecast.solar.arrays,
+                        self.config.actuals_to_forecast_panel_ids,
                         aggregation.lower(),
                     )
                     self._update_historical_charts(analysis_data, refresh_battery=True)
@@ -225,11 +225,11 @@ class AnalysisTab:
 
     def _show_custom_chart_builder(self) -> None:
         """Open a live custom-chart preview without changing the main Analysis view."""
-        metric_labels = charts.analysis_column_labels(self.config.forecast.arrays)
+        metric_labels = charts.analysis_column_labels(self.config.forecast.solar.arrays)
         orientation_metrics = {
             data.actual_column_name(array.panel_id): f"Solar - {array.name}"
-            for array in self.config.forecast.arrays
-            if array.panel_id in self.config.dashboard.actuals_to_forecast.values()
+            for array in self.config.forecast.solar.arrays
+            if array.panel_id in self.config.actuals_to_forecast_panel_ids.values()
         }
         metric_labels.update(orientation_metrics)
         metric_labels["battery"] = "Battery Level"
@@ -407,8 +407,8 @@ class AnalysisTab:
                             bounds,
                             str(group_by_input.value),
                             str(aggregation_input.value).lower(),
-                            self.config.forecast.arrays,
-                            self.config.dashboard.actuals_to_forecast,
+                            self.config.forecast.solar.arrays,
+                            self.config.actuals_to_forecast_panel_ids,
                             selections,
                         )
                         preview_data = preview
@@ -448,8 +448,8 @@ class AnalysisTab:
             analysis_data.power,
             analysis_data.battery,
             self.state,
-            self.config.forecast.arrays,
-            self.config.dashboard.actuals_to_forecast,
+            self.config.forecast.solar.arrays,
+            self.config.actuals_to_forecast_panel_ids,
             self._refresh_historical_time_zoom,
         )
 
@@ -481,8 +481,8 @@ class AnalysisTab:
             bounds,
             self.state.historical_frequency,
             self.state.historical_power_interval_minutes,
-            self.config.forecast.arrays,
-            self.config.dashboard.actuals_to_forecast,
+            self.config.forecast.solar.arrays,
+            self.config.actuals_to_forecast_panel_ids,
             self.state.historical_aggregation.lower(),
         )
 

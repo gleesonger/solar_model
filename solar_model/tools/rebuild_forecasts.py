@@ -119,7 +119,7 @@ def main() -> None:
             snapshots: dict[str, pd.Timestamp] = {}
             for as_of in snapshots_by_day[local_day]:
                 calculated = calculate_adjusted_forecast(
-                    forecasts, actuals, as_of, timezone.key, models=config.forecast.model_calibration_parameters,
+                    forecasts, actuals, as_of, timezone.key, models=config.forecast.models,
                 )
                 if calculated is not None:
                     snapshot, values = calculated

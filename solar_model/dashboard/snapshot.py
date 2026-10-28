@@ -43,14 +43,14 @@ def load_recent_data(config: Config, live_collector: LivePowerCollector) -> Rece
     timezone = ZoneInfo(config.timezone)
     today = datetime.now(timezone).date()
     recent_daily, recent_monthly = data.load_recent_energy_summaries(
-        config.database.path, config.timezone, today, config.forecast.arrays,
+        config.database.path, config.timezone, today, config.forecast.solar.arrays,
     )
     return (
         data.load_day(
             config.database.path,
             config.timezone,
-            config.forecast.arrays,
-            config.dashboard.actuals_to_forecast,
+            config.forecast.solar.arrays,
+            config.actuals_to_forecast_panel_ids,
         ).copy(),
         data.load_latest_collection_local(config.database.path, config.timezone),
         live_collector.snapshot(),

@@ -12,6 +12,7 @@ from solar_model.config import Config
 
 from solar_model.dashboard.tabs.analysis import AnalysisTab
 from solar_model.dashboard.tabs.control import ControlTab
+from solar_model.dashboard.tabs.plan import PlanTab
 from solar_model.dashboard.live import LivePowerCollector
 from solar_model.dashboard.state import DashboardElements, DashboardState
 from solar_model.dashboard.tabs.recent import RecentTab
@@ -39,6 +40,7 @@ class DashboardLayout:
         self.historical_tab = AnalysisTab(config, self.state, self.elements)
         self.system_info_tab = SystemInfoTab(config, self.elements)
         self.control_tab = ControlTab(config)
+        self.plan_tab = PlanTab(config)
 
     def render_dashboard_layout(self, container: Column, snapshot: DashboardSnapshot) -> None:
         LOGGER.info("Dashboard page UI loading")
@@ -60,6 +62,7 @@ class DashboardLayout:
                     ).classes("solar-tabs") as tabs:
                         recent = ui.tab("Recent")
                         historical = ui.tab("Analysis")
+                        plan = ui.tab("Plan")
                         system_info = ui.tab("System Info")
                         control = ui.tab("Control")
                     self.historical_tab.render_mobile_controls_trigger()
@@ -68,6 +71,7 @@ class DashboardLayout:
             selected = {
                 "Recent": recent,
                 "Analysis": historical,
+                "Plan": plan,
                 "Historical": historical,
                 "System Info": system_info,
                 "Control": control,
@@ -81,6 +85,8 @@ class DashboardLayout:
                         self.historical_tab.render_historical_tab()
                 with ui.tab_panel(system_info).classes("p-0"):
                     self.system_info_tab.render_system_info_tab(snapshot.device_information)
+                with ui.tab_panel(plan).classes("p-0 min-w-0"):
+                    self.plan_tab.render_plan_tab()
                 with ui.tab_panel(control).classes("p-0"):
                     self.control_tab.render_control_tab()
 
@@ -149,12 +155,14 @@ def render_dashboard_styles() -> None:
                 margin-right: 0.25rem;
             }
             .dashboard-tabs-row {
-                grid-template-columns: auto auto 1fr !important;
+                grid-template-columns: auto minmax(0, 1fr) !important;
             }
             .dashboard-tabs-row > :first-child {
                 display: none;
             }
             .solar-tabs {
+                min-width: 0;
+                max-width: 100%;
                 justify-self: start;
                 grid-column: 2;
                 grid-row: 1;
@@ -194,6 +202,46 @@ def render_dashboard_styles() -> None:
             background-color: #0070C0 !important;
             color: #ffffff !important;
         }
+        .q-table thead {
+            position: relative;
+            z-index: 2;
+        }
+        .plan-scenario-group {
+            min-width: 0;
+            margin: 0;
+            padding: 4px 8px 8px;
+            border: 1px solid #cbd5e1;
+            border-radius: 4px;
+        }
+        .plan-scenario-group legend {
+            margin-inline: auto;
+            padding-inline: 6px;
+        }
+        .plan-detail-table .q-table th,
+        .plan-detail-table .q-table td {
+            padding: 4px 6px;
+            font-size: 0.75rem;
+        }
+        .plan-detail-table .q-table th {
+            white-space: normal;
+            max-width: 9rem;
+        }
+        .plan-detail-table .q-table td {
+            white-space: nowrap;
+            font-variant-numeric: tabular-nums;
+        }
+        .plan-detail-advanced .q-table th,
+        .plan-detail-advanced .q-table td {
+            padding: 6px 12px;
+            font-size: 0.8125rem;
+        }
+        .plan-detail-advanced .q-table th {
+            min-width: 110px;
+            max-width: 220px;
+        }
+        .plan-detail-advanced .q-table th:nth-child(-n+2) {
+            min-width: 70px;
+        }
         .summary-total-table tbody tr:last-child td {
             background-color: #f1f3f5 !important;
             font-weight: 700;
@@ -203,3 +251,5 @@ def render_dashboard_styles() -> None:
     ui.add_css(assets.joinpath("live_updates.css").read_text(encoding="utf-8"))
     script = assets.joinpath("live_updates.js").read_text(encoding="utf-8")
     ui.add_head_html(f"<script>{script}</script>")
+    table_script = assets.joinpath("table_headers.js").read_text(encoding="utf-8")
+    ui.add_head_html(f"<script>{table_script}</script>")

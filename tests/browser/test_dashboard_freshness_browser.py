@@ -247,8 +247,8 @@ from solar_model.dashboard.tabs.recent import RecentTab
 warnings.HEARTBEAT_INTERVAL_SECONDS = 0.2
 @ui.page('/')
 def index():
-    config = SimpleNamespace(timezone='Europe/Dublin', forecast=SimpleNamespace(arrays=()),
-        dashboard=SimpleNamespace(actuals_to_forecast={{}}),
+    config = SimpleNamespace(timezone='Europe/Dublin', forecast=SimpleNamespace(solar=SimpleNamespace(arrays=())),
+        actuals_to_forecast_panel_ids={{}}, dashboard=SimpleNamespace(actuals_to_forecast={{}}),
         actuals=SimpleNamespace(data_retrival_schedule=SimpleNamespace(
         full_updated_interval_seconds=60, live_update_interval_seconds=1,
     )))

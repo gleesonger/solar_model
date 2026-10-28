@@ -13,7 +13,7 @@ Source: [solar_model/runtime/collector.py](../../solar_model/runtime/collector.p
 5. Sleep until the next wall-clock boundary; repeat.
 
 - Full collection is configurable, shipped at 60 seconds; it is not inherently fixed to one minute.
-- Each cycle checks the persisted last forecast attempt against `forecast.interval_seconds`, using UTC elapsed time. Recent attempts skip HTTP requests and adjustment, including after restart; an INFO message gives the last attempt and next due time in the configured timezone.
+- Each cycle checks the persisted last forecast attempt against `forecast.solar.interval_seconds`, using UTC elapsed time. Recent attempts skip HTTP requests and adjustment, including after restart; an INFO message gives the last attempt and next due time in the configured timezone.
 - Existing installations without an attempt marker use the latest saved forecast collection. Due attempts are reserved before HTTP work; failed/partial attempts still consume the interval, preventing restart retry bursts. A database schedule-check failure skips HTTP and retries the check next cycle.
 - Collectors expose `collect_once`; they do not run independent scheduling loops.
 - No catch-up queue exists. Requests and correction run synchronously in the persisted collector.

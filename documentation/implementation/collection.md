@@ -160,3 +160,5 @@ The common scan timestamp identifies the vintage. It is different from forecast 
 The dashboard's live collector reuses `load_registers(metrics=...)` and `read_registers()`, but uses its own Modbus connection. It requests plant powers, battery availability/SOC, selected daily/lifetime meters, and voltage/current for mapped strings. It transforms tuples into `LivePowerData` and retains it in memory rather than calling `save_modbus_sample()`.
 
 See [dashboard-ui.md](dashboard-ui.md) for its values dictionary, baselines, thread state, daily resets, and presentation handoff.
+
+The array request parameters follow the [Forecast.Solar estimate API](https://doc.forecast.solar/api:estimate) and [official API specification](https://api.forecast.solar/swagger.yaml). YAML documents their units/sign conventions inline; `peak_kw` maps to the provider kwp parameter. Local array ID/name are not included in the request URL.

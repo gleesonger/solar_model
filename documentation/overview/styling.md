@@ -62,3 +62,31 @@ Regenerate it from the repository root with `python dashboard/assets/create_sola
 - Keep units, forecast patterns, and legend styles aligned with meaning; preserve missing-value blanks and user selections.
 - Check mobile table width, drawer access, chart legends, notification/banner overlap, and loading/stale states.
 - A central theme remains a possible improvement.
+
+## Plan presentation
+
+Plan controls wrap on narrow screens; summary metrics share one bordered grid of inline label/value pairs, using one, two or three columns by viewport width. The full DataFrame table scrolls horizontally, shows all rows without pagination (clock hours in Compact, original periods in Advanced), and displays local start/end times as HH:MM. The mobile tab grid uses a shrinking middle column so NiceGUI tab scrolling accommodates Plan alongside the existing four tabs.
+
+The plan chart shares the existing Solar amber, House Load blue and Battery light blue. Actual lines are solid, scenario forecasts dashed; both segments share a legend name. Tooltip labels explain the distinction. Power and battery energy use separate labelled axes; timestamp formatting uses the configured timezone. A spinner replaces Refresh while calculating, and controls restore on failure; any previous successful report remains visible with an explicit failure status.
+
+Plan scenario changes retain chart zoom and legend selections; rendering is immediate without line-drawing animation.
+
+Plan Grid Import uses red and Grid Export uses green on the power axis, with solid actuals and dashed forecasts. Extra top spacing keeps the wrapped five-item mobile legend clear of axes; date/time tick labels use two lines to reduce horizontal overlap.
+
+The Plan chart sets `alignTicks=True` on the battery y-axis so its tick/gridline positions align with the power axis while retaining independent kWh and kW scales.
+
+All dashboard table headers stay below the dashboard topbar during page scrolling and leave the viewport at the end of their own table. Shared `assets/table_headers.js` translates the real header within the table bounds on scroll/resize, preserving column widths, sorting and horizontal scrolling without a second header or an inner vertical scrollbar. Updates use animation frames; child-list observation also handles newly displayed tables and refreshed rows. Styling applies to all Quasar table headers.
+
+Plan detail defaults to Compact with an Advanced toggle beside Download Excel. Short core labels, wrapping headers and scoped 12px table text with 4px/6px cell padding reduce column widths; numeric cells remain unwrapped and horizontal scrolling remains available. Start/end SOC columns sit beside their kWh counterparts in Advanced; Compact shows ending kWh and SOC. Adjustment guidance lives in its tooltip, and the next action has its own line and scenario selection shares the average-cost/range row rather than a separate card.
+
+Plan numeric cells use tabular digits with fixed trailing decimal places per column: two for kWh/kW/cost, four for tariff rates and one for SOC, including Total values. Compact detail aggregates by local clock hour; Advanced retains source timesteps.
+
+Plan headers use short labels while retaining units; sorting icons/actions are disabled. Scenario-average cost/range shares a wrapping row with two compact labelled Solar/Load button groups. Each shows Low (0.5x), Base and High (1.5x); exactly one button is selected in each group. Controls use standard dense, unelevated NiceGUI toggles and wrap within the mobile viewport.
+
+After a successful plan run, Refresh uses its normal disabled/grey state until the adjustment changes; no separate changed-adjustment text occupies space. Failed attempts leave Refresh enabled for retry.
+
+Solar/Load scenario controls use individual bordered fieldsets with centred legends above the buttons. Unselected buttons use Quasar grey-2 with dark text; the selected button retains the primary colour and white text. The groups have a 24px gap (twice the former 12px) and wrap on narrow screens. Border/legend rules are scoped to `.plan-scenario-group`.
+
+Advanced Plan detail adds `.plan-detail-advanced`: 13px text, 6px/12px cell padding, headers at least 110px wide (70px for Start/End) and up to 220px before wrapping. Compact retains its tighter existing styling; both remain horizontally scrollable.
+
+Advanced Plan detail keeps full descriptive column names alongside its wider columns. Compact alone uses the shortened headers; underlying field keys and numeric formatting are unchanged.

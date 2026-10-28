@@ -106,7 +106,7 @@ def prepare_download(
     return result
 
 
-def excel_bytes(dataframe: pd.DataFrame) -> bytes:
+def excel_bytes(dataframe: pd.DataFrame, *, sheet_name: str = "Analysis Data") -> bytes:
     if len(dataframe) > 1_048_575 or len(dataframe.columns) > 16_384:
         raise ValueError("The export exceeds Excel's sheet limits; choose a larger timestep or CSV")
     # Excel has no timezone-aware datetime type.  Keep the displayed local
@@ -119,9 +119,9 @@ def excel_bytes(dataframe: pd.DataFrame) -> bytes:
     buffer = BytesIO()
     # Pass the whole DataFrame to the Rust writer; no Python cell iteration.
     df_to_xlsx(
-        exported, buffer, sheet_name="Analysis Data", constant_memory=True,
+        exported, buffer, sheet_name=sheet_name, constant_memory=True,
         header_format={"bold": True, "border": "thin", "align_horizontal": "center", "align_vertical": "top"},
-        column_formats={"period": {"num_format": "yyyy-mm-dd hh:mm:ss"}},
+        column_formats={"period": {"num_format": "yyyy-mm-dd hh:mm:ss"}} if "period" in exported.columns else {},
     )
     return buffer.getvalue()
 

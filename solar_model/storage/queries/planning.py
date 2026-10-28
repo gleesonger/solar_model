@@ -19,6 +19,13 @@ from solar_model.storage.queries.forecasting import load_hourly_house_load
 LOGGER = logging.getLogger(__name__)
 
 
+def _forecast_bounds(as_of: datetime, config: Config) -> tuple[datetime, datetime]:
+    """Whole UTC hours around the projection, for paired scenario half-hours."""
+    start = pd.Timestamp(utc_instant(as_of))
+    end = start + pd.Timedelta(hours=config.energy_plan.num_projection_hours)
+    return start.floor("h").to_pydatetime(), end.ceil("h").to_pydatetime()
+
+
 def interval_energies(rows: list[ForecastSolarSample], panel_ids: tuple[int, ...], timezone: ZoneInfo, source: str) -> dict[datetime, float] | None:
     """Convert cumulative Forecast.Solar Wh values into interval kWh totals."""
     by_panel: dict[int, list[tuple[datetime, float]]] = {}
@@ -42,12 +49,11 @@ def interval_energies(rows: list[ForecastSolarSample], panel_ids: tuple[int, ...
 def load_house_load_intervals(database: SolarDatabase, as_of: datetime, config: Config) -> list[ForecastInterval]:
     """Feed the production house forecaster into planning without future observations."""
     zone = ZoneInfo(config.timezone)
-    settings = config.forecast.model_calibration_parameters.load
+    settings = config.forecast.load.model_calibration_parameters
     cutoff = pd.Timestamp(datetime.combine(as_of.astimezone(zone).date(), time.min, zone))
     history = load_hourly_house_load(database.engine.url.database, zone,
         start=cutoff - pd.Timedelta(days=settings.lookback), end=cutoff)
-    start = pd.Timestamp(utc_instant(as_of))
-    end = start + pd.Timedelta(hours=config.energy_plan.num_projection_hours)
+    start, end = map(pd.Timestamp, _forecast_bounds(as_of, config))
     predictions = {}
     intervals = []
     for hour in pd.date_range(start.floor("h"), end, freq="h", inclusive="left"):
@@ -80,31 +86,56 @@ def load_forecast_as_of(database: SolarDatabase, as_of: datetime, config: Config
     LOGGER.info("Using forecast snapshot collected at %s", snapshot_at)
 
     timezone = ZoneInfo(config.timezone)
-    panel_ids = tuple(array.panel_id for array in config.forecast.arrays)
+    panel_ids = tuple(array.panel_id for array in config.forecast.solar.arrays)
     solar_intervals = interval_energies(rows, panel_ids, timezone, "adj") or interval_energies(rows, panel_ids, timezone, "raw")
     if not solar_intervals:
         raise ValueError("the as-of forecast contains no usable solar values")
 
     solar: list[ForecastInterval] = []
+    coverage_start, projection_end = _forecast_bounds(as_of, config)
     previous_ends_at: datetime | None = None
     for ends_at, solar_kwh in sorted(solar_intervals.items()):
-        if ends_at < utc_instant(as_of):
+        if ends_at <= coverage_start:
             continue
-        starts_at = previous_ends_at or add_elapsed(ends_at, -timedelta(seconds=config.forecast.interval_seconds))
-        solar.append(ForecastInterval(starts_at, ends_at, float(solar_kwh)))
+        starts_at = previous_ends_at or add_elapsed(ends_at, -timedelta(seconds=config.forecast.solar.interval_seconds))
+        left, right = max(starts_at, coverage_start), min(ends_at, projection_end)
+        if left >= right:
+            break
+        solar.append(ForecastInterval(left, right, float(solar_kwh) * ((right - left) / (ends_at - starts_at))))
         previous_ends_at = ends_at
+        if ends_at >= projection_end:
+            break
 
-    projection_end = add_elapsed(as_of, timedelta(hours=config.energy_plan.num_projection_hours))
     if not solar:
         raise ValueError("the as-of forecast contains no future solar intervals")
-    if utc_instant(solar[0].starts_at) > utc_instant(as_of):
-        solar.insert(0, ForecastInterval(as_of, solar[0].starts_at, 0.0))
+    if utc_instant(solar[0].starts_at) > coverage_start:
+        solar.insert(0, ForecastInterval(coverage_start, solar[0].starts_at, 0.0))
     if utc_instant(solar[-1].ends_at) < utc_instant(projection_end):
         solar.append(ForecastInterval(solar[-1].ends_at, projection_end, 0.0))
 
     load = load_house_load_intervals(database, as_of, config)
 
     return ForecastData(solar=solar, load=load)
+
+
+def load_plan_actuals(database: SolarDatabase, starts_at: datetime, ends_at: datetime, capacity_kwh: float) -> pd.DataFrame:
+    """Measured power and SOC-based stored energy on a UTC minute grid, retaining gaps."""
+    sample = SigenStorModbusSample
+    with database.sessions() as session:
+        rows = session.execute(select(
+            sample.collected_at_utc, sample.plant_pv_power_kw, sample.plant_load_power_kw,
+            sample.plant_battery_soc_percent, sample.plant_grid_power_kw,
+        ).where(sample.collected_at_utc >= starts_at, sample.collected_at_utc <= ends_at)
+            .order_by(sample.collected_at_utc)).all()
+    frame = pd.DataFrame(rows, columns=["timestamp", "solar", "house_load", "soc", "grid"])
+    frame["timestamp"] = pd.to_datetime(frame.timestamp, utc=True)
+    frame["battery"] = pd.to_numeric(frame.pop("soc")) * capacity_kwh / 100
+    grid = pd.to_numeric(frame.pop("grid"))
+    frame["grid_import"] = grid.clip(lower=0)
+    frame["grid_export"] = (-grid).clip(lower=0)
+    if frame.empty:
+        return frame
+    return frame.set_index("timestamp").astype(float).resample("1min").mean().reset_index()
 
 def load_battery_state_as_of(database: SolarDatabase, as_of: datetime, device_info: DeviceInfo) -> DeviceState:
     """Load the latest battery state known at the as-of time."""

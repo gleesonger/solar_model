@@ -11,16 +11,16 @@ The live hook is [solar_model.services.forecasting.refresh_adjusted_forecast](..
 - Scalar calibration uses previous target days: 24 UTC-hour factors, 56-day lookback, 21-day recency half-life, weighted least squares through zero. Missing training yields scalar 1.
 - Factors interpolate around hourly centres. Historical actuals are mean plant PV kW per UTC hour.
 - Missing/non-finite observations do not contribute residuals; if none are usable, correction uses a neutral residual and retains the calibrated forecast.
-- Completed current-day hours supply standardised residuals against hourly historical distributions. Residual half-life defaults to 1 hour; `forecast.model_calibration_parameters.solar_intraday.prior_effective_observations` uses decimal influence after one effective observation; the code default is one-third (strength 2), and the shipped YAML uses `0.3333` (strength approximately 2).
+- Completed current-day hours supply standardised residuals against hourly historical distributions. Residual half-life defaults to 1 hour; `forecast.solar.model_calibration_parameters.intraday.prior_effective_observations` uses decimal influence after one effective observation; the code default is one-third (strength 2), and the shipped YAML uses `0.3333` (strength approximately 2).
 - Only targets at/after the current UTC hour floor are updated. The open hour uses earlier completed observations; its actual is excluded from residual inference.
 - Future target days receive calibrated forecasts without today's residual.
 - Site correction is allocated to panels by raw-power share and saved into the newest available **collection snapshot**, keeping each collection's output.
 - Adjusted Wh integrates watts forward to the next timestamp, capped at 6 hours; the final point assumes 1 hour. Totals reset by local day.
-- Model tuning lives in `forecast.model_calibration_parameters` in YAML and is loaded at startup. Current scalar/residual output is not clipped non-negative; see findings.
+- Model tuning lives in `forecast.solar.model_calibration_parameters` (day_ahead/intraday) and `forecast.load.model_calibration_parameters` (house load) in YAML and is loaded at startup. Current scalar/residual output is not clipped non-negative; see findings.
 
 ## Daily house-load model
 
-The house-load model lives in [house_load.py](../../solar_model/planning/forecasts/house_load.py). Daily collection, the planning report and the evaluation CLI use its shared `predict_day()` helper. Inputs are summed `house_load_kwh_period` from hourly history before local target-day midnight, excluding conversion losses that the optimiser models separately. Recency-weighted weekday/weekend hourly means shrink toward all-days hourly means; there is no intraday adjustment. The existing `forecast.model_calibration_parameters.load` tuning key is retained for configuration compatibility.
+The house-load model lives in [house_load.py](../../solar_model/planning/forecasts/house_load.py). Daily collection, the planning report and the evaluation CLI use its shared `predict_day()` helper. Inputs are summed `house_load_kwh_period` from hourly history before local target-day midnight, excluding conversion losses that the optimiser models separately. Recency-weighted weekday/weekend hourly means shrink toward all-days hourly means; there is no intraday adjustment. House-load tuning lives under `forecast.load.model_calibration_parameters`.
 
 `forecast_house_load` stores generation time and each UTC target hour's household kWh. The entire day is inserted atomically and remains fixed across later runs/restarts/configuration changes. Failed writes can retry. Targets follow 23/24/25-hour local days, preserving repeated hours. Missing history stays null. Version 0.3.0 drops the undeployed `forecast_load` table and creates `forecast_house_load`; old local counter-based predictions are discarded, not relabelled. No historical house forecasts are fabricated.
 
@@ -50,13 +50,13 @@ Source: [solar_model/storage/queries/dashboard.py](../../solar_model/storage/que
 
 The three model blocks use the same names: `lookback`, `halflife`, and `prior_effective_observations`. The last field is the decimal fraction of influence after one unit of evidence, despite its retained name. Defaults are:
 
-| `forecast.model_calibration_parameters` block | `lookback` | `halflife` | `prior_effective_observations` |
+| `forecast.solar.model_calibration_parameters` (day_ahead/intraday) and `forecast.load.model_calibration_parameters` (house load) block | `lookback` | `halflife` | `prior_effective_observations` |
 | --- | --- | --- | --- |
 | `solar_day_ahead` | 56 days | 21 days | `null` (no prior in this model) |
 | `solar_intraday` | `null` (earlier completed hours today) | 1 hour | one-third (YAML: `0.3333`) |
 | `load` | 42 days | 14 days | `0.2` (20%) |
 
-A numeric intraday `lookback` imposes an additional limit in hours, within today's completed observations. Day-ahead/load time settings use days. Code derives `prior_strength = 1 / prior_effective_observations - 1`, giving strength 4 for load and approximately 2 for the shipped intraday fraction. Fractions must be finite, greater than 0 and at most 1, with no rounding of derived strengths. The code default of exact one-third retains intraday strength 2 when model settings are omitted. Load evidence is the sum of recency weights; solar intraday evidence is effective sample size (`sum(weights)^2 / sum(weights^2)`). Missing model blocks retain the original defaults for existing YAML files. The collector, load-profile CLI and operational rebuild all consume the model settings; restart managed processes after changing YAML. Planning uses the same house-load helper and `load` tuning block; its legacy `energy_plan` history fields are retained but unused.
+A numeric intraday `lookback` imposes an additional limit in hours, within today's completed observations. Day-ahead/load time settings use days. Code derives `prior_strength = 1 / prior_effective_observations - 1`, giving strength 4 for load and approximately 2 for the shipped intraday fraction. Fractions must be finite, greater than 0 and at most 1, with no rounding of derived strengths. The code default of exact one-third retains intraday strength 2 when model settings are omitted. Load evidence is the sum of recency weights; solar intraday evidence is effective sample size (`sum(weights)^2 / sum(weights^2)`). Missing model blocks retain the original defaults for existing YAML files. The collector, load-profile CLI and operational rebuild all consume the model settings; restart managed processes after changing YAML. Planning uses the same house-load helper and `forecast.load.model_calibration_parameters` tuning block; the unused legacy `energy_plan` history fields have been removed.
 
 Commands and write effects are in [operations.md](../operations/runbook.md).
 

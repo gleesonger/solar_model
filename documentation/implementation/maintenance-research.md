@@ -68,7 +68,7 @@ main()
   group collection timestamps by local collection date
   for each replay local day:
     for each recorded collection timestamp that day:
-      calculate_adjusted_forecast(frames, as_of, models=config.forecast.model_calibration_parameters)
+      calculate_adjusted_forecast(frames, as_of, models=config.forecast.models)
       accumulate target watt fields by destination snapshot
     add_adjusted_energy_values() per destination snapshot
     save_adjusted_forecasts_bulk() once for that day's outputs
@@ -115,7 +115,7 @@ No model fitting or adjusted writes occur. Optional CSV stores the report, not t
 
 Source: [solar_model/tools/evaluate_load.py](../../solar_model/tools/evaluate_load.py), a report-only evaluator of the production load model in `solar_model/planning/forecasts/solar.py`.
 
-The CLI loads `--config` (default `config.yaml`) and uses `forecast.model_calibration_parameters.load`; configured database/timezone are defaults, overridable by CLI flags. The shared production `load_hourly_house_load()` queries hourly load period sums grouped by UTC hour, divides by storage scale, and adds local `day`, `hour`, and weekday/weekend `day_type`. `predict_day()` uses only prior history within `settings.lookback` days (default 42), weighted by `settings.halflife` days (default 14). It blends type-specific and all-days hourly means with `type_weight/(type_weight+settings.prior_strength)`. The shared field `prior_effective_observations` is a decimal influence fraction after one unit of weighted evidence, default `0.2` (20%); its derived strength is `1 / prior_effective_observations - 1` (default 4). Without matching day-type observations the all-days hourly mean is used, including at fraction `1` (100% influence); hours with no observations remain missing. Pure helper calls may receive settings explicitly or use the original configuration defaults.
+The CLI loads `--config` (default `config.yaml`) and uses `forecast.load.model_calibration_parameters`; configured database/timezone are defaults, overridable by CLI flags. The shared production `load_hourly_house_load()` queries hourly load period sums grouped by UTC hour, divides by storage scale, and adds local `day`, `hour`, and weekday/weekend `day_type`. `predict_day()` uses only prior history within `settings.lookback` days (default 42), weighted by `settings.halflife` days (default 14). It blends type-specific and all-days hourly means with `type_weight/(type_weight+settings.prior_strength)`. The shared field `prior_effective_observations` is a decimal influence fraction after one unit of weighted evidence, default `0.2` (20%); its derived strength is `1 / prior_effective_observations - 1` (default 4). Without matching day-type observations the all-days hourly mean is used, including at fraction `1` (100% influence); hours with no observations remain missing. Pure helper calls may receive settings explicitly or use the original configuration defaults.
 
 Predicted frame: `hour`, `prediction_kwh`, `type_weight` (24 rows). `evaluate()` joins observed target-day hours and appends day/type. Report adds absolute/signed kWh errors, prints overall/type MAE/bias, and daily total comparisons. It does not write the DB or replace the planner's exact-weekday profile.
 

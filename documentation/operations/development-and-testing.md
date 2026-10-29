@@ -9,7 +9,7 @@ Run from the repository root. The Docker image uses Python 3.12.10; see [Dockerf
 ```powershell
 python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -e ".[test]"
-.\.venv\Scripts\python.exe -m pytest -q
+.\.venv\Scripts\python.exe -m pytest -q tests/core/test_config.py
 ```
 
 - [requirements.txt](../../requirements.txt) contains runtime ranges rather than a lockfile. Pytest, Playwright and extraction's openpyxl are provided by package extras rather than the runtime list.
@@ -20,7 +20,7 @@ python -m venv .venv
 
 ## Package verification
 
-Tests are grouped by subsystem. Run `python -m pytest -q` from the repository root. `python -m pip wheel . --no-deps` verifies package construction; the wheel must include dashboard CSS/JS/SVG and both register maps. Module CLIs support `--help` without opening a database. Tests use temporary databases and synthetic browser data.
+Tests are grouped by subsystem. From the repository root, run only key targeted tests relevant to the change, using `python -m pytest -q <test-file>` with specific test names or `-k` where appropriate. Do not run the full suite. Model simulations and performance benchmarks run only when requested by the user; targeted planning regression tests can exercise the solver when needed to verify a planning change. Formatting-only changes need lightweight syntax/AST or diff checks. `python -m pip wheel . --no-deps` verifies package construction; the wheel must include dashboard CSS/JS/SVG and both register maps. Module CLIs support `--help` without opening a database. Tests use temporary databases and synthetic browser data.
 
 ## Test map
 
@@ -28,6 +28,7 @@ Use the [isolated development walkthrough](isolated-development.md) for syntheti
 
 | Tests | What they cover |
 | --- | --- |
+| [test_next_action.py](../../tests/planning/test_next_action.py) | Shared commands, equipment saturation, command SOC bounds, rejection of unsafe passive/forced responses and export-safe rates across nine scenarios, including early SOC stops |
 | [test_forecast_model_config.py](../../tests/forecasting/test_forecast_model_config.py) | YAML model parsing/defaults/validation, lookback and half-life effects, and model settings passed through collection, refresh and CLI entry points |
 | [test_forecast_influence.py](../../tests/forecasting/test_forecast_influence.py) | Decimal-fraction load/intraday influence, sparse day-type fallback, 100% influence and invalid fractions and old percentage inputs |
 | [test_daily_load_forecast.py](../../tests/forecasting/test_daily_load_forecast.py) | House-load profile freeze/restart, midnight cutoff, DST targets, scaling, missing history, planning parity, migration and Analysis-only forecast styling |
@@ -48,7 +49,7 @@ Use the [isolated development walkthrough](isolated-development.md) for syntheti
 
 ## Verification limits
 
-Run the ordinary full suite, including the legacy-named migration regression; do not use old exclusions for resolved collection failures. Record the command, revision/workspace, environment and any skipped checks with each new verification result. Browser skips indicate missing prerequisites, not verified browser behavior.
+Keep verification targeted. Include the legacy-named migration regression when changing the migration paths it covers; its historical filename is not a reason to exclude it. Record the command, revision/workspace, environment and any skipped checks with each new verification result. Browser skips indicate missing prerequisites, not verified browser behavior.
 
 [test_remaining_review_fixes.py](../../tests/regressions/test_remaining_review_fixes.py) supplies additional independent numerical/recovery checks, including real HiGHS plans through both DST transitions. See [verification scope](../reviews/verification.md) for integration gaps. Desktop Chromium tests do not establish Android saved-page behavior; unit tests and package builds do not establish Docker or hardware compatibility.
 

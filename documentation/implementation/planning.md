@@ -2,13 +2,13 @@
 
 Sources: [input assembly](../../solar_model/services/planning.py), [as-of queries](../../solar_model/storage/queries/planning.py), [optimisation](../../solar_model/planning/optimisation.py), [physical limits](../../solar_model/planning/system.py) and [reports](../../solar_model/tools/reports.py). This is a report pipeline used by the workbook CLI and dashboard Plan tab with shared first controls and scenario-specific trajectories, without device control.
 
-The scoring implementation follows [plan-model scoring](../overview/plan-model.md#3-scoring): a tariff-scaled protection reward with diminishing returns minus net cost, using one solve. R and scored battery energy are measured from zero stored kWh, without subtracting a discharge floor.
+The scoring implementation follows [plan-model scoring](../overview/plan-model.md#3-scoring): a tariff-scaled protection reward with diminishing returns minus net cost. One joint-scenario solve selects the first mode and shared settings. R and scored battery energy are measured from zero stored kWh, without subtracting a discharge floor.
 
 ## 1. CLI call hierarchy
 
-The separate synthetic performance tool runs with `python -m solar_model.tools.benchmark_planning --output planning-benchmark.json`. One script loops over nineteen input variants, spawning a fresh worker for each; it uses nine joint scenarios and the historical 43-period benchmark grid (including its final five-minute tail), overriding intervals only inside the worker. It does not access the database or device, change application intervals, or reuse a compiled model. The current YAML supplies tariffs, scheduled bounds and scoring defaults; the JSON records its hash and the optimisation source hash.
+The synthetic performance tool runs with `python -m solar_model.tools.benchmark_planning --output planning-benchmark.json`. Its default nineteen input variants use nine joint scenarios and the historical 43-period grid. `--grid production` selects configured intervals; `--cases` selects named variants and supports `solar_4` and `load_4`. Each case starts in a fresh controller worker and performs one public simulation. No database or device is accessed. JSON records source/configuration hashes, native timings, per-scenario full/visible costs and scores, and battery endpoints.
 
-The controller kills and reaps a worker exceeding five seconds, records N/A and continues without retrying. Imports/input preparation precede a ready/start handshake and have a separate 30-second startup limit. The five-second budget includes construction, compilation, solving, result extraction and physical/cost/duration validation. `simulation_seconds` stops when the simulation returns; `total_seconds` also includes validation. Construction, CVXPY compilation and HiGHS solve times are reported separately. BLAS/OpenMP threads are fixed at one; HiGHS keeps its automatic settings. Results are saved after every case. See the [input-sensitivity measurements](../reviews/performance.md).
+The controller kills and reaps the simulation process tree after five seconds, records N/A and continues without retrying. Windows uses `taskkill /T`; POSIX isolates the case in a process group. Controller imports/input preparation precede a ready/start handshake with a separate 30-second limit. The five-second budget includes construction, compilation, solving, extraction and physical/cost/duration validation. `simulation_seconds` stops when the public call returns; `total_seconds` includes independent validation. Build, compilation and native solve timings are recorded separately. BLAS/OpenMP limits are one; the single HiGHS solver uses automatic settings. The independently reconstructed weighted report score must match the native objective within 0.000001. See [performance measurements](../reviews/performance.md).
 
 ```text
 solar_model.tools.plan_as_of.main()
@@ -28,10 +28,9 @@ solar_model.tools.plan_as_of.main()
   create_scenarios()
     _half_hour_intervals() -> _scenario_intervals()
   simulate_energy_plan()
-    validate inputs, compute periods, log start/projection
-    Build Model: fresh variables/constraints and numeric inputs
-    Optimise Model: score_simulation(), log complexity, compile and solve with HiGHS
-    Model to Results section: derive action/mode and extract scenario frames
+    validate inputs and build one model with shared mode/command variables
+    score and solve all scenarios jointly
+    extract selected mode, reconstruct routes and check all balances
     log end and elapsed time
   group_plan(output timestep)
   write_workbook()
@@ -99,43 +98,46 @@ Output contract: `list[ScenarioData]`, where the frozen dataclass has `name: str
 
 `ScenarioDimensionConfig.items()` fixes low/med/high iteration order. `ScenariosConfig` supplies explicit multipliers and probabilities per level; `scenario_probabilities(settings)` computes the nine joint weights for both generation and dashboard averaging. High-case half-hour timing stress remains fixed in the generator. Zero-weight cases remain in results; the optimiser normalises combined probabilities as before.
 
-## 6. Solver hierarchy and arrays
+## 6. Solver hierarchy and numeric inputs
 
 ```text
 simulate_energy_plan(device_info, state, scenarios, config, projection_start)
-  wrapper: overall start/end timing and logging, try/except
-  _simulate_energy_plan: validate names/probabilities, normalise start to UTC, calculate intervals
-  Build Model
-    create fresh flow/state variables and shared first-step rates/SOC constraints
-    assemble numeric forecasts, tariffs, limits and initial battery state
-  Optimise Model
-    score_simulation builds probability-weighted protection reward minus cost over visible and hidden periods
-    construct a new cp.Problem, log complexity, compile and solve directly with HiGHS
-  Model to Results
-    derive numeric NextAction/OperatingMode, extract values and check balances
-    return SimulationResult(next_action, results, lookahead_results)
-  log successful end; exceptions log a failed end and are re-raised
+  wrapper owns timing/logging and exception reporting
+  _simulate_energy_plan:
+    validate inputs and create visible/hidden periods
+    create system quantities, shared mode flags and command settings
+    assemble numeric inputs and common physics
+    apply each scenario's three first responses using named masks
+    score_simulation supplies the unchanged joint-scenario objective
+    compile and solve once with HiGHS
+    extract the selected mode, reconstruct reports and validate balances
+    return SimulationResult
+  log successful end; failures log and re-raise
 ```
 
-Every call rebuilds and recompiles the problem. There are no cached models, CVXPY input parameters, parameter-update closures or global model locks. Input durations can change on each replanning call without a cache-compatibility check. Solver warm starts are disabled. Result frames are newly allocated, so later solves do not mutate earlier reports.
+Every call builds and compiles one fresh problem in the calling process. There are no mode workers, process pools, compiled caches, CVXPY input parameters, parameter-update closures or global model locks. Warm starts are disabled and result frames are newly allocated. Input durations can change without cache compatibility checks.
 
-The public wrapper owns overall `perf_counter` timing, start/end logging and the try/except. `_simulate_energy_plan` directly calls HiGHS, logs projection/complexity and prints compilation/solve timing from CVXPY solver statistics to stdout. There is no solve callback or separate solve timer. INFO logging reports `plan_model start`, period/scenario counts, compact minute runs such as `time_steps=[15*1, 10*1, 15*22, 60*18, 5*1]`, scalar variable/Boolean/explicit constraint/parameter counts (zero parameters), with solver status/objective and compile/solve timing printed to stdout, followed by a successful `plan_model end` and elapsed seconds on stdout. Failures retain exception logging with elapsed time.
+The public wrapper owns elapsed timing and exception reporting. `_simulate_energy_plan` logs projection/complexity and prints solver status, objective and compilation/solve times. Only optimal/optimal-inaccurate statuses are accepted; other statuses raise ValueError. No candidate is silently excluded and no secondary or tie-break objective is added.
 
-The return value is `SimulationResult`: `next_action` is the shared action including derived mode, and `results` maps scenario names to visible DataFrames; `lookahead_results` retains the six hidden rows per scenario for diagnostics. Whole-scenario net cost is subtracted from a tariff-scaled reward for average protection, then scenario scores are probability-weighted. Probabilities must be finite/non-negative with a positive total and are normalised in the score.
+The return value is SimulationResult: NextAction contains the solver-selected mode and settings shared across all scenarios; results holds visible frames and lookahead_results retains six hidden rows per scenario. Probabilities must be finite/non-negative with a positive total and are normalised in the score.
 
 `score_scenario(costs, levels, device, config, constraints, durations)` returns total net cost and duration-weighted average battery protection, adding concave piecewise-linear utility bounds to the shared constraints. Costs and levels accept either lists of scalar expressions or a vector expression; the simulation passes scenario columns directly without rebuilding scalar expression lists. Stored energy is scored from zero, without a discharge-floor offset or the extra floor-clamping Boolean variables. `score_simulation(..., projection_starts_at, durations)` calculates `V = X/100 * R * reference_import_rate * projection_hours/24` (using the sum of supplied interval durations for `projection_hours`, or the configured hours when durations are omitted), then returns the weighted average of `-cost + V * protection/100 + terminal_credit`. It does not invoke the solver.
 
 `_reference_import_rate(config, starts_at, ends_at)` samples the import tariff at the start of each elapsed hour in an explicit aware timestamp range. The scoring caller supplies 24 hours, giving exactly 24 values whose arithmetic mean is the reference rate. Each sample uses its configured-local weekday and effective tariff plan; there is no tariff-boundary search or special DST handling. A change between samples is deliberately approximated. A partial final hour in another caller's range is duration-weighted. The mean is clipped to zero if non-positive; missing tariff coverage raises an error. X is `energy_plan.protection_preference` (finite, non-negative, no upper bound; default 50); R is `preferred_reserve_kwh`. The score remains cost-sensitive at X=100. At zero reward, utility variables can remain slack; any reported protection must be recomputed from solved energy.
 
-The four shared first-step variables match numeric `NextAction`: forced battery charge/discharge rates and their respective SOC cut-offs. Rates are non-negative kW, with at most one positive. Activation Booleans distinguish zero from positive commands using `MIN_FORCE_RATE_KW = 0.1` (100 W); rates remain continuous above this threshold. SOC cut-offs independently lie in `[0, 100]` and need not be ordered.
+The four shared first-step variables retain the numeric NextAction fields: charge/discharge power ceilings and SOC stops. A three-element Boolean variable `next_mode` represents self-consumption, charge and discharge, with sum exactly one. Named masks activate the relevant response. Inactive rates are zero; an active forced rate is at least `MIN_FORCE_RATE_KW = 0.1`. Rates respect equipment capability; SOC settings lie in `[0,100]`. The active charge stop is no higher than the first configured maximum energy converted to SOC; the active discharge stop is no lower than the first configured minimum converted to SOC. Both conversions use the same health-adjusted capacity as `_energy_until_soc`. Inactive stops remain unconstrained by user schedules because they do not control that mode. They are commands, not promises of identical achieved power across scenarios.
 
-`_energy_until_soc` implements `min(requested_energy, max(0, SOC_headroom))` using bounded disjunctions. Charge headroom includes charge efficiency; discharge headroom includes discharge efficiency. Reaching the stopping SOC reduces forced energy, and starting at or beyond it produces zero forced energy. With both rates zero, active grid charging and battery export are disabled; passive PV charging and discharge to load ignore action SOC cut-offs. Hardware and scheduled kWh bounds still apply. Later controls remain independent.
+`_energy_until_soc` retains exact `min(requested_energy, max(0, SOC_headroom))`, including initial energy beyond the stop and existing efficiency/health-adjusted capacity conventions. Both shared forced requests are constructed; inactive rates imply zero energy. Each scenario computes its own numeric ceilings with ordinary Python min/max. `_minimum` encodes an exact scalar minimum using a bounded binary branch only when the request can cross the ceiling. `_when(mask, value, target, upper, constraints)` means value equals target when the mode mask is one; otherwise it permits their full physical range. A literal product of two unknown solver expressions would be nonlinear, so masking is encoded with bounded linear equalities. No discretionary under-delivery is permitted. Later decisions remain independently optimised per scenario.
 
-For row zero, NumPy computes the self-consumption response from numeric inputs separately for each scenario: `self_pv_load = min(PV, demand, inverter_active_kw * dt)`; solar charging input is bounded by remaining PV, battery charge-input allowance and `(maximum_kwh - initial_kwh) / charge_efficiency`; battery-to-load is bounded by residual demand, discharge allowance, remaining inverter output and `(initial_kwh - minimum_kwh) * discharge_efficiency`, with non-negative headroom. Remaining AC capacity serves PV export; any remaining PV is clipped. The stored solar charge includes charge efficiency. Each of six route variables is conditionally fixed to its numeric target using `abs(flow - target) <= route_bound * sum(forcing)`, represented by two affine inequalities. Route bounds come from that route's existing PV/load/equipment maxima, not an arbitrary large constant. When both forcing Booleans are zero these are equalities; either forced mode fully relaxes them. No new Boolean variables are introduced. This preserves scenario-dependent passive directions and uses the current uniform-within-interval forecast assumption. It retains configured energy bounds, not a new metadata-SOC policy. Forced-mode PV priority and saturation remain separate limitations.
+- **Self-consumption:** PV serves demand first within AC output capacity. Surplus charges within battery power and physical capacity. Residual demand draws from the battery within available stored energy, discharge power and remaining AC capacity. User schedules do not alter this passive response; the mode is infeasible if that response breaches them. Usable solar is bounded by PV availability and the AC output left after battery charging/discharging. Action SOC settings are ignored as before.
+- **Charge, PV first:** achieved charging input is the minimum of the SOC-clipped shared request, battery input limit, physical capacity headroom and `PV + AC absorption allowance`. User maximum energy is enforced through the commanded SOC stop and interval-end constraints, not a separate response clamp. Usable solar is `min(PV, achieved_charge + AC output allowance)`. Grid charging absorbs only the PV shortfall; household demand can draw from the site connection and does not reduce the inverter absorption rating.
+- **Discharge, PV first:** usable solar is `min(PV, AC output allowance)`. Achieved discharge is the minimum of the SOC-clipped shared request, battery discharge allowance and AC capacity left after PV. Battery charging is zero. User minimum energy is encoded in the commanded discharge SOC stop. The export cap does not reduce predicted discharge: existing export constraints reject unsafe responses. If battery/inverter output capability exceeds `max(0, demand - usable_solar) + battery_export_allowance`, the shared commanded discharge rate times duration must also fit that allowance. This prevents a high rate followed by an early SOC stop from satisfying only an average-energy cap. The rate bound is conservative even when an already-reached stop prevents all discharge; where inverter headroom itself is within the allowance, no extra rate bound is needed. All nine scenarios constrain the same rate.
 
-`tests/planning/test_next_action.py` checks the former PV-export/battery-to-load counterexample, forced discharge remaining available when profitable, passive response under high protection preference, conversion losses, scheduled bounds, empty/full batteries, scenario-dependent passive direction, inverter saturation and curtailment.
+These are declared report-model response assumptions: the forced power setting acts as a ceiling and each active mode persists through the interval. They are not installed-firmware verification. SOC stopping and saturation use interval energy under the existing uniform-power approximation; response after a stop, ramping and subinterval PV clipping are not simulated.
 
-The Model to Results section creates a local numeric `NextAction` and derives a local `OperatingMode` IntEnum from the solved rates. The derived mode is stored in `NextAction`, which is returned alongside the scenario dictionary in `SimulationResult`. Minimum/maximum report columns retain scheduled bounds.
+`tests/planning/test_next_action.py` checks PV-first discharge saturation, a shared charge ceiling producing different achieved energy across nine scenarios, solar/mixed/grid charging limits, passive response, losses, SOC stopping, rejection of user-bound breaches, command-encoded energy bounds and export-safe shared rates (including early SOC stopping).
+
+The Model to Results section creates a numeric NextAction from the selected mode flag and solved settings. Minimum/maximum report columns retain scheduled bounds. Mode remains explicit even if an already-reached SOC stop makes achieved charging/discharging zero.
 
 `_projection_intervals` reads the initial minute vector from `energy_plan.projection_resolution_mins`. The current YAML lists four entries of 15 followed by 23 entries of 60. Cumulative boundaries are anchored at the preceding full UTC hour. The first action uses the first entry intact; later boundaries already overtaken by that action are dropped, and the following interval is shortened to the next configured boundary. The visible endpoint remains `starts_at + num_projection_hours`, with a final partial interval preserving the complete elapsed horizon. A shorter horizon clips the first action if needed. At 10:05 the current vector becomes `[15, 10, 15, 15] + [60] * 23 + [5]` (28 periods).
 
@@ -143,33 +145,43 @@ The grid does not inspect tariffs, battery-limit schedules or midnight. Rates an
 
 After `_projection_intervals` produces the visible grid, `_simulate_energy_plan` appends six four-hour slots from its exact endpoint, without tariff or clock alignment. The same state/flow constraints apply to both portions. Logs show visible/hidden counts and the complete minute vector ending in `240*6`. Scoring includes both portions and preserves protection reward per elapsed hour. Extraction validates all periods, then splits the frames so standard CLI exports and dashboard Compact show only the configured visible duration. Dashboard Advanced combines both dictionaries for its chart/table/export; its summary boxes remain visible-only.
 
-Every interval has its own `theta_hrs` and charging/discharging/inverter energy limits. The first-step forced rates and SOC clipping use only the first interval's duration. ForecastData integrates energy over each actual interval. Battery end levels are a `(T,S)` variable matrix with local balance equalities referring only to the previous state variable; scoring and results reuse these states. This avoids the expanding expression chains found in the earlier implementation.
+Every interval has its own `theta_hrs` and charging/discharging/inverter energy limits. The first-step forced rates and SOC clipping use only the first interval's duration. ForecastData integrates energy over each actual interval. Battery end levels are a `(T,S)` variable matrix with a plain loop adding one vector balance per period, referring only to the previous state; scoring and results reuse these states. This avoids the expanding expression chains found in the earlier implementation.
 
-Forecasts, tariff rates and scheduled bounds are assembled as numeric `(T,S)` arrays. Energy balances, charge/discharge exclusivity, inverter/export limits and battery bounds are each expressed as matrix constraints using elementwise multiplication for period-specific coefficients. The opening battery matrix is the initial state followed by shifted end states; a single-period horizon uses only the initial state. First-action constraints operate on row zero across all scenarios. Numeric input assembly still iterates over intervals/scenarios, but creates no per-cell CVXPY constraints. This changes expression construction, not the physical equations or scenario coupling.
+Forecasts, tariff rates and scheduled bounds use ordinary Python lists indexed `[period][scenario]`. Physical constraints are built one period at a time using scalar limits and one-dimensional scenario lists; costs use one-dimensional lists of rates over time. These pass directly to CVXPY, including `cp.multiply`, without NumPy conversion. CVXPY interprets nested-list constants as columns, so the model deliberately passes only one-dimensional lists. Solver quantities remain six CVXPY matrices: `solar_used`, `battery_charge_input`, `battery_discharge_output`, `grid_import`, `grid_export` and `battery_level_eop`. Boolean battery/grid direction matrices exclude opposed flows. Numeric inputs must be finite; solar, load, initial battery energy and export limits must be non-negative. Neither optimisation.py nor system.py imports NumPy.
 
-Eight non-negative flow variables have shape `(T,S)`: solar→load/battery/grid/clipped, battery→load/grid, grid→load/battery. Boolean `battery_charging` and `grid_importing` variables have the same shape and independently select battery and grid directions. Every flow value is interval kWh, not kW.
-
-Loss factors are `1/efficiency - 1`. Solar/grid-to-battery variables represent stored charge; associated loss is additional input energy. Battery-to-load/grid represent delivered AC energy; discharge loss is extra battery depletion.
-
-The total battery charging-input allowance is `max_charge_kwh = inverter_battery_charge_power_kw * interval_hours`, independent of AC absorption. With stored solar/grid charge S and G and efficiency eta_c, constrain `(S + G) / eta_c <= max_charge_kwh`. Separately constrain `G / eta_c <= inverter_max_absorption_power_kw * interval_hours`; shared inverter-flow and battery-capacity bounds also apply. At 8.8 kW battery charging capability, 5.5 kW AC absorption and 95% efficiency, combined stored charge can reach 8.36 kWh per hour, while grid-only stored charge remains at most 5.225 kWh per hour. This retains the existing single charging-efficiency convention. `tests/planning/test_next_action.py` checks solar-only and mixed charging above the AC limit, plus feasible and infeasible grid-only charging at that limit.
-
-Key per-interval equations, abbreviated with physical route names:
+All quantities are interval kWh. C is battery charging input before the existing single charging efficiency; D is delivered battery output before accounting for extra depletion. U is usable PV, B stored battery energy and A signed inverter AC output. The physical model is:
 
 ```text
-solar = solar_to_load + solar_to_battery + charge_loss + solar_to_grid + clipped
-load  = solar_to_load + battery_to_load + grid_to_load
-battery_end = battery_start + stored_charge - delivered_discharge - discharge_loss
-grid_import = grid_to_load + grid_to_battery + grid_charge_loss
-grid_export = solar_to_grid + battery_to_grid
+0 <= U <= forecast_solar
+A = U - C + D
+battery_end = battery_start + eta_c * C - D / eta_d
+grid_export - grid_import = A - household_demand
+-inverter_absorption_kw * dt <= A <= inverter_active_kw * dt
 ```
 
-Charge and discharge constraints depend on the boolean mode. Combined DC→AC and AC→DC flows share the maximum active inverter power × `dt`; grid charge also observes absorption power. Battery export observes its scheduled kW limit. End-of-period battery bounds come from configured schedules, with maximum capped by SOH-adjusted capacity. An absent export schedule falls back to 9999 kW; absent minimum/maximum schedules still fail rule lookup.
+Charging input is bounded by `system_limits.max_charge_kwh`, independently of AC absorption. The absorption allowance also respects the inverter active-power bound, as before. Opposed internal AC conversion routes are eliminated: the model represents the single AC port's net direction. Solar can directly charge the battery above the AC rating. Discharge retains the existing minimum of battery discharge and inverter active-power capability. Battery end energy respects configured hard minimum/maximum schedules, with maximum capped by health-adjusted capacity. Missing minimum/maximum schedules still fail tariff-rule lookup.
 
-The separate grid-import/export expressions above retain non-negative source/destination flows, with `grid_import <= max_grid_import * grid_importing` and `grid_export <= max_grid_export * (1 - grid_importing)` applied elementwise across all visible and hidden intervals/scenarios. `max_grid_import` is scenario household energy plus the minimum of battery charging-input allowance, inverter active power × duration and inverter absorption power × duration. `max_grid_export` is inverter active power × duration. These are equipment/forecast-derived direction bounds, not site import/export settings; household demand is not limited by inverter rating. Zero exchange is allowed. Direction can differ across scenarios under a shared first battery action, and can change between intervals. The cost expression prices these exclusive grid flows, so cheap import cannot be paired with simultaneous higher-priced export to create fictitious revenue. Within-interval direction changes require finer model intervals; the hidden four-hour slots remain coarse approximations.
+Grid direction uses `grid_import <= (demand + min(max_charge, max_absorption)) * grid_importing` and `grid_export <= max_output * (1 - grid_importing)`. Bounds scale with each interval duration and are independently applied in each scenario, including hidden slots. They are direction-selection bounds, not new site-meter settings; household demand is not capped by inverter rating. Charging/import and discharging/export can occur in different intervals. Changes within a coarse interval require finer modelling.
 
-`tests/planning/test_grid_exchange.py` verifies the cheap-tariff counterexample (7 kW demand and 5.5 kW battery discharge produce 1.5 kW net import), genuine export surplus, grid charging alongside demand above inverter rating, scenario-specific grid directions and charging/export in separate intervals. Checks include first-period billing/losses and exclusivity throughout visible and hidden output.
+The battery-only export limit is retained under the reporting allocation below: `battery_export = min(D, grid_export)`. Therefore `battery_export <= E` is exactly the disjunction `D <= E OR grid_export <= E`. A bounded Boolean branch is added only at cells where E is below maximum discharge; otherwise the cap cannot bind. This permits solar export above the battery export cap, including when that cap is zero. E defaults to 9999 kW times interval duration when its schedule is absent.
 
-The objective maximises the probability-weighted average of tariff-scaled, duration-weighted diminishing-return protection reward minus total net cost, as described above. Scenarios share the first-step forced battery rates and SOC cut-offs; their operating mode is derived from those rates. First-step outcomes and all later decisions remain scenario-specific.
+`allocate_energy_routes()` in `planning/system.py` accepts matching-length numeric iterables and returns Python lists for the existing report columns. Its loop uses scalar min/max and arithmetic: charging uses PV before grid input; remaining PV supplies household load before battery discharge; each source's remaining output is exported. Solar/grid stored charge is its allocated input times eta_c, with the difference reported as charging loss. Delivered battery output depletes B by D/eta_d. These are deterministic model allocations, not uniquely measured source identities or independent optimisation decisions. They introduce no second gross grid trade. Extraction converts native solver output to lists; scalar min/max also handles numerical clipping and protection contributions before assigning report columns.
+
+`tests/planning/test_grid_exchange.py` checks net-meter billing under export-above-import tariffs, real exports, household demand above inverter rating, different grid directions across scenarios and exclusivity in hidden slots. Extraction checks reconstructed solar/load conservation, battery state and both grid directions against solved values within 0.001 kWh, then calculates costs and unchanged score contributions.
+
+### Design review and retained contracts
+
+| Review concern | Implemented decision |
+| --- | --- |
+| Preserve one action across nine futures | Three shared mode flags and four scalar command settings in one solve; achieved C/D/U are scenario-specific |
+| Preserve economics | Same scenario probabilities, scoring functions, reserve utility/preference, duration weights and terminal credit |
+| Preserve equipment/user limits | Explicit battery/DC and inverter/AC boundaries, hard energy schedules, battery export disjunction, direction exclusions and SOC stopping |
+| Avoid hidden reporting freedoms | Source routes are reconstructed after solving using one documented allocation |
+| Avoid discretionary under-delivery | Exact first-step minima, not upper bounds alone |
+| Keep report consumers stable | Existing `SimulationResult`, action fields, route/cost/score columns, visible/lookahead split, charts and exports remain supported |
+| Do not imply hardware validation | Ceiling/PV-priority semantics are model assumptions; no command writer, handover or transient device simulation is added |
+
+The objective maximises the probability-weighted average of tariff-scaled, duration-weighted diminishing-return protection reward minus total net cost, as described above. Scenarios share the first-step forced battery rates and SOC cut-offs; their operating mode is selected by the shared Boolean vector. First-step outcomes and all later decisions remain scenario-specific.
 
 ## 7. Result DataFrame contract
 
@@ -181,7 +193,7 @@ One frame per named scenario contains `T` ordered rows:
 | `tariff_name`, `import_rate`, `export_rate` | Interval-start import band and money/kWh rates |
 | Minimum/maximum battery kWh, battery export kW limit | Selected enforced schedules |
 | `solar_kwh`, `load_kwh` | Input forecast interval energy |
-| All route `*_kwh` and three loss fields | Solver values and charge/discharge-loss expressions |
+| All route `*_kwh` and three loss fields | Deterministic allocations reconstructed from solved system totals |
 | `solar_to_inverter_kwh`, `battery_to_inverter_kwh` | Combined reported route totals |
 | `inverter_dc_to_ac_kwh`, `inverter_ac_to_dc_kwh` | Inverter-direction totals |
 | `grid_import_kwh`, `grid_export_kwh` | Total grid energy including relevant losses |
@@ -189,7 +201,7 @@ One frame per named scenario contains `T` ordered rows:
 | `import_cost`, `export_revenue`, `net_cost` | Energy × applicable rates |
 | `cost_score`, `protection_score`, `total_score` | Unweighted scenario contributions; each frame covers its visible or hidden portion |
 
-Solar/load conservation is checked within 0.001 kWh after extracting values. Only optimal/optimal-inaccurate solver states are accepted; other statuses raise.
+Solar/load conservation, battery-state changes and both grid directions are checked within 0.001 kWh after reconstructing routes. Only optimal/optimal-inaccurate solver states are accepted; other statuses raise.
 
 ## 8. Grouping and Excel output
 
@@ -201,7 +213,7 @@ No result is written back to SQLite. The existing output path is deleted before 
 
 ## Package API
 
-`planning.types.NextAction` is a frozen dataclass with `force_battery_charge_rate`/`force_battery_discharge_rate` in kW and `charge_cut_off_soc_percent`/`discharge_cut_off_soc_percent`. Timing is implicit. `OperatingMode` remains an `IntEnum` (2/4/5) used for the locally derived mode in `simulate_energy_plan`, and is included as a derived action field, rather than an independent solver choice. No device commands are executed.
+`planning.types.NextAction` retains charge/discharge power ceilings and SOC stopping settings. `OperatingMode` remains an IntEnum (2/4/5), selected from the solved Boolean mode vector. Positive rates remain consistent with that mode. Timing is implicit and no device commands are executed.
 
 `simulate_energy_plan` accepts device metadata/state, `list[ScenarioData]`, configuration and projection start, and returns `SimulationResult(next_action, results, lookahead_results)`. It has no database/network/UI dependency. The former `build_plan` wrapper is inlined into `services.planning.plan_as_of`, which loads cutoff-aware inputs and generates scenarios directly. The CLI groups and writes `result.results` through `tools.reports`.
 

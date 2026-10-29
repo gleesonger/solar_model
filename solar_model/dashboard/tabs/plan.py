@@ -391,9 +391,9 @@ class PlanTab:
         action = result.next_action
         minutes = (first.ends_at.iloc[0] - first.starts_at.iloc[0]).total_seconds() / 60
         if action.mode == OperatingMode.CHARGE_PV_FIRST:
-            description = f"Force charge at {action.force_battery_charge_rate:.2f} kW until {action.charge_cut_off_soc_percent:.1f}% SOC"
+            description = f"Force charge up to {action.force_battery_charge_rate:.2f} kW until {action.charge_cut_off_soc_percent:.1f}% SOC"
         elif action.mode == OperatingMode.DISCHARGE_PV_FIRST:
-            description = f"Force discharge at {action.force_battery_discharge_rate:.2f} kW until {action.discharge_cut_off_soc_percent:.1f}% SOC"
+            description = f"Force discharge up to {action.force_battery_discharge_rate:.2f} kW until {action.discharge_cut_off_soc_percent:.1f}% SOC"
         else:
             description = "Self-consumption"
         ui.label(f"Action for next {minutes:g} mins - {description}").classes("text-base font-semibold")

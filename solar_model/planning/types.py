@@ -20,7 +20,12 @@ class OperatingMode(IntEnum):
 
 @dataclass(frozen=True)
 class NextAction:
-    """Control for the next time step; forced battery rates in kW and SOC in percent."""
+    """Shared next command; battery power ceilings in kW and SOC stops in percent.
+
+    Achieved first-interval power can differ between scenarios due to PV,
+    equipment saturation and commanded SOC stops. User limits constrain the
+    command and its response; this object does not execute EMS.
+    """
     mode: OperatingMode
     force_battery_charge_rate: float
     force_battery_discharge_rate: float

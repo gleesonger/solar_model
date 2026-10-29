@@ -40,7 +40,7 @@ def run_plan(monkeypatch):
                 variables["next_discharge_cut_off_soc_percent"] == 0.,
             ])
             if later_export is not None:
-                constraints.append(variables["battery_to_grid"][1, 0] == later_export)
+                constraints.append(variables["grid_export"][1, 0] == later_export)
             return original_score(costs, levels, scenarios, device, config, constraints, starts_at, durations)
 
         monkeypatch.setattr(optimisation, "score_simulation", score)

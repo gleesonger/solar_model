@@ -8,6 +8,8 @@ This page identifies available regression coverage and remaining verification wo
 - [Migration checks](../../tests/storage/test_database_0_1_0_migration.py) and [grid statistics](../../tests/storage/test_grid_power_rollup.py) cover legacy preservation, readiness, sign-separated grid statistics and valid-reading counts.
 - [Browser checks](../../tests/browser/) exercise synthetic dashboard rendering, freshness and interactions. [Planning tests](../../tests/planning/) check numerical/model contracts; [download tests](../../tests/dashboard/test_analysis_download.py) inspect exported values and workbook content.
 
+The [first-action regressions](../../tests/planning/test_next_action.py) also exercise command-encoded user energy bounds, rejection of passive responses that need unimplemented controls, and shared export-safe discharge rates across nine scenarios, including an early SOC-stop counterexample. These are synthetic software checks; they do not establish installed-firmware behavior or post-correction performance.
+
 Coverage describes what tests exercise, not their latest pass status. Mocked failures and synthetic inputs have narrower scope than production integration tests.
 
 ## Remaining integration work

@@ -7,6 +7,8 @@ import json
 import multiprocessing as mp
 import os
 import platform
+import signal
+import subprocess
 import traceback
 from pathlib import Path
 from time import perf_counter, process_time
@@ -23,7 +25,9 @@ STEPS = [15, 10, 15, 15] + [15] * 20 + [60] * 18 + [5]
 CAP_SECONDS = 5.0
 
 
-def _worker(connection, case: str, config_path: str) -> None:
+def _worker(connection, case: str, config_path: str, grid: str = "historical") -> None:
+    if os.name != "nt":
+        os.setsid()  # The deadline controller must also stop nested mode workers.
     # Heavy imports and synthetic inputs are prepared outside the timed budget.
     try:
         from dataclasses import asdict, fields, replace
@@ -92,7 +96,7 @@ def _worker(connection, case: str, config_path: str) -> None:
             battery_discharge_cut_off_soc_percent=10., battery_charge_cut_off_soc_percent=100.,
         )
 
-        def projection_intervals(cfg, when):
+        def historical_intervals(cfg, when):
             intervals = []
             for minutes in STEPS:
                 end = when + timedelta(minutes=minutes)
@@ -100,7 +104,14 @@ def _worker(connection, case: str, config_path: str) -> None:
                 when = end
             return intervals
 
-        metrics = {}
+        periods = (historical_intervals(config, start) if grid == "historical"
+                   else optimisation._projection_intervals(config, start))
+        steps = [(end - begin).total_seconds() / 60 for begin, end in periods]
+
+        def projection_intervals(cfg, when):
+            return periods
+
+        metrics = {"build_seconds": None, "compile_seconds": None, "highs_solve_seconds": None}
         original_solve = cp.Problem.solve
 
         def timed_solve(problem, *args, **kwargs):
@@ -128,7 +139,7 @@ def _worker(connection, case: str, config_path: str) -> None:
         metrics["simulation_seconds"] = perf_counter() - begin
         assert len(result.results) == 9
         for frame in result.results.values():
-            assert len(frame) == 43
+            assert len(frame) == len(steps)
             f = frame.drop(columns=["starts_at", "ends_at", "tariff_name"]).astype(float)
             np.testing.assert_allclose(
                 f.battery_end_kwh,
@@ -154,11 +165,45 @@ def _worker(connection, case: str, config_path: str) -> None:
             assert not ((f.solar_to_battery_kwh + f.grid_to_battery_kwh > 1e-5)
                         & (f.battery_to_load_kwh + f.battery_to_grid_kwh > 1e-5)).any()
             durations = [(b - a).total_seconds() / 60 for a, b in zip(frame.starts_at, frame.ends_at)]
-            np.testing.assert_allclose(durations, STEPS)
+            np.testing.assert_allclose(durations, steps)
+        # Compare the native objective with independently reconstructed reports.
+        scenario_metrics = {}
+        for scenario in scenarios:
+            visible = result.results[scenario.name]
+            hidden = result.lookahead_results[scenario.name]
+            full_cost = float(visible.net_cost.sum() + hidden.net_cost.sum())
+            full_score = float(visible.total_score.sum() + hidden.total_score.sum())
+            scenario_metrics[scenario.name] = {
+                "probability": scenario.probability / sum(s.probability for s in scenarios),
+                "visible_cost": float(visible.net_cost.sum()), "full_cost": full_cost,
+                "full_score": full_score, "visible_end_kwh": float(visible.battery_end_kwh.iloc[-1]),
+                "full_end_kwh": float(hidden.battery_end_kwh.iloc[-1]),
+            }
+            # Validate port ratings, exclusions and limits in hidden rows too.
+            for frame in (visible, hidden):
+                f = frame.drop(columns=["starts_at", "ends_at", "tariff_name"]).astype(float)
+                hours = np.array([(b-a).total_seconds()/3600 for a,b in zip(frame.starts_at,frame.ends_at)])
+                charge = (f.solar_to_battery_kwh + f.grid_to_battery_kwh) / device.charge_efficiency
+                discharge = f.battery_to_load_kwh + f.battery_to_grid_kwh
+                ac = f.grid_export_kwh - f.grid_import_kwh + f.load_kwh
+                assert (charge <= device.inverter_battery_charge_power_kw * hours + 1e-5).all()
+                assert (discharge <= min(device.inverter_battery_discharge_power_kw,device.inverter_max_active_power_kw) * hours + 1e-5).all()
+                assert (ac <= device.inverter_max_active_power_kw * hours + 1e-5).all()
+                assert (ac >= -min(device.inverter_max_absorption_power_kw,device.inverter_max_active_power_kw) * hours - 1e-5).all()
+                assert (f.battery_to_grid_kwh <= f.limit_battery_export_rate_to_grid_kw * hours + 1e-5).all()
+                assert (f.battery_end_kwh >= f.minimum_battery_kwh - 1e-5).all()
+                assert (f.battery_end_kwh <= f.maximum_battery_kwh + 1e-5).all()
+                assert not ((f.grid_import_kwh > 1e-5) & (f.grid_export_kwh > 1e-5)).any()
+                assert not ((charge > 1e-5) & (discharge > 1e-5)).any()
+        full_score = sum(s["probability"] * s["full_score"] for s in scenario_metrics.values())
+        full_cost = sum(s["probability"] * s["full_cost"] for s in scenario_metrics.values())
+        np.testing.assert_allclose(full_score, metrics["objective"], atol=1e-6, rtol=0)
         metrics.update(
             total_seconds=perf_counter() - begin, cpu_seconds=process_time() - cpu_begin,
             expected_cost=float(sum(s.probability * result.results[s.name].net_cost.sum() for s in scenarios)),
             next_action=asdict(result.next_action), validation="passed",
+            objective=full_score, weighted_full_score=full_score, weighted_full_cost=full_cost,
+            scenarios=scenario_metrics, visible_periods=len(periods),
         )
         connection.send({"event": "result", "status": "completed", **metrics})
     except Exception:
@@ -167,9 +212,9 @@ def _worker(connection, case: str, config_path: str) -> None:
         connection.close()
 
 
-def _run_case(context, case: str, config_path: str) -> dict:
+def _run_case(context, case: str, config_path: str, grid: str = "historical") -> dict:
     parent, child = context.Pipe()
-    process = context.Process(target=_worker, args=(child, case, config_path))
+    process = context.Process(target=_worker, args=(child, case, config_path, grid))
     process.start()
     child.close()
     try:
@@ -191,7 +236,16 @@ def _run_case(context, case: str, config_path: str) -> dict:
     finally:
         # A separate process lets the controller stop native HiGHS calls reliably.
         if process.is_alive():
-            process.kill()
+            if os.name == "nt":
+                subprocess.run(["taskkill", "/PID", str(process.pid), "/T", "/F"],
+                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                               creationflags=subprocess.CREATE_NO_WINDOW)
+            else:
+                try:
+                    os.killpg(process.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    if process.is_alive():
+                        process.kill()
         process.join()
         parent.close()
 
@@ -200,20 +254,24 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", type=Path, default=Path("config.yaml"))
     parser.add_argument("--output", type=Path, default=Path("planning-benchmark.json"))
+    parser.add_argument("--grid", choices=("historical", "production"), default="historical")
+    parser.add_argument("--cases", nargs="+", choices=(*CASES, "solar_4", "load_4"), default=CASES)
     args = parser.parse_args()
     for name in ("OPENBLAS_NUM_THREADS", "OMP_NUM_THREADS", "MKL_NUM_THREADS"):
         os.environ[name] = "1"
     report = {
         "platform": platform.platform(), "logical_cpus": os.cpu_count(),
-        "cap_seconds": CAP_SECONDS, "timesteps_minutes": STEPS,
+        "cap_seconds": CAP_SECONDS, "grid": args.grid,
+        "timesteps_minutes": STEPS if args.grid == "historical" else None,
+        "timing_scope": "build, compile, solve, extraction and validation; controller startup excluded",
         "config_sha256": hashlib.sha256(args.config.read_bytes()).hexdigest(),
         "model_sha256": hashlib.sha256(Path(__file__).parents[1].joinpath("planning/optimisation.py").read_bytes()).hexdigest(),
         "cases": [],
     }
     context = mp.get_context("spawn")
     print(f"{'Case':<20} {'Status':<10} {'Total s':>9} {'Build s':>9} {'Compile s':>10} {'HiGHS s':>9}", flush=True)
-    for case in CASES:
-        record = {"case": case, **_run_case(context, case, str(args.config.resolve()))}
+    for case in args.cases:
+        record = {"case": case, **_run_case(context, case, str(args.config.resolve()), args.grid)}
         record.pop("event", None)
         report["cases"].append(record)
         args.output.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
@@ -222,7 +280,7 @@ def main() -> None:
         print(f"{case:<20} {record['status']:<10} {times[0]:>9} {times[1]:>9} {times[2]:>10} {times[3]:>9}", flush=True)
         if record["status"] == "error":
             print(record["error"], flush=True)
-    print(f"Saved {len(CASES)} single-run cases to {args.output}", flush=True)
+    print(f"Saved {len(args.cases)} single-run cases to {args.output}", flush=True)
     if any(record["status"] == "error" for record in report["cases"]):
         raise SystemExit(1)
 

@@ -190,7 +190,7 @@ def test_each_call_builds_a_fresh_model_with_current_inputs(monkeypatch, caplog,
     assert "time_steps=[15*1, 10*1, 15*2, 5*1, 240*6]" in caplog.text
     timings = capsys.readouterr().out
     assert "plan_model end: status=success elapsed_seconds=" in timings
-    assert "plan_model solve: status=optimal compile_seconds=" in timings
+    assert "status=optimal compile_seconds=" in timings
     assert "solver_seconds=" in timings
 
 

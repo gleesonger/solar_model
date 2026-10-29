@@ -8,7 +8,7 @@ Sources: [optimisation](../../solar_model/planning/optimisation.py), [scenarios]
 
 The model chooses **a proposed next battery-control action**, with a view of the coming day. Forecasts, physical modelling and optimisation support that decision.
 
-One joint optimisation evaluates nine solar/load scenarios. All share the next action (the first configured timestep, currently 15 minutes), while their outcomes and later decisions can differ. A user preference balances expected financial return against retained battery protection. Only the next action is intended for future execution; the remaining projection gives decision context. Today, both are report outputs.
+One joint optimisation evaluates all nine solar/load scenarios and chooses one shared next action: operating mode, power ceilings and SOC stops. Outcomes and later decisions can differ by scenario. A user preference balances expected financial return against retained battery protection. Only the next action is intended for future execution; the remaining projection gives decision context. Today, both are report outputs.
 
 | Section | Covers |
 | --- | --- |
@@ -30,23 +30,25 @@ It evaluates nine combinations of low, base and high solar and house-load foreca
 
 Each scenario is evaluated for electricity cost and retained battery protection across the visible horizon and a hidden 24-hour extension. We average the combined scores using scenario probabilities. The user's preference scales protection; a terminal credit values the final battery energy.
 
-The optimiser selects the shared next action that maximises that objective. Each requested calculation initialises from as-of measurements and forecasts; there is no automatic execution/update loop. The remaining day plans explain the decision and show possible outcomes; they are not committed schedules.
+The optimiser selects the shared next action that maximises the probability-weighted objective. Each requested calculation initialises from as-of measurements and forecasts; there is no automatic execution/update loop. The remaining day plans explain the decision and show possible outcomes; they are not committed schedules.
 
 ### 2.2 Joint Scenario Optimisation
 
 We choose one action now by testing how it performs across nine possible futures. Later actions can adapt to whichever future unfolds.
 
-Shared variables describe the first action: forced battery charge/discharge rates and their SOC cut-offs. Positive charging implies charge mode, positive discharging implies discharge mode, and both zero imply self-consumption. Each scenario has its own energy flows, battery path and later decisions.
+Three shared Boolean mode flags represent self-consumption, charge and discharge, with exactly one active. Shared variables describe forced battery rates and SOC stops. Charge mode requires a positive charge rate and zero discharge rate; discharge mode requires the reverse; self-consumption fixes both rates to zero. Each scenario has its own energy flows, battery path and later decisions.
 
-The first interval's **physical outcomes are not shared**. The same self-consumption command can charge in a high-solar scenario and discharge in a high-load scenario. Shared forced rates, SOC stopping and direction restrictions constrain first-step flows. For self-consumption, the first-step flows are calculated from each scenario: PV supplies demand first, surplus charges the battery, residual demand draws from the battery, and remaining grid exchange/curtailment follows equipment and configured energy limits. Conditional linear constraints enforce these outcomes without additional Boolean variables. Forced-mode PV priority and complete saturation response remain incompletely constrained. See [first-step findings](../reviews/findings.md#first-step-action-modelling).
+The first interval's **physical outcomes are not shared**. One shared command is evaluated against each scenario's solar/load inputs. Self-consumption follows a fixed passive response. Forced power settings are ceilings: achieved power saturates at the scenario's available PV/AC supply, remaining AC output, battery power, physical storage capacity and commanded SOC stop. User energy bounds are encoded in the active command's SOC stop. Export limits constrain the shared command and resulting flows; they do not silently reduce its predicted discharge. Charge mode consumes PV before AC absorption; discharge mode uses PV output before battery output. Later decisions remain independently optimised. The response is an interval-energy model assumption requiring installed-firmware validation.
 
-`_simulate_energy_plan` creates vectorised time-by-scenario flow/battery variables and one shared first-action control set, builds a single probability-weighted `cp.Problem(cp.Maximize(score), constraints)`, and solves it once with CVXPY/HiGHS. Inline sections are Build Model, Optimise Model and Model to Results; there are no separate build/optimise/extract functions or intermediate EnergyModel/NextActionVariables classes. The formulation is a mixed-integer linear programme because it includes Boolean charge/force/SOC-stop decisions.
+`simulate_energy_plan` builds and solves one joint CVXPY/HiGHS model. Six CVXPY quantity matrices represent usable PV, battery charge/discharge, grid import/export and battery energy. Forecasts, rates, limits and extracted report routes use ordinary Python lists. Each period's physical equations use scalar limits and one-dimensional scenario lists passed directly to CVXPY; rate lists over time feed each scenario's cost. First responses and report allocations use arithmetic and scalar min/max; named mode masks activate the corresponding equations. Two small helpers encode exact solver minimums and conditional equalities. There are no direct NumPy imports in the optimisation or physical/report-allocation modules. Later decisions remain independent by scenario.
+
+There are no mode workers, candidate comparisons or process-pool startup costs. Exactly one fresh mixed-integer problem is compiled and solved with HiGHS, with warm starts disabled and no compiled cache. Solver-chosen mode flags determine the returned OperatingMode. Exact minima prevent discretionary under-delivery. Solver tolerances can select different nearly optimal schedules; no tie-break objective is added. Only optimal/optimal-inaccurate statuses are accepted; others fail the calculation.
 
 Later decisions can adapt independently in each scenario. This two-stage approximation effectively assumes the scenario becomes known after the first interval; it is optimistic about future information. It is an approximation, not a guarantee against every possible future.
 
 ### 2.3 Next Action and Day Plan
 
-The primary output is one implementable action for the next time step, with forced battery charge/discharge rates in kW and applicable SOC settings. Mode is derived from the rates rather than selected independently: charge rate positive means forced charge until charge SOC, discharge rate positive means forced discharge until discharge SOC, and both zero mean self-consumption ignoring these SOC cut-offs. Timing is implicit; the action has no timestamps. Net grid flow follows from battery power, load and solar. The returned `NextAction` dataclass includes an `OperatingMode` IntEnum derived after solving. A positive forced rate is at least 0.1 kW. Its three modes can be described by four planning intents:
+The primary output is one implementable action for the next time step, with a solver-selected mode, shared forced power ceilings and SOC stops. Charge mode means charge up to the positive charge rate until charge SOC; discharge mode means discharge up to the positive discharge rate until discharge SOC. Self-consumption sets both rates to zero and ignores action SOC stops. A positive forced rate is at least 0.1 kW. Timing is implicit. Achieved battery power and net grid flow depend on each scenario. These modes can be described by four planning intents:
 
 | Intent | SigenStor mode | Intended behaviour |
 | --- | --- | --- |
@@ -205,7 +207,7 @@ $$
 
 $\Delta t_t$ is elapsed interval duration in hours. Equal 15-minute intervals reduce this to an ordinary average. Scoring the average battery energy would give a different result and hide low-energy periods. Even this time-averaged score does not guarantee a minimum reserve; display the minimum and time below $R$ separately.
 
-The implementation uses a concave piecewise-linear chord approximation over health-adjusted capacity, refining segments until maximum utility shortfall is at most the fixed `PROTECTION_APPROXIMATION_ERROR = 0.05` points. For chord segment k, $a_k$ and $b_k$ are its slope and intercept. The LP utility $q_{t,s}$ replaces exact $S(E_{t,s})$ in the average above: constrain $q_{t,s}\le a_kE_{t,s}+b_k$ for every segment, and reward q. Concavity permits this with linear constraints and no extra binary variables. Chord interpolation understates the exact score between breakpoints. Use this approximation in the single combined solve. At X = 0, protection variables are not rewarded and can sit below the curve; recompute reported protection from the solved energy trajectory rather than reporting arbitrary slack values.
+The implementation uses a concave piecewise-linear chord approximation over health-adjusted capacity, refining segments until maximum utility shortfall is at most the fixed `PROTECTION_APPROXIMATION_ERROR = 0.05` points. For chord segment k, $a_k$ and $b_k$ are its slope and intercept. The LP utility $q_{t,s}$ replaces exact $S(E_{t,s})$ in the average above: constrain $q_{t,s}\le a_kE_{t,s}+b_k$ for every segment, and reward q. Concavity permits this with linear constraints and no extra binary variables. Chord interpolation understates the exact score between breakpoints. Use this approximation in the single joint-scenario solve. At X = 0, protection variables are not rewarded and can sit below the curve; recompute reported protection from the solved energy trajectory rather than reporting arbitrary slack values.
 
 ## 4. Forecast Models
 
@@ -269,7 +271,9 @@ It represents battery storage, household demand, solar generation, the inverter 
 
 The executable control set is self-consumption (2), charge with PV first (4), and discharge with PV first (5). Modes 3 and 6 are excluded from this design. The numerical mapping is defined in Appendix 6 of the [Sigenergy Modbus V2.9 specification](../reference/Sigenergy%20Modbus%20Protocol%20EN_V2.9.pdf); exact command response still requires verification on the installed firmware.
 
-The current model derives mode from mutually exclusive forced battery rates and enforces SOC stopping with additional Boolean min/max constraints, including when initial energy is already beyond the cut-off. Self-consumption ignores action SOC cut-offs and disables first-period grid-to-battery and battery-to-grid routes. Its first-period PV/load/charge/discharge/export/curtailment outcomes are fixed per scenario using the starting energy, configured energy bounds, efficiencies and equipment limits; the economic objective cannot choose alternative passive flows. Complete forced-mode PV-first priority and saturation at all other equipment/flow limits are not yet enforced. Consequently the proposed commands require firmware/physical validation before execution.
+The model derives mode from mutually exclusive positive power ceilings and retains SOC stopping, including when starting beyond the cut-off. Self-consumption ignores action SOC settings and follows PV/household/battery priorities within physical equipment and storage bounds; it is rejected if this passive response breaches user energy schedules. Forced charge achieves the minimum of the command/SOC allowance and each scenario's physical charging capacity/supply. Forced discharge gives PV the inverter output first, then supplies battery output within the remaining capacity and commanded SOC allowance. User maximum/minimum energy constrain the active charge/discharge SOC stops using health-adjusted capacity. The battery-export cap constrains the response and, when hardware could exceed the allowance, the commanded discharge rate itself across all scenarios. A short burst above the cap cannot be justified by an early SOC stop. No controller or automatic device clamp for YAML limits is assumed. Thus the same 8.8 kW charging command can achieve 8.8 kW with sufficient PV and only 5.5 kW without PV when AC absorption is 5.5 kW.
+
+This is a declared response model, not firmware verification. The active mode persists for the interval; power/energy are averaged uniformly. Subinterval clipping after an early SOC stop, ramping, response delay and post-stop handover are not simulated. The proposed commands still require installed-firmware validation before execution.
 
 The [Sigenergy Modbus V2.9 specification](../reference/Sigenergy%20Modbus%20Protocol%20EN_V2.9.pdf) and [register review](../reviews/sigenergy-home-assistant-register-review.md) provide integration context. No control-register writes, acknowledgement/read-back, retained EMS ownership or handover implementation exist in this application.
 
@@ -279,28 +283,27 @@ We track where energy goes and how much remains in the battery, accounting for l
 
 Battery state is stored energy $B$, with non-negative interval ends bounded by configured minimum/maximum energy schedules and health-adjusted capacity. Protection scores this same stored energy: $E=B$, with zero as the origin for both E and R. The discharge cut-off does not shift the scoring origin. The input loader and dashboard SOC conversion use nameplate capacity times SOC/100; physical capacity and command-stop conversion use capacity times state of health/100. This mismatch needs reconciliation when health is below 100%; available-discharge telemetry has a different meaning and is not substituted. Metadata charge/discharge SOC cut-offs are not automatically added as hard energy bounds.
 
-Use interval kWh for all energy routes. With charge efficiency $\eta_c$ and discharge efficiency $\eta_d$, define solar/grid-to-battery flows as stored energy and battery-to-load/grid flows as delivered energy. In the equations below, `eta_c` and `eta_d` are those efficiencies, `battery_start` and `battery_end` are the opening/closing B, and each route name identifies its source and destination. Conservation is:
+The solver uses interval kWh for six system quantities: usable solar U, battery charging input C, delivered battery output D, stored energy B, grid import and grid export. With the existing charging/discharging efficiencies:
 
 ```text
-solar = solar_to_load + solar_to_grid + solar_clipped + solar_to_battery / eta_c
-load = solar_to_load + battery_to_load + grid_to_load
-battery_end = battery_start + solar_to_battery + grid_to_battery
-              - (battery_to_load + battery_to_grid) / eta_d
-grid_import = grid_to_load + grid_to_battery / eta_c
-grid_export = solar_to_grid + battery_to_grid
+inverter_output = U - C + D
+battery_end = battery_start + eta_c * C - D / eta_d
+grid_export - grid_import = inverter_output - household_demand
 ```
+
+Battery charging input C is measured before charging efficiency; D is delivered output, requiring D/eta_d of stored energy. Source-to-destination routes are reconstructed for reports: charging uses PV before grid input; remaining PV supplies household load before battery discharge; source surpluses are exported. Existing route and loss columns remain available, but represent a documented allocation of solved totals rather than separately measured energy identities or free optimisation choices.
 
 The resulting `battery_end` is $E_{t,s}$ used by the protection curve; `grid_import` and `grid_export` are $I_{t,s}$ and $O_{t,s}$ used by the cost formula. Carry each scenario's end energy into its next interval. The first starting state is measured, not a forecast. Do not allow simultaneous battery charging and discharging or assume that the same battery energy has a different physical identity because it came from PV or the grid.
 
 ### 5.4 Physical Constraints
 
-Battery charging input from solar plus grid is bounded by battery DC charging power times interval hours. Grid charging separately observes inverter AC absorption and shared conversion limits; the AC absorption rating does not cap DC solar charging. Under the current single charging efficiency, stored charge equals charging input times charge efficiency.
+Battery charging input from solar plus grid is bounded by battery DC charging power times interval hours. Signed inverter AC output separately observes active output and absorption limits; the AC absorption rating does not cap DC solar charging. Under the current single charging efficiency, stored charge equals charging input times charge efficiency.
 
-Implemented constraints include health-adjusted capacity, configured hard minimum/maximum battery schedules, mutually exclusive charging/discharging, duration-scaled battery limits, shared inverter active-power/absorption bounds and the configured battery-to-grid export limit. The preferred reserve R is separate and soft. Current power settings constrain battery/inverter routes; they do not establish general site import/export meter limits.
+Implemented constraints include health-adjusted capacity, configured hard minimum/maximum battery schedules, mutually exclusive charging/discharging, duration-scaled battery limits, signed inverter AC output/absorption bounds and the configured battery-to-grid export limit. The preferred reserve R is separate and soft. Current power settings constrain battery/inverter routes; they do not establish general site import/export meter limits.
 
 Solar may be explicitly clipped when it cannot be used/stored/exported. Flow equalities conserve solar, household load and battery energy. Separate import/export flows are mutually exclusive within each interval and scenario, using a Boolean grid direction independent of battery direction. The same shared battery action can therefore produce importing and exporting outcomes in different scenarios. Import bounds include household demand plus feasible grid charging; export bounds follow inverter output capability. These bounds implement direction selection, not general site-meter limits. Opposite grid directions at different times require separate model intervals; long hidden slots retain this aggregation approximation.
 
-The first self-consumption interval follows a fixed PV-first response within the model's uniform-power and configured-energy-bound conventions. Forced-mode PV priority and saturation remain incomplete; do not treat their tariff-driven route choices as verified device behaviour. This limitation and the SOC-convention issue are tracked in [review findings](../reviews/findings.md). Infeasible solves raise an error; initial measured energy is not itself constrained by interval-end minimum/maximum schedules.
+All three first-step modes follow the declared scenario-specific physical response, including PV priority and forced-power saturation. Configured energy/export limits reject unsafe commands rather than reducing their predicted response; energy stops are encoded in the active command, and restrictive export limits bound its discharge rate. Self-consumption is unavailable when its passive response would breach user energy limits. The battery-only export cap applies to the reconstructed battery export `min(delivered battery output, grid export)`, independently of solar exports. Hardware response and SOC-convention questions remain tracked in [review findings](../reviews/findings.md). Infeasible solves raise an error; initial measured energy is not itself constrained by interval-end minimum/maximum schedules.
 
 ### 5.5 Units, Time and Data Conventions
 
@@ -308,13 +311,13 @@ Planning uses physical kWh, kW, hours, EUR/kWh and EUR. Database measurements ar
 
 Use aware UTC instants and explicit start/end intervals, treating energy as belonging to `[start, end)`. Local dates, tariffs and daily forecast issuance use the configured timezone. The visible 24-hour projection ends 24 elapsed hours after its starting instant, including a final partial period when necessary; the six hidden four-hour slots extend the solved horizon to 48 elapsed hours. A local day can contain 23 or 25 hours. Resampling must conserve energy and preserve distinct repeated hours.
 
-Only observations and forecast vintages available at the planning cutoff are eligible. Keep raw and adjusted history separate and preserve cumulative-counter reset handling. Unknown data must not silently become observed zero. ForecastData validates aware intervals, ordering, contiguity and requested coverage, and the model validates scenario names/probabilities. Comprehensive forecast-energy finiteness/non-negativity and input-age rejection are not implemented; a valid as-of snapshot can still be old. Solar fallback/padding and missing-house-profile behaviour are described in section 4.4 and remain data-policy limitations.
+Only observations and forecast vintages available at the planning cutoff are eligible. Keep raw and adjusted history separate and preserve cumulative-counter reset handling. Unknown data must not silently become observed zero. ForecastData validates aware intervals, ordering, contiguity and requested coverage, and the model validates scenario names/probabilities. The solver rejects non-finite numeric inputs and negative solar/load energy or battery export limits. Input-age rejection is not implemented; a valid as-of snapshot can still be old. Solar fallback/padding and missing-house-profile behaviour are described in section 4.4 and remain data-policy limitations.
 
 ## 6. Validation and Open Decisions
 
 ### 6.1 Verified Behaviour and Checks
 
-The planning/forecast/dashboard regression suites exercise shared first actions, SOC stopping, forecast integration, energy conservation, duration-scaled limits, scenario probabilities, tariff-scaled scoring, UTC/DST handling, as-of isolation, report generation and browser interactions. Use synthetic inputs and temporary databases; this documentation review did not rerun simulation or touch the user's database.
+The planning/forecast/dashboard regression suites exercise shared first actions, SOC stopping, forecast integration, energy conservation, duration-scaled limits, scenario probabilities, tariff-scaled scoring, UTC/DST handling, as-of isolation, report generation and browser interactions. Use synthetic inputs and temporary databases; numerical checks do not establish installed-firmware response.
 
 Scoring checks cover preference endpoints, zero-based reserve, non-positive reference tariffs, horizon scaling, probability normalisation, bounded chord error, actual-plus-adjusted solar repetition, as-of leakage and DST checks, hidden four-hour lookahead, visible/hidden state continuity and reporting separation, and reported component totals matching the solved objective. Browser checks cover scenario buttons, Compact/Advanced selection, fixed decimals, hourly aggregation and Excel downloads. Test results establish software behaviour on those inputs, not installed-firmware response or a runtime bound.
 
@@ -325,7 +328,7 @@ Scoring checks cover preference endpoints, zero-based reserve, non-positive refe
 | Input assembly | `services.planning.plan_as_of` loads cutoff-aware device/state/solar inputs and uses the shared house-load helper for visible plus hidden horizon coverage |
 | Scenarios | `planning.scenarios.create_scenarios` creates nine configured low/med/high cases weighted by independent dimension probability products with high-case half-hour timing stress |
 | Projection | YAML minute vector with repetition shorthand, intact first action, UTC-clock alignment and full elapsed horizon |
-| Solver | Vectorised joint CVXPY mixed-integer linear problem; one HiGHS solve, fresh build/compile per call, no compiled cache or warm start |
+| Solver | One joint-scenario CVXPY/HiGHS mixed-integer problem, three shared mode flags with exactly one active, fresh build/compile, no process pool, compiled cache or warm start |
 | Objective | Tariff-scaled, duration-weighted diminishing protection reward minus net cost across visible and hidden periods, with normalised scenario probabilities |
 | Bounds | Configured interval-end minimum/maximum are hard constraints; preferred reserve is a soft scoring input |
 | Output | `SimulationResult` contains `NextAction`/`OperatingMode` and scenario DataFrames, including post-scaling score contributions; separate lookahead_results retains hidden rows; CLI exports visible reports |
@@ -340,7 +343,7 @@ The Plan tab offers protection adjustment, a one-line proposed action, expected-
 
 The model assumes independent scenario probabilities and full scenario-specific flexibility after the first action. Protection is a preference utility, not a calibrated outage probability. Remaining issues are recorded in [review findings](../reviews/findings.md), including:
 
-- Complete forced-mode PV priority and saturation, plus installed-firmware validation of all command responses.
+- Installed-firmware validation of the declared first-step PV-priority/ceiling response, including subinterval saturation, SOC-stop response and handover.
 - A consistent nameplate/health-adjusted SOC convention and mapping metadata cut-offs into physical bounds.
 - General site-meter power limits; grid import/export direction is already exclusive within each interval/scenario, including when export prices exceed import prices.
 - Solar target-time semantics, fallback/padding visibility, forecast input validation and age policy.

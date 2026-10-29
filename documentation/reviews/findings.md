@@ -6,8 +6,7 @@ Known defects, undecided policies and verification gaps. These items qualify the
 
 | Finding | Evidence / consequence |
 | --- | --- |
-| First-action command does not determine the predicted dispatch | Self-consumption can export all PV while discharging to household load despite available PV. The mode in `NextAction` is the proposed device command, so this requires a command/flow constraint repair, not a presentation rename. See [material planning checks](#material-planning-checks-2026-10-29). |
-| AC absorption incorrectly limits total battery charging | `system_limits()` caps all battery charging at `min(battery charge power, AC absorption power)`, including DC solar charging. Stored metadata reports 8.8 kW battery charging versus 5.5 kW AC absorption; historical near-zero-grid samples show charging above 5.5 kW. A controlled 24-hour comparison changes stored solar by 4.18 kWh and projected visible cost by EUR 0.852. See [material planning checks](#material-planning-checks-2026-10-29). |
+| Forced-mode command response remains incomplete | First-step self-consumption now has fixed scenario-specific PV-first flows and regression coverage. Complete PV priority and saturation under forced modes still require constraints and installed-firmware validation; mode/power/SOC fields are proposed commands, not presentation labels. See [first-step action modelling](#first-step-action-modelling). |
 | Host timezone leaks into ORM local dates | [solar_model/storage/schema.py](../../solar_model/storage/schema.py) hybrids use host `astimezone()`/SQLite `localtime`; legacy hybrids still expose host dates; active recent/lifetime summaries now use configured timezone . Configured timezone can differ from host, especially Docker. |
 | Missing planning rules pass config load | Minimum/maximum schedules default empty and validate only when non-empty, but [simulate_energy_plan](../../solar_model/planning/optimisation.py) calls `tariff_rule` on both unconditionally. |
 | Solar interval conventions disagree | Dashboard treats forecast timestamps as starts; [load_forecast_as_of](../../solar_model/tools/plan_as_of.py) uses them as ends and uses collection interval for the first interval width. Planning may shift energy timing. |
@@ -47,50 +46,26 @@ Known defects, undecided policies and verification gaps. These items qualify the
 
 ## Suggested repair order
 
-1. Correct the demonstrated command/dispatch mismatch and battery/AC charging-limit separation below.
+1. Complete forced-mode PV-priority and saturation constraints below; the first-step self-consumption mismatch is corrected.
 2. Resolve forecast interval meaning and required planning-rule validation; extend replay parity and adverse optimiser coverage before changing those contracts.
 3. Review dependency reproducibility and retained legacy paths; HiGHS declaration and Docker port metadata have already been corrected.
 
 
 ## First-step action modelling
 
-`simulate_energy_plan` derives first-step operating mode from mutually exclusive forced battery rates. SOC stopping is modelled, including starting beyond the cut-off; self-consumption ignores action SOC cut-offs. The fixed 100 W minimum positive rate distinguishes forcing from zero. PV-first priority and saturation at other equipment/flow limits from the target plan model are not yet fully enforced; scenario flows remain optimisation decisions within the existing equations. Installed-firmware response is also unverified.
+`simulate_energy_plan` derives first-step operating mode from mutually exclusive forced battery rates. SOC stopping is modelled, including starting beyond the cut-off; self-consumption ignores action SOC cut-offs. The fixed 100 W minimum positive rate distinguishes forcing from zero. Self-consumption now fixes first-step scenario flows to the PV-first response under current equipment/energy bounds and efficiencies. Intentional economic discharge must select a forced mode. PV-first priority and complete saturation in forced modes are still not fully enforced; their scenario flows retain optimisation freedom within the existing equations. Installed-firmware response is also unverified.
 
 Planning remains report-only: no device commands, acknowledgement, EMS ownership or handover are implemented. Real device/provider behavior, Docker installation, actual process-kill recovery, sustained concurrent SQLite writes and exhaustive browser/output combinations remain unverified. Dashboard administrative confirmation is not authentication; intended access policy remains undecided.
 
 ## Material planning checks (2026-10-29)
 
-Targeted review of the current working tree, including its uncommitted scenario/configuration changes. The numerical cases below use synthetic in-memory forecasts, the current YAML tariff schedules and 95% charging/discharging efficiencies. They are counterexamples, not historical closed-loop savings measurements. The user's database was opened only through SQLite `mode=ro` to inspect metadata and existing telemetry. The review used no migrations or device commands. Its grid-meter accounting finding has since been corrected with per-interval/scenario direction constraints; the remaining findings below concern command response and battery charging limits.
+Targeted review of the current working tree, including its uncommitted scenario/configuration changes. The numerical cases below use synthetic in-memory forecasts, the current YAML tariff schedules and 95% charging/discharging efficiencies. They are counterexamples, not historical closed-loop savings measurements. The user's database was opened only through SQLite `mode=ro` to inspect metadata and existing telemetry. The review used no migrations or device commands. Its grid-meter accounting finding has since been corrected with per-interval/scenario direction constraints. The battery charging limit now uses battery charging capability independently of AC absorption, with solar/mixed/grid regression coverage. The remaining finding below concerns command response.
 
-### Proposed command and predicted flows disagree
+### Remaining forced-mode command response
 
-Source: [first-step constraints and action extraction](../../solar_model/planning/optimisation.py).
+The self-consumption counterexample from the targeted review is corrected. First-step passive flows are fixed per scenario using numeric forecast inputs, initial energy, efficiencies, equipment limits and configured energy bounds. Regression tests prevent surplus PV export being paired with discretionary battery discharge to household load in mode 2. If intentional discharge wins economically, the optimiser must select a forced mode; the mode is not relabelled after solving.
 
-A 12:00 UTC start on 2026-10-29, 10 kWh synthetic battery capacity, 5 kWh initial state and 5 kW equipment limits reproduced self-consumption mode 2 with both forced rates zero. Solar is 1 kWh and household demand 0.25 kWh in the first 15 minutes, with zero energy thereafter. Use the shipped 24-hour visible projection plus hidden extension and protection preference zero. The solver sends all 1 kWh PV to grid, supplies the 0.25 kWh household demand from battery, and ends at 4.736842 kWh. The missing PV priority lets battery-to-load substitute for the disabled battery-to-grid route.
-
-Under the documented self-consumption policy, this unconstrained, partially charged case instead supplies demand from PV and charges from its surplus: 5 + (1 - 0.25) * 0.95 = 5.7125 kWh. The difference is about 0.976 kWh in one action interval. Intentional discharge to prepare for cheaper charging can be economically reasonable, but the proposed command must express that intent and reproduce the predicted rates/stopping behaviour. Correct the mode-dependent dispatch constraints; merely renaming mode 2 after solving is not an established fix. Installed-firmware response was not tested.
-
-### Battery DC charging is restricted by an unrelated AC limit
-
-Source: [system_limits](../../solar_model/planning/system.py) and [battery-charge constraint](../../solar_model/planning/optimisation.py).
-
-`max_charge_kwh = min(inverter_battery_charge_power_kw, inverter_max_absorption_power_kw) * duration` bounds the sum of solar and grid charging inputs. The AC absorption constraint is also applied separately to grid charging. This incorrectly restricts DC-coupled solar charging to the AC limit.
-
-Read-only historical evidence: at **2026-08-30 14:29 UTC**, stored plant readings show battery charging **7.782 kW**, PV **8.081 kW**, grid import **0.030 kW**, household load **0.269 kW**. There are 41 stored samples with battery charging above 5.5 kW and absolute grid power below 0.1 kW. These observations establish that total charging is not universally limited to 5.5 kW; they do not establish a complete efficiency curve or atomic register balance.
-
-Controlled synthetic comparison: start at 2026-10-29 12:00 UTC, capacity 18.08 kWh, initial energy 0.55 kWh and the metadata/efficiencies above. Supply 8 kW solar for two hours, then zero solar; demand is 4 kW at clock hours 17-21 on each day and 0.3 kW otherwise. Retain the shipped 24-hour projection plus extension. A single-scenario diagnostic changes only the total battery charging bound to its 8.8 kW metadata value; the separate AC absorption and inverter-flow constraints remain active. This conservative diagnostic is not a complete battery-side power/efficiency convention repair.
-
-| Result | Current model | Separated battery/AC bound |
-| --- | --- | --- |
-| Solar stored over first two hours | 10.45 kWh | 14.63 kWh |
-| Solar exported over first two hours | 4.4 kWh | 0 kWh |
-| Visible-day net cost | EUR 4.64353 | EUR 3.79150 |
-
-The EUR 0.85202 difference is about 18% of the current projected visible-day cost. It survives protection preferences zero and 50. Both noon cases return self-consumption initially, so that comparison alone does not establish a different first command or measured real-world savings.
-
-A separate morning comparison does change the immediate command. Start at **07:00 UTC** on the same date with **3 kWh initial energy**, 8 kW solar at **12:00-14:00** on the first day only, and household demand of **3 kW at 17:00-21:00** on both days and **0.3 kW otherwise**. Keep protection preference **50**, the shipped projection, tariffs, battery/inverter metadata, efficiencies and terminal credit. The current bound produces **mode 4, 5.5 kW forced charging** in the first 15 minutes (1.375 kWh grid energy for battery charging, plus household import). Changing only the battery/AC bound separation produces **mode 2, no forced charging and no grid import** in that interval. Projected visible costs are respectively EUR 1.71142 and EUR 1.59229. Thus the incorrect capability bound can cause unnecessary immediate grid charging as well as substantially pessimistic solar-storage projections. These are model comparisons, not measured executed-device savings.
-
-The repair should keep battery-port limits separate from AC conversion limits and explicitly reconcile which side of efficiency each rated power constrains.
+The correction does not establish complete PV-first routing/saturation for forced charging/discharging, installed-firmware behaviour, metadata-SOC conventions or controller execution. Those remain open. The current self-consumption response uses the same uniform-within-interval energy approximation and configured bounds as the rest of the model; it is not a hardware-validation claim.
 
 ### Scope and exclusions
 

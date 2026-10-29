@@ -18,7 +18,7 @@ def system_limits(device: DeviceInfo, interval_hours: float) -> SystemLimits:
     if not (0 < device.charge_efficiency <= 1) or not (0 < device.discharge_efficiency <= 1):
         raise ValueError("battery efficiencies must be between 0 and 1 (inclusive)")
     capacity = device.system_battery_capacity_kwh * device.battery_state_of_health_percent / 100
-    max_charge_kwh = min(device.inverter_battery_charge_power_kw, device.inverter_max_absorption_power_kw) * interval_hours
+    max_charge_kwh = device.inverter_battery_charge_power_kw * interval_hours
     max_discharge_kwh = min(device.inverter_battery_discharge_power_kw, device.inverter_max_active_power_kw) * interval_hours
     if capacity <= 0 or max_charge_kwh < 0 or max_discharge_kwh < 0:
         raise ValueError("battery capacity and charge/discharge limits must be non-negative")

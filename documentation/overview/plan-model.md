@@ -38,7 +38,7 @@ We choose one action now by testing how it performs across nine possible futures
 
 Shared variables describe the first action: forced battery charge/discharge rates and their SOC cut-offs. Positive charging implies charge mode, positive discharging implies discharge mode, and both zero imply self-consumption. Each scenario has its own energy flows, battery path and later decisions.
 
-The first interval's **physical outcomes are not shared**. The same self-consumption command can charge in a high-solar scenario and discharge in a high-load scenario. Shared forced rates, SOC stopping and direction restrictions constrain first-step flows. However, complete PV-first priority and saturation/self-consumption response are not enforced; remaining flow choices are still optimisation decisions. See [first-step findings](../reviews/findings.md#first-step-action-modelling).
+The first interval's **physical outcomes are not shared**. The same self-consumption command can charge in a high-solar scenario and discharge in a high-load scenario. Shared forced rates, SOC stopping and direction restrictions constrain first-step flows. For self-consumption, the first-step flows are calculated from each scenario: PV supplies demand first, surplus charges the battery, residual demand draws from the battery, and remaining grid exchange/curtailment follows equipment and configured energy limits. Conditional linear constraints enforce these outcomes without additional Boolean variables. Forced-mode PV priority and complete saturation response remain incompletely constrained. See [first-step findings](../reviews/findings.md#first-step-action-modelling).
 
 `_simulate_energy_plan` creates vectorised time-by-scenario flow/battery variables and one shared first-action control set, builds a single probability-weighted `cp.Problem(cp.Maximize(score), constraints)`, and solves it once with CVXPY/HiGHS. Inline sections are Build Model, Optimise Model and Model to Results; there are no separate build/optimise/extract functions or intermediate EnergyModel/NextActionVariables classes. The formulation is a mixed-integer linear programme because it includes Boolean charge/force/SOC-stop decisions.
 
@@ -269,7 +269,7 @@ It represents battery storage, household demand, solar generation, the inverter 
 
 The executable control set is self-consumption (2), charge with PV first (4), and discharge with PV first (5). Modes 3 and 6 are excluded from this design. The numerical mapping is defined in Appendix 6 of the [Sigenergy Modbus V2.9 specification](../reference/Sigenergy%20Modbus%20Protocol%20EN_V2.9.pdf); exact command response still requires verification on the installed firmware.
 
-The current model derives mode from mutually exclusive forced battery rates and enforces SOC stopping with additional Boolean min/max constraints, including when initial energy is already beyond the cut-off. Self-consumption ignores action SOC cut-offs and disables first-period grid-to-battery and battery-to-grid routes. Full PV-first priority and saturation at all other equipment/flow limits are not yet enforced. Consequently the proposed commands require firmware/physical validation before execution.
+The current model derives mode from mutually exclusive forced battery rates and enforces SOC stopping with additional Boolean min/max constraints, including when initial energy is already beyond the cut-off. Self-consumption ignores action SOC cut-offs and disables first-period grid-to-battery and battery-to-grid routes. Its first-period PV/load/charge/discharge/export/curtailment outcomes are fixed per scenario using the starting energy, configured energy bounds, efficiencies and equipment limits; the economic objective cannot choose alternative passive flows. Complete forced-mode PV-first priority and saturation at all other equipment/flow limits are not yet enforced. Consequently the proposed commands require firmware/physical validation before execution.
 
 The [Sigenergy Modbus V2.9 specification](../reference/Sigenergy%20Modbus%20Protocol%20EN_V2.9.pdf) and [register review](../reviews/sigenergy-home-assistant-register-review.md) provide integration context. No control-register writes, acknowledgement/read-back, retained EMS ownership or handover implementation exist in this application.
 
@@ -294,11 +294,13 @@ The resulting `battery_end` is $E_{t,s}$ used by the protection curve; `grid_imp
 
 ### 5.4 Physical Constraints
 
+Battery charging input from solar plus grid is bounded by battery DC charging power times interval hours. Grid charging separately observes inverter AC absorption and shared conversion limits; the AC absorption rating does not cap DC solar charging. Under the current single charging efficiency, stored charge equals charging input times charge efficiency.
+
 Implemented constraints include health-adjusted capacity, configured hard minimum/maximum battery schedules, mutually exclusive charging/discharging, duration-scaled battery limits, shared inverter active-power/absorption bounds and the configured battery-to-grid export limit. The preferred reserve R is separate and soft. Current power settings constrain battery/inverter routes; they do not establish general site import/export meter limits.
 
 Solar may be explicitly clipped when it cannot be used/stored/exported. Flow equalities conserve solar, household load and battery energy. Separate import/export flows are mutually exclusive within each interval and scenario, using a Boolean grid direction independent of battery direction. The same shared battery action can therefore produce importing and exporting outcomes in different scenarios. Import bounds include household demand plus feasible grid charging; export bounds follow inverter output capability. These bounds implement direction selection, not general site-meter limits. Opposite grid directions at different times require separate model intervals; long hidden slots retain this aggregation approximation.
 
-A complete PV-priority/self-consumption policy is still absent; do not treat tariff-driven route choices as verified device behaviour. This limitation and the SOC-convention issue are tracked in [review findings](../reviews/findings.md). Infeasible solves raise an error; initial measured energy is not itself constrained by interval-end minimum/maximum schedules.
+The first self-consumption interval follows a fixed PV-first response within the model's uniform-power and configured-energy-bound conventions. Forced-mode PV priority and saturation remain incomplete; do not treat their tariff-driven route choices as verified device behaviour. This limitation and the SOC-convention issue are tracked in [review findings](../reviews/findings.md). Infeasible solves raise an error; initial measured energy is not itself constrained by interval-end minimum/maximum schedules.
 
 ### 5.5 Units, Time and Data Conventions
 
@@ -338,7 +340,7 @@ The Plan tab offers protection adjustment, a one-line proposed action, expected-
 
 The model assumes independent scenario probabilities and full scenario-specific flexibility after the first action. Protection is a preference utility, not a calibrated outage probability. Remaining issues are recorded in [review findings](../reviews/findings.md), including:
 
-- Full PV-priority, saturation and self-consumption command response, plus installed-firmware validation.
+- Complete forced-mode PV priority and saturation, plus installed-firmware validation of all command responses.
 - A consistent nameplate/health-adjusted SOC convention and mapping metadata cut-offs into physical bounds.
 - General site-meter power limits; grid import/export direction is already exclusive within each interval/scenario, including when export prices exceed import prices.
 - Solar target-time semantics, fallback/padding visibility, forecast input validation and age policy.

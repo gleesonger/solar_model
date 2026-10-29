@@ -60,9 +60,6 @@ def _simulate_energy_plan(device_info: DeviceInfo, device_state: DeviceState, sc
     plan_columns = ["starts_at", "ends_at", "minimum_battery_kwh", "maximum_battery_kwh", "tariff_name", "import_rate", "export_rate", "limit_battery_export_rate_to_grid_kw", "load_kwh", "solar_kwh"]
     initial_battery = device_state.battery_kwh
     limits = system_limits(device_info, theta_hrs)
-    capacity_kwh = limits.capacity_kwh
-    max_charge_kwh = limits.max_charge_kwh
-    max_discharge_kwh = limits.max_discharge_kwh
 
     solar_to_load = cp.Variable((num_time_periods, scenario_count), nonneg=True, name="solar_to_load")
     solar_to_battery = cp.Variable((num_time_periods, scenario_count), nonneg=True, name="solar_to_battery")
@@ -75,13 +72,10 @@ def _simulate_energy_plan(device_info: DeviceInfo, device_state: DeviceState, sc
     battery_charging = cp.Variable((num_time_periods, scenario_count), boolean=True, name="battery_charging")
     grid_importing = cp.Variable((num_time_periods, scenario_count), boolean=True, name="grid_importing")
 
-    charge_loss_factor = limits.charge_loss_factor
-    discharge_loss_factor = limits.discharge_loss_factor
+    solar_to_battery_loss = limits.charge_loss_factor * solar_to_battery
+    grid_to_battery_loss = limits.charge_loss_factor * grid_to_battery
 
-    solar_to_battery_loss = charge_loss_factor * solar_to_battery
-    grid_to_battery_loss = charge_loss_factor * grid_to_battery
-
-    battery_to_ac_loss = discharge_loss_factor * (battery_to_load + battery_to_grid)
+    battery_to_ac_loss = limits.discharge_loss_factor * (battery_to_load + battery_to_grid)
 
     forcing = cp.Variable(2, boolean=True, name="next_forcing_active")
 
@@ -94,21 +88,21 @@ def _simulate_energy_plan(device_info: DeviceInfo, device_state: DeviceState, sc
         cp.sum(forcing) <= 1,
         next_action_force_battery_charge_rate >= MIN_FORCE_RATE_KW * forcing[0],
         next_action_force_battery_discharge_rate >= MIN_FORCE_RATE_KW * forcing[1],
-        next_action_force_battery_charge_rate <= max_charge_kwh / theta_hrs * forcing[0],
-        next_action_force_battery_discharge_rate <= max_discharge_kwh / theta_hrs * forcing[1],
+        next_action_force_battery_charge_rate <= limits.max_charge_kwh / theta_hrs * forcing[0],
+        next_action_force_battery_discharge_rate <= limits.max_discharge_kwh / theta_hrs * forcing[1],
         next_action_discharge_cut_off_soc_percent <= 100,
         next_action_charge_cut_off_soc_percent <= 100,
     ]
     # Shared first-step energy, clipped at the relevant SOC stopping point.
-    big_m = (capacity_kwh + abs(initial_battery)) / min(device_info.charge_efficiency, device_info.discharge_efficiency) + max(max_charge_kwh, max_discharge_kwh)
+    big_m = (limits.capacity_kwh + abs(initial_battery)) / min(device_info.charge_efficiency, device_info.discharge_efficiency) + max(limits.max_charge_kwh, limits.max_discharge_kwh)
     forced_charge_energy = _energy_until_soc(
         next_action_force_battery_charge_rate * theta_hrs,
-        (capacity_kwh * next_action_charge_cut_off_soc_percent / 100 - initial_battery) / device_info.charge_efficiency,
+        (limits.capacity_kwh * next_action_charge_cut_off_soc_percent / 100 - initial_battery) / device_info.charge_efficiency,
         big_m, constraints,
     )
     forced_discharge_energy = _energy_until_soc(
         next_action_force_battery_discharge_rate * theta_hrs,
-        (initial_battery - capacity_kwh * next_action_discharge_cut_off_soc_percent / 100) * device_info.discharge_efficiency,
+        (initial_battery - limits.capacity_kwh * next_action_discharge_cut_off_soc_percent / 100) * device_info.discharge_efficiency,
         big_m, constraints,
     )
     battery_level_eop = cp.Variable((num_time_periods, scenario_count), nonneg=True, name="battery_level_eop")
@@ -122,7 +116,7 @@ def _simulate_energy_plan(device_info: DeviceInfo, device_state: DeviceState, sc
         import_rule = tariff_rule(import_rules, local)
         limit_battery_export_rate_to_grid_kw = tariff_rule_rate(config.energy_plan.limit_battery_export_rate_to_grid_kw, local, 9999)
         minimum_battery_kwh = tariff_rule(config.energy_plan.minimum_battery_kwh, local).rate
-        maximum_battery_kwh = min(capacity_kwh, tariff_rule(config.energy_plan.maximum_battery_kwh, local).rate)
+        maximum_battery_kwh = min(limits.capacity_kwh, tariff_rule(config.energy_plan.maximum_battery_kwh, local).rate)
         export_rate = tariff_rule(export_rules, local).rate
         for scenario in scenarios:
             forecast_point = scenario.forecast_data.sum(starts_at, ends_at)
@@ -166,6 +160,45 @@ def _simulate_energy_plan(device_info: DeviceInfo, device_state: DeviceState, sc
         inputs["minimum_battery_kwh"] <= battery_level_eop,
         battery_level_eop <= inputs["maximum_battery_kwh"],
     ]
+    # Self-consumption determines first-step dispatch; it is not a free flow policy.
+    # Keep the current configured energy bounds and efficiency conventions.
+    pv = inputs["solar_kwh"][0, :]
+    demand = inputs["load_kwh"][0, :]
+    ac_budget = device_info.inverter_max_active_power_kw * theta_hrs
+    self_pv_load = np.minimum(np.minimum(pv, demand), ac_budget)
+    self_charge_input = np.minimum.reduce([
+        pv - self_pv_load,
+        max_charge[0, :],
+        np.maximum(0., inputs["maximum_battery_kwh"][0, :] - initial_battery)
+        / device_info.charge_efficiency,
+    ])
+    self_battery_load = np.minimum.reduce([
+        demand - self_pv_load,
+        max_discharge[0, :],
+        ac_budget - self_pv_load,
+        np.maximum(0., initial_battery - inputs["minimum_battery_kwh"][0, :])
+        * device_info.discharge_efficiency,
+    ])
+    self_pv_grid = np.minimum(
+        pv - self_pv_load - self_charge_input,
+        ac_budget - self_pv_load - self_battery_load,
+    )
+    # Forcing is either zero (self-consumption) or one (a forced mode).
+    # Each bound is an existing physical upper bound for its route, so these
+    # equalities relax completely when either forced mode is selected.
+    active_forcing = cp.sum(forcing)
+    for flow, target, bound in (
+        (solar_to_load[0, :], self_pv_load, np.minimum(pv, demand)),
+        (solar_to_battery[0, :], self_charge_input * device_info.charge_efficiency,
+         np.minimum(pv, max_charge[0, :]) * device_info.charge_efficiency),
+        (battery_to_load[0, :], self_battery_load, np.minimum(demand, max_discharge[0, :])),
+        (grid_to_load[0, :], demand - self_pv_load - self_battery_load, demand),
+        (solar_to_grid[0, :], self_pv_grid, np.minimum(pv, ac_budget)),
+        (solar_clipped[0, :], pv - self_pv_load - self_charge_input - self_pv_grid, pv),
+    ):
+        constraints += [flow - target <= bound * active_forcing,
+                        target - flow <= bound * active_forcing]
+
     net_cost = (cp.multiply(inputs["import_rate"], grid_import)
                 - cp.multiply(inputs["export_rate"], grid_export))
     net_cost_flows = [net_cost[:, s] for s in range(scenario_count)]
@@ -224,7 +257,7 @@ def _simulate_energy_plan(device_info: DeviceInfo, device_state: DeviceState, sc
 
     protection_value = _protection_value(config, projection_starts_at, sum(durations))
     terminal_rate = _terminal_rate(config, periods[-1][1]) * device_info.discharge_efficiency
-    score_segments = _protection_segments(capacity_kwh, config.energy_plan.preferred_reserve_kwh)
+    score_segments = _protection_segments(limits.capacity_kwh, config.energy_plan.preferred_reserve_kwh)
     score_weights = np.array(durations) / sum(durations)
     for s, (scenario_name, df) in enumerate(dict_df_results.items()):
 

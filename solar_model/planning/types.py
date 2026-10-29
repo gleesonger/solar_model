@@ -1,5 +1,5 @@
 from __future__ import annotations
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from collections.abc import Iterable
 from enum import IntEnum
@@ -11,6 +11,7 @@ from solar_model.time_utils import utc_instant
 class SimulationResult:
     next_action: NextAction
     results: dict[str,pd.DataFrame]
+    lookahead_results: dict[str, pd.DataFrame] = field(default_factory=dict)
 
 class OperatingMode(IntEnum):
     SELF_CONSUMPTION = 2

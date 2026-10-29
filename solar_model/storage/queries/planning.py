@@ -20,9 +20,9 @@ LOGGER = logging.getLogger(__name__)
 
 
 def _forecast_bounds(as_of: datetime, config: Config) -> tuple[datetime, datetime]:
-    """Whole UTC hours around the projection, for paired scenario half-hours."""
+    """Whole UTC hours around the visible projection plus 24-hour lookahead."""
     start = pd.Timestamp(utc_instant(as_of))
-    end = start + pd.Timedelta(hours=config.energy_plan.num_projection_hours)
+    end = start + pd.Timedelta(hours=config.energy_plan.num_projection_hours + 24)
     return start.floor("h").to_pydatetime(), end.ceil("h").to_pydatetime()
 
 
@@ -93,12 +93,13 @@ def load_forecast_as_of(database: SolarDatabase, as_of: datetime, config: Config
 
     solar: list[ForecastInterval] = []
     coverage_start, projection_end = _forecast_bounds(as_of, config)
+    profile_start = utc_instant(datetime.combine(as_of.astimezone(timezone).date(), time.min, timezone))
     previous_ends_at: datetime | None = None
     for ends_at, solar_kwh in sorted(solar_intervals.items()):
-        if ends_at <= coverage_start:
+        if ends_at <= profile_start:
             continue
         starts_at = previous_ends_at or add_elapsed(ends_at, -timedelta(seconds=config.forecast.solar.interval_seconds))
-        left, right = max(starts_at, coverage_start), min(ends_at, projection_end)
+        left, right = max(starts_at, profile_start), min(ends_at, projection_end)
         if left >= right:
             break
         solar.append(ForecastInterval(left, right, float(solar_kwh) * ((right - left) / (ends_at - starts_at))))
@@ -108,14 +109,69 @@ def load_forecast_as_of(database: SolarDatabase, as_of: datetime, config: Config
 
     if not solar:
         raise ValueError("the as-of forecast contains no future solar intervals")
-    if utc_instant(solar[0].starts_at) > coverage_start:
-        solar.insert(0, ForecastInterval(coverage_start, solar[0].starts_at, 0.0))
+    if utc_instant(solar[0].starts_at) > profile_start:
+        solar.insert(0, ForecastInterval(profile_start, solar[0].starts_at, 0.0))
     if utc_instant(solar[-1].ends_at) < utc_instant(projection_end):
         solar.append(ForecastInterval(solar[-1].ends_at, projection_end, 0.0))
 
     load = load_house_load_intervals(database, as_of, config)
+    solar = _lookahead_solar(database, solar, as_of, config, coverage_start, projection_end)
 
     return ForecastData(solar=solar, load=load)
+
+
+def _lookahead_solar(database: SolarDatabase, solar: list[ForecastInterval], as_of: datetime,
+                     config: Config, coverage_start: datetime, coverage_end: datetime) -> list[ForecastInterval]:
+    """Repeat today's actual-plus-forecast hourly power profile in the hidden day."""
+    zone = ZoneInfo(config.timezone)
+    cutoff = utc_instant(as_of)
+    day = as_of.astimezone(zone).replace(hour=0, minute=0, second=0, microsecond=0)
+    sample = SigenStorModbusSample
+    with database.sessions() as session:
+        rows = session.execute(select(sample.collected_at_utc, sample.plant_pv_power_kw)
+            .where(sample.collected_at_utc >= utc_instant(day), sample.collected_at_utc <= cutoff,
+                   sample.plant_pv_power_kw.is_not(None))).all()
+    powers = defaultdict(list)
+    for timestamp, power in rows:
+        powers[datetime.fromisoformat(timestamp).astimezone(zone).hour].append(float(power))
+    profile = {}
+    intervals = tuple(solar)
+    missing_hours = []
+    for hour in range(24):
+        left = utc_instant(day + timedelta(hours=hour))
+        right = utc_instant(day + timedelta(hours=hour + 1))
+        if right <= left:  # A skipped spring clock hour has no source energy.
+            profile[hour] = 0.
+            continue
+        past_end = min(right, max(left, cutoff))
+        actual = powers.get(hour)
+        if past_end > left and actual:
+            energy = sum(actual) / len(actual) * (past_end - left).total_seconds() / 3600
+        else:
+            energy = ForecastData._sum_intervals(intervals, left, past_end) if past_end > left else 0.
+            if past_end > left:
+                missing_hours.append(hour)
+        if right > past_end:
+            energy += ForecastData._sum_intervals(intervals, past_end, right)
+        profile[hour] = energy / ((right - left).total_seconds() / 3600)
+    if missing_hours:
+        LOGGER.warning("plan_model lookahead solar: actuals missing for local hours %s; using forecast", missing_hours)
+
+    visible_end = cutoff + timedelta(hours=config.energy_plan.num_projection_hours)
+    result = []
+    for interval in solar:
+        left, right = max(coverage_start, interval.starts_at), min(visible_end, interval.ends_at)
+        if left < right:
+            result.append(ForecastInterval(left, right, interval.kwh * ((right - left) / (interval.ends_at - interval.starts_at))))
+    cursor = visible_end
+    while cursor < coverage_end:
+        local = cursor.astimezone(zone)
+        next_hour = utc_instant(local.replace(minute=0, second=0, microsecond=0)) + timedelta(hours=1)
+        end = min(coverage_end, next_hour)
+        result.append(ForecastInterval(cursor, end, profile[local.hour] * (end - cursor).total_seconds() / 3600))
+        cursor = end
+    LOGGER.info("plan_model lookahead solar: repeating local-day actuals + forecast profile from %s", day.date())
+    return result
 
 
 def load_plan_actuals(database: SolarDatabase, starts_at: datetime, ends_at: datetime, capacity_kwh: float) -> pd.DataFrame:

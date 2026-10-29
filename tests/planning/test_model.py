@@ -14,8 +14,8 @@ from solar_model.planning.types import DeviceInfo, DeviceState, ForecastData, Fo
 def test_in_memory_plan_preserves_scenario_energy_and_cost(resolution, expected_durations):
     start = datetime(2026, 10, 24, tzinfo=timezone.utc)
     end = start + timedelta(hours=2)
-    baseline = ForecastData([ForecastInterval(start, end, 0.)],
-                            [ForecastInterval(start, end, 2.)])
+    baseline = ForecastData([ForecastInterval(start, end + timedelta(hours=24), 0.)],
+                            [ForecastInterval(start, end, 2.), ForecastInterval(end, end + timedelta(hours=24), 0.)])
     device = DeviceInfo(**{field.name: 1. for field in fields(DeviceInfo)})
     device = replace(device, system_battery_capacity_kwh=10., battery_state_of_health_percent=100.,
                      inverter_max_active_power_kw=5., inverter_max_absorption_power_kw=5.,
@@ -67,6 +67,47 @@ def test_generated_scenarios_separate_names_and_probabilities_from_forecasts():
     assert not hasattr(forecast, "name")
 
 
+@pytest.mark.parametrize("hidden_load", [0., 4.])
+def test_hidden_four_hour_slots_preserve_energy_for_future_demand(monkeypatch, hidden_load):
+    import cvxpy as cp
+    start = datetime(2026, 10, 28, 10, 5, tzinfo=timezone.utc)
+    end = start + timedelta(hours=1)
+    forecast = ForecastData([ForecastInterval(start, end + timedelta(hours=24), 0.)], [
+        ForecastInterval(start, end, 0.), ForecastInterval(end, end + timedelta(hours=4), hidden_load),
+        ForecastInterval(end + timedelta(hours=4), end + timedelta(hours=24), 0.)])
+    device = DeviceInfo(**{f.name: 1. for f in fields(DeviceInfo)})
+    device = replace(device, system_battery_capacity_kwh=10., battery_state_of_health_percent=100.,
+                     charge_efficiency=.95, discharge_efficiency=.95)
+    config = load_config()
+    rule = TariffRule(("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"), "00:00", "24:00", .4, "flat")
+    config = replace(config, tariffs=TariffsConfig((TariffPeriod("2000-01-01", (rule,), (replace(rule, rate=.1),)),)),
+        energy_plan=replace(config.energy_plan, num_projection_hours=1, projection_resolution_mins=(60,),
+            protection_preference=0., minimum_battery_kwh=(replace(rule, rate=0.),),
+            maximum_battery_kwh=(replace(rule, rate=10.),)))
+    problems = []
+    solve = cp.Problem.solve
+    def capped_solve(problem, *args, **kwargs):
+        problems.append(problem)
+        return solve(problem, *args, **{**kwargs, "time_limit": 5.})
+    monkeypatch.setattr(cp.Problem, "solve", capped_solve)
+    result = simulate_energy_plan(device, DeviceState(4.), [ScenarioData("base", forecast, 1.)], config, start)
+    visible, hidden = result.results["base"], result.lookahead_results["base"]
+    assert len(visible) == 1
+    assert visible.ends_at.iloc[-1] == end
+    assert visible.grid_export_kwh.sum() == pytest.approx(0., abs=1e-6)
+    assert visible.battery_end_kwh.iloc[-1] == pytest.approx(4.)
+    assert hidden.starts_at.tolist() == [end + timedelta(hours=4 * h) for h in range(6)]
+    assert [(b - a).total_seconds() / 60 for a, b in zip(hidden.starts_at, hidden.ends_at)] == [240.] * 6
+    assert hidden.battery_start_kwh.iloc[0] == pytest.approx(visible.battery_end_kwh.iloc[-1])
+    delivered = min(3.8, hidden_load)
+    assert hidden.battery_to_load_kwh.sum() == pytest.approx(delivered)
+    assert hidden.battery_end_kwh.iloc[-1] == pytest.approx(4. - delivered / .95, abs=1e-6)
+    assert visible.terminal_score.eq(0.).all()
+    assert hidden.terminal_score.iloc[:-1].eq(0.).all()
+    assert hidden.terminal_score.iloc[-1] == pytest.approx(hidden.battery_end_kwh.iloc[-1] * .95 * (.4 + .1) / 2)
+    assert visible.total_score.sum() + hidden.total_score.sum() == pytest.approx(problems[0].value)
+
+
 def test_each_call_builds_a_fresh_model_with_current_inputs(monkeypatch, caplog, capsys):
     import cvxpy as cp
     from solar_model.planning import optimisation
@@ -97,11 +138,11 @@ def test_each_call_builds_a_fresh_model_with_current_inputs(monkeypatch, caplog,
 
     def run(when, battery, demand, cfg=config, info=device, probability=1.):
         end = when + timedelta(hours=1)
-        forecast = ForecastData([ForecastInterval(when, end, 0.)], [ForecastInterval(when, end, demand)])
-        return simulate_energy_plan(info, DeviceState(battery), [ScenarioData("base", forecast, probability)], cfg, when).results["base"]
+        forecast = ForecastData([ForecastInterval(when, end + timedelta(hours=24), 0.)], [ForecastInterval(when, end, demand), ForecastInterval(end, end + timedelta(hours=24), 0.)])
+        return simulate_energy_plan(info, DeviceState(battery), [ScenarioData("base", forecast, probability)], cfg, when)
 
-    first = run(start, 0., 1.)
-    second = run(start + timedelta(days=1), 1., 2.)
+    first = run(start, 0., 1.).results["base"]
+    second = run(start + timedelta(days=1), 1., 2.).results["base"]
     assert problems[0] is not problems[1]
     assert first.battery_start_kwh.iloc[0] == 0.
     assert first.load_kwh.sum() == pytest.approx(1.)
@@ -110,8 +151,14 @@ def test_each_call_builds_a_fresh_model_with_current_inputs(monkeypatch, caplog,
     assert second.battery_start_kwh.iloc[0] == 1.
     assert second.load_kwh.sum() == pytest.approx(2.)
     assert second.starts_at.iloc[0] == start + timedelta(days=1)
+    scored_result = run(start, 4., 1., cfg=replace(config, energy_plan=replace(config.energy_plan, protection_preference=75.)))
+    scored = scored_result.results["base"]
+    assert scored.cost_score.tolist() == pytest.approx((-scored.net_cost).tolist())
+    assert scored.protection_score.sum() > 0
+    assert scored.total_score.tolist() == pytest.approx((scored.cost_score + scored.protection_score).tolist())
+    assert scored.total_score.sum() + scored_result.lookahead_results["base"].total_score.sum() == pytest.approx(problems[-1].value, abs=1e-6)
     assert "plan_model complexity:" in caplog.text
-    assert "time_steps=[15*1, 10*1, 15*2, 5*1]" in caplog.text
+    assert "time_steps=[15*1, 10*1, 15*2, 5*1, 240*6]" in caplog.text
     timings = capsys.readouterr().out
     assert "plan_model end: status=success elapsed_seconds=" in timings
     assert "plan_model solve: status=optimal compile_seconds=" in timings
@@ -121,7 +168,7 @@ def test_each_call_builds_a_fresh_model_with_current_inputs(monkeypatch, caplog,
 def test_discharge_power_limit_scales_with_each_mixed_interval():
     start = datetime(2026, 10, 24, tzinfo=timezone.utc)
     end = start + timedelta(hours=2)
-    forecast = ForecastData([ForecastInterval(start, end, 0.)], [ForecastInterval(start, end, 6.)])
+    forecast = ForecastData([ForecastInterval(start, end + timedelta(hours=24), 0.)], [ForecastInterval(start, end, 6.), ForecastInterval(end, end + timedelta(hours=24), 0.)])
     device = DeviceInfo(**{field.name: 1. for field in fields(DeviceInfo)})
     device = replace(device, system_battery_capacity_kwh=10., battery_state_of_health_percent=100.,
                      inverter_max_active_power_kw=5., inverter_max_absorption_power_kw=5.,
@@ -181,7 +228,9 @@ def test_mixed_projection_grid_ignores_tariff_and_battery_schedule_boundaries():
     (50, [15, 10] + [15] * 19 + [60] * 18 + [50]),
 ])
 def test_projection_keeps_first_action_and_aligns_following_periods(minute, expected):
-    config = replace(load_config(), timezone="UTC")
+    config = load_config()
+    config = replace(config, timezone="UTC", energy_plan=replace(
+        config.energy_plan, num_projection_hours=24, projection_resolution_mins=(15,) * 24 + (60,) * 18))
     start = datetime(2026, 10, 27, 10, minute, tzinfo=timezone.utc)
     periods = _projection_intervals(config, start)
     assert [(b - a).total_seconds() / 60 for a, b in periods] == expected

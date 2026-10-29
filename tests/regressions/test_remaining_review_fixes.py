@@ -224,7 +224,8 @@ def test_dst_overlap_scenarios_and_solver_use_real_elapsed_hours(day, end_hour):
     start = datetime.combine(day, datetime.min.time(), zone)
     end = start.replace(hour=end_hour)
     interval = ForecastInterval(start, end, 4.)
-    forecast = ForecastData([interval], [interval])
+    tail = ForecastInterval(utc_instant(end), utc_instant(end) + timedelta(hours=24), 0.)
+    forecast = ForecastData([interval, tail], [interval, tail])
     for hour in range(4):
         assert forecast.sum(add_elapsed(start, timedelta(hours=hour)), add_elapsed(start, timedelta(hours=hour + 1))).solar_kwh == 1.
     scenarios = create_scenarios(forecast)
@@ -285,7 +286,7 @@ def test_database_planning_loader_covers_four_elapsed_dst_hours(database, monkey
             session.add(SigenStorHourlySample(hour_start_utc=stamp.isoformat(), import_tariff_band="day",
                         sample_count=1, house_load_kwh_period=1., plant_load_total_kwh_period=2.))
     forecast = planner.load_forecast_as_of(database, start, cfg)
-    assert len(forecast.load) == 4
+    assert len(forecast.load) == 28
     point = forecast.sum(start, add_elapsed(start, timedelta(hours=4)))
     assert (point.solar_kwh, point.load_kwh) == (4., 4.)
 

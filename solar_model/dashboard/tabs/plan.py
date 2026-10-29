@@ -2,15 +2,20 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from dataclasses import dataclass
+from enum import StrEnum
 from html import escape
 import json
+import math
 from zoneinfo import ZoneInfo
+from typing import Literal
 
 from nicegui import run, ui
 import pandas as pd
 
 from solar_model.config import Config
 from solar_model.dashboard.components.warnings import notify_error
+from solar_model.dashboard.planning_worker import ensure_planning_worker
 from solar_model.dashboard.components.tables import mark_final_total_row
 from solar_model.dashboard.components.download_dialog import excel_bytes
 from solar_model.logging_setup import LOGGER
@@ -18,6 +23,109 @@ from solar_model.planning.optimisation import battery_protection_score
 from solar_model.planning.scenarios import LOAD_SCENARIOS, SOLAR_SCENARIOS
 from solar_model.planning.types import OperatingMode, SimulationResult
 from solar_model.services.planning import plan_with_preference
+from solar_model.utils import table_to_object_list
+
+
+class Aggregation(StrEnum):
+    QUANTITY = "quantity"
+    AVERAGE = "average"
+    OPENING_STATE = "opening_state"
+    CLOSING_STATE = "closing_state"
+    SETTING = "setting"
+    TEXT = "text"
+    START_TIME = "start_time"
+    END_TIME = "end_time"
+    DURATION = "duration"
+
+
+@dataclass(frozen=True)
+class PlanColumn:
+    name: str
+    label: str
+    compact_label: str | None
+    compact_order: int | None
+    format: Literal["time", "text", "number"]
+    decimals: int | None
+    aggregation: Aggregation
+    per_hour: bool
+    export: bool
+
+
+# Insertion order is Advanced order; Compact has its own explicit positions.
+PLAN_COLUMNS = {column.name: column for column in table_to_object_list(PlanColumn,
+    #name                                    label                                   compact_label    compact_order format    decimals aggregation                per_hour export
+    ("starts_at",                            "Start",                                None,            1,            "time",   None,    Aggregation.START_TIME,    False,   True),
+    ("ends_at",                              "End",                                  None,            2,            "time",   None,    Aggregation.END_TIME,      False,   True),
+    ("t",                                    "t",                                    None,            3,            "number", 2,       Aggregation.DURATION,      False,   False),
+    ("plan_action",                          "Plan action",                          "Action",        4,            "text",   None,    Aggregation.TEXT,          False,   True),
+    ("tariff_name",                          "Tariff Name",                          "Tariff",        5,            "text",   None,    Aggregation.TEXT,          False,   True),
+    ("import_rate",                          "Import rate (€/kWh)",                  None,            6,            "number", 4,       Aggregation.AVERAGE,       False,   True),
+    ("export_rate",                          "Export rate (€/kWh)",                  None,            7,            "number", 4,       Aggregation.AVERAGE,       False,   True),
+    ("load_kwh",                             "House Load (kWh)",                     "House (kWh)",   8,            "number", 2,       Aggregation.QUANTITY,      False,   True),
+    ("solar_kwh",                            "Solar kWh",                            "Solar (kWh)",   9,            "number", 2,       Aggregation.QUANTITY,      False,   True),
+    ("solar_to_load_kwh",                    "Solar To Load kWh",                    None,            None,         "number", 2,       Aggregation.QUANTITY,      False,   True),
+    ("solar_to_battery_kwh",                 "Solar To Battery kWh",                 None,            None,         "number", 2,       Aggregation.QUANTITY,      False,   True),
+    ("solar_to_battery_loss_kwh",            "Solar To Battery Loss kWh",            None,            None,         "number", 2,       Aggregation.QUANTITY,      False,   True),
+    ("solar_to_grid_kwh",                    "Solar To Grid kWh",                    None,            None,         "number", 2,       Aggregation.QUANTITY,      False,   True),
+    ("solar_clipped_kwh",                    "Solar Clipped kWh",                    None,            None,         "number", 2,       Aggregation.QUANTITY,      False,   True),
+    ("solar_to_inverter_kwh",                "Solar To Inverter kWh",                None,            None,         "number", 2,       Aggregation.QUANTITY,      False,   True),
+    ("grid_to_load_kwh",                     "Grid To Load kWh",                     None,            None,         "number", 2,       Aggregation.QUANTITY,      False,   True),
+    ("grid_to_battery_kwh",                  "Grid To Battery kWh",                  None,            None,         "number", 2,       Aggregation.QUANTITY,      False,   True),
+    ("grid_to_battery_loss_kwh",             "Grid To Battery Loss kWh",             None,            None,         "number", 2,       Aggregation.QUANTITY,      False,   True),
+    ("inverter_ac_to_dc_kwh",                "Inverter Ac To Dc kWh",                None,            None,         "number", 2,       Aggregation.QUANTITY,      False,   True),
+    ("battery_to_load_kwh",                  "Battery To Load kWh",                  None,            None,         "number", 2,       Aggregation.QUANTITY,      False,   True),
+    ("battery_to_grid_kwh",                  "Battery To Grid kWh",                  None,            None,         "number", 2,       Aggregation.QUANTITY,      False,   True),
+    ("battery_to_ac_loss_kwh",               "Battery To Ac Loss kWh",               None,            None,         "number", 2,       Aggregation.QUANTITY,      False,   True),
+    ("battery_to_inverter_kwh",              "Battery To Inverter kWh",              None,            None,         "number", 2,       Aggregation.QUANTITY,      False,   True),
+    ("inverter_dc_to_ac_kwh",                "Inverter Dc To Ac kWh",                None,            None,         "number", 2,       Aggregation.QUANTITY,      False,   True),
+    ("losses_kwh",                           "Losses kWh",                           "Losses (kWh)",  10,           "number", 2,       Aggregation.QUANTITY,      False,   True),
+    ("grid_import_kwh",                      "Grid Import kWh",                      "Import (kWh)",  11,           "number", 2,       Aggregation.QUANTITY,      False,   True),
+    ("grid_export_kwh",                      "Grid Export kWh",                      "Export (kWh)",  12,           "number", 2,       Aggregation.QUANTITY,      False,   True),
+    ("minimum_battery_kwh",                  "Minimum Battery kWh",                  None,            None,         "number", 2,       Aggregation.SETTING,       False,   True),
+    ("maximum_battery_kwh",                  "Maximum Battery kWh",                  None,            None,         "number", 2,       Aggregation.SETTING,       False,   True),
+    ("limit_battery_export_rate_to_grid_kw", "Limit Battery Export Rate To Grid kW", None,            None,         "number", 2,       Aggregation.SETTING,       False,   True),
+    ("battery_start_kwh",                    "Battery start (kWh)",                  None,            None,         "number", 2,       Aggregation.OPENING_STATE, False,   True),
+    ("battery_start_soc_percent",            "Battery start SOC (%)",                None,            None,         "number", 1,       Aggregation.OPENING_STATE, False,   True),
+    ("battery_charging",                     "Battery Charging",                     None,            None,         "number", 2,       Aggregation.SETTING,       False,   True),
+    ("battery_end_kwh",                      "Battery end (kWh)",                    "Battery (kWh)", 13,           "number", 2,       Aggregation.CLOSING_STATE, False,   True),
+    ("battery_end_soc_percent",              "Battery end SOC (%)",                  "SOC (%)",       14,           "number", 1,       Aggregation.CLOSING_STATE, False,   True),
+    ("import_cost",                          "Import cost (€)",                      "Cost (€)",      15,           "number", 2,       Aggregation.QUANTITY,      False,   True),
+    ("export_revenue",                       "Export revenue (€)",                   "Revenue (€)",   16,           "number", 2,       Aggregation.QUANTITY,      False,   True),
+    ("net_cost",                             "Net cost (€)",                         "Net (€)",       17,           "number", 2,       Aggregation.QUANTITY,      False,   True),
+    ("cost_score",                           "Cost Score",                           None,            None,         "number", 2,       Aggregation.QUANTITY,      True,    True),
+    ("protection_score",                     "Protection Score",                     None,            None,         "number", 2,       Aggregation.QUANTITY,      True,    True),
+    ("terminal_score",                       "Terminal Score",                       None,            None,         "number", 2,       Aggregation.QUANTITY,      True,    True),
+    ("total_score",                          "Total Score",                          None,            None,         "number", 2,       Aggregation.QUANTITY,      True,    True),
+)}
+
+
+def detail_column(name: str) -> PlanColumn:
+    """Retain inferred presentation/aggregation for unlisted Advanced columns."""
+    if name in PLAN_COLUMNS:
+        return PLAN_COLUMNS[name]
+    label = name.replace("_", " ").title().replace("Kwh", "kWh").replace("Kw", "kW")
+    return PlanColumn(name, label, None, None, "number", 1 if name.endswith("soc_percent") else 2,
+                      Aggregation.QUANTITY if name.endswith("_kwh") else Aggregation.SETTING, False, True)
+
+
+def detail_columns(frame: pd.DataFrame, compact: bool) -> list[dict]:
+    """Build table/export headers from the shared definitions."""
+    available = {"t", "plan_action", *frame.columns}
+    definitions = [column for column in PLAN_COLUMNS.values() if column.name in available]
+    if compact:
+        definitions = sorted((column for column in definitions if column.compact_order is not None),
+                             key=lambda column: column.compact_order)
+    else:
+        definitions += [detail_column(name) for name in frame if name not in PLAN_COLUMNS]
+    columns = []
+    for definition in definitions:
+        column = {"name": definition.name, "field": definition.name,
+                  "label": (definition.compact_label or definition.label) if compact else definition.label,
+                  "align": "right" if definition.format == "number" else "left", "sortable": False}
+        if definition.decimals is not None:
+            column[":format"] = f"value => value == null ? '' : Number(value).toFixed({definition.decimals})"
+        columns.append(column)
+    return columns
 
 
 def scenario_summary(frame: pd.DataFrame, reserve: float) -> dict[str, float]:
@@ -36,6 +144,17 @@ def scenario_summary(frame: pd.DataFrame, reserve: float) -> dict[str, float]:
         "below_reserve": float(durations[levels < reserve].sum()),
         "protection": float((protection * durations).sum() / durations.sum()),
     }
+
+
+def table_detail_frame(frame: pd.DataFrame) -> pd.DataFrame:
+    """Show hourly score rates and elapsed-hour weights without changing exports."""
+    display = frame.copy()
+    hours = (pd.to_datetime(frame.ends_at) - pd.to_datetime(frame.starts_at)).dt.total_seconds() / 3600
+    display["t"] = hours
+    for column in frame:
+        if detail_column(column).per_hour:
+            display[column] = frame[column] / hours
+    return display
 
 
 def detail_frame(frame: pd.DataFrame, capacity: float | None) -> pd.DataFrame:
@@ -65,22 +184,25 @@ def detail_rows(frame: pd.DataFrame, timezone_name: str, first_mode: OperatingMo
             OperatingMode.DISCHARGE_PV_FIRST: "Force discharge",
             OperatingMode.SELF_CONSUMPTION: "Self-consumption",
         }[first_mode]
-    for column in ("starts_at", "ends_at"):
-        timestamps = pd.to_datetime(display[column], utc=True)
-        display[column] = timestamps.dt.tz_convert(timezone_name).dt.strftime("%H:%M")
-    for column in frame.columns.difference(["starts_at", "ends_at", "tariff_name", "plan_action"]):
-        display[column] = pd.to_numeric(display[column]).round(4)
+    for column in display:
+        definition = detail_column(column)
+        if definition.format == "time":
+            timestamps = pd.to_datetime(display[column], utc=True)
+            display[column] = timestamps.dt.tz_convert(timezone_name).dt.strftime("%H:%M")
+        elif definition.format == "number":
+            display[column] = pd.to_numeric(display[column]).round(4)
     display = display.astype(object).where(pd.notna(display), None)
     return [{"period": index + 1, **row} for index, row in enumerate(display.to_dict("records"))]
 
 
 def detail_totals(frame: pd.DataFrame) -> dict:
     """Sum interval energy/costs; leave state levels, limits and rates blank."""
-    levels = {"minimum_battery_kwh", "maximum_battery_kwh", "battery_start_kwh", "battery_end_kwh"}
     totals = {column: None for column in frame.columns}
-    totals["starts_at"] = "Total"
     for column in frame.columns:
-        if (column.endswith("_kwh") and column not in levels) or column in {"import_cost", "export_revenue", "net_cost"}:
+        aggregation = detail_column(column).aggregation
+        if aggregation == Aggregation.START_TIME:
+            totals[column] = "Total"
+        elif aggregation in (Aggregation.QUANTITY, Aggregation.DURATION):
             value = pd.to_numeric(frame[column]).sum(min_count=1)
             totals[column] = round(float(value), 4) if pd.notna(value) else None
     return totals
@@ -88,9 +210,7 @@ def detail_totals(frame: pd.DataFrame) -> dict:
 
 def hourly_detail_frame(frame: pd.DataFrame, timezone_name: str, first_mode: OperatingMode) -> pd.DataFrame:
     """Split overlapping periods into local clock hours, then sum flows/costs."""
-    levels = {"minimum_battery_kwh", "maximum_battery_kwh", "battery_start_kwh", "battery_end_kwh"}
-    sums = [column for column in frame if (column.endswith("_kwh") and column not in levels)
-            or column in {"import_cost", "export_revenue", "net_cost"}]
+    definitions = {name: detail_column(name) for name in [*frame.columns, "plan_action"]}
     actions = detail_rows(frame, timezone_name, first_mode)
     pieces = []
     for row, action in zip(frame.to_dict("records"), actions):
@@ -102,27 +222,32 @@ def hourly_detail_frame(frame: pd.DataFrame, timezone_name: str, first_mode: Ope
             fraction = (stop - cursor) / (end - start)
             piece = {**row, "starts_at": cursor, "ends_at": stop, "plan_action": action["plan_action"],
                      "_hour": hour, "_seconds": (stop - cursor).total_seconds()}
-            for column in sums:
-                piece[column] = row[column] * fraction
-            for suffix in ("kwh", "soc_percent"):
-                first, last = f"battery_start_{suffix}", f"battery_end_{suffix}"
-                change = row[last] - row[first]
-                piece[first] = row[first] + change * ((cursor - start) / (end - start))
-                piece[last] = row[first] + change * ((stop - start) / (end - start))
+            for column, definition in definitions.items():
+                if definition.aggregation == Aggregation.QUANTITY:
+                    piece[column] = row[column] * fraction
+                elif definition.aggregation == Aggregation.DURATION:
+                    piece[column] = (stop - cursor).total_seconds() / 3600
+                elif definition.aggregation in (Aggregation.OPENING_STATE, Aggregation.CLOSING_STATE):
+                    # Paired state fields use the existing start/end naming convention.
+                    first = column.replace("_end_", "_start_")
+                    last = column.replace("_start_", "_end_")
+                    at = cursor if definition.aggregation == Aggregation.OPENING_STATE else stop
+                    piece[column] = row[first] + (row[last] - row[first]) * ((at - start) / (end - start))
             pieces.append(piece)
             cursor = stop
     grouped = []
     for _, group in pd.DataFrame(pieces).groupby("_hour", sort=True):
         row = group.iloc[-1].to_dict()
         row["starts_at"], row["ends_at"] = group.starts_at.iloc[0], group.ends_at.iloc[-1]
-        for column in sums:
-            row[column] = group[column].sum(min_count=1)
-        for column in ("battery_start_kwh", "battery_start_soc_percent"):
-            row[column] = group[column].iloc[0]
-        for column in ("tariff_name", "plan_action"):
-            row[column] = " / ".join(dict.fromkeys(group[column].dropna()))
-        for column in ("import_rate", "export_rate"):
-            if column in group:
+        for column, definition in definitions.items():
+            aggregation = definition.aggregation
+            if aggregation in (Aggregation.QUANTITY, Aggregation.DURATION):
+                row[column] = group[column].sum(min_count=1)
+            elif aggregation in (Aggregation.OPENING_STATE, Aggregation.START_TIME):
+                row[column] = group[column].iloc[0]
+            elif aggregation == Aggregation.TEXT:
+                row[column] = " / ".join(dict.fromkeys(group[column].dropna()))
+            elif aggregation == Aggregation.AVERAGE:
                 valid = group[column].notna()
                 weights = group.loc[valid, "_seconds"]
                 row[column] = (group.loc[valid, column] * weights).sum() / weights.sum() if valid.any() else float("nan")
@@ -131,9 +256,7 @@ def hourly_detail_frame(frame: pd.DataFrame, timezone_name: str, first_mode: Ope
 
 
 def detail_decimal_places(column: str) -> int | None:
-    if column in {"starts_at", "ends_at", "plan_action", "tariff_name"}:
-        return None
-    return 4 if column in {"import_rate", "export_rate"} else 1 if column.endswith("soc_percent") else 2
+    return detail_column(column).decimals
 
 
 def plan_chart_options(frame: pd.DataFrame, actuals: pd.DataFrame, timezone_name: str) -> dict:
@@ -159,11 +282,14 @@ def plan_chart_options(frame: pd.DataFrame, actuals: pd.DataFrame, timezone_name
             values = (frame[energy_column].astype(float) / hours).tolist()
             forecast = list(zip(starts, values)) + [[ends[-1], values[-1]]]
         for kind, data in (("actual", observed), ("forecast", forecast)):
+            stepped = kind == "forecast" and column in {"grid_import", "grid_export"}
             series.append({
                 "id": f"{column}_{kind}",
                 "name": label, "type": "line", "data": data, "yAxisIndex": axis,
                 "showSymbol": False, "connectNulls": False, "color": color,
-                "step": "end" if kind == "forecast" and column != "battery" else False,
+                "step": "end" if stepped else False,
+                "smooth": 0.2 if kind == "forecast" and not stepped else False,
+                "smoothMonotone": "x",
                 "lineStyle": {"type": "solid" if kind == "actual" else "dashed", "width": 2},
             })
     date_format = 'new Intl.DateTimeFormat("en-IE", {timeZone: ' + json.dumps(timezone_name) + ', day:"2-digit",month:"short",hour:"2-digit",minute:"2-digit"})'
@@ -194,8 +320,8 @@ class PlanTab:
     def render_plan_tab(self) -> None:
         with ui.row().classes("w-full items-end gap-4 flex-wrap"):
             self.adjustment = ui.number(
-                "Protection adjustment (0–100)", value=self.config.energy_plan.protection_preference,
-                min=0, max=100, step=1, on_change=self._adjustment_changed,
+                "Protection adjustment", value=self.config.energy_plan.protection_preference,
+                min=0, step=1, on_change=self._adjustment_changed,
             ).props("outlined dense").classes("w-64 max-w-full")
             self.adjustment.tooltip(f"Higher values give battery protection more value relative to net cost. 0 considers cost only. Target reserve: {self.config.energy_plan.preferred_reserve_kwh:g} kWh.")
             self.refresh_button = ui.button("Refresh plan", icon="refresh", on_click=self.refresh)
@@ -215,8 +341,8 @@ class PlanTab:
             return
         try:
             value = self.adjustment.value
-            if value is None or not 0 <= float(value) <= 100:
-                raise ValueError("Protection adjustment must be between 0 and 100")
+            if value is None or not math.isfinite(float(value)) or float(value) < 0:
+                raise ValueError("Protection adjustment must be finite and non-negative")
             preference = float(value)
         except (ValueError, TypeError) as error:
             notify_error(str(error))
@@ -229,6 +355,7 @@ class PlanTab:
         as_of = datetime.now(timezone.utc).replace(microsecond=0)
         succeeded = False
         try:
+            await ensure_planning_worker()
             report = await run.cpu_bound(plan_with_preference, self.config, as_of, preference)
             if report is None:
                 raise RuntimeError("The plan calculation did not return a result")
@@ -283,7 +410,7 @@ class PlanTab:
         self.summary_output = ui.column().classes("w-full min-w-0 gap-3")
         if self.actuals.empty:
             ui.label("No actual measurements available for today.").classes("text-sm text-gray-600")
-        self.chart = ui.echart(plan_chart_options(result.results[self.scenario_name], self.actuals, self.config.timezone)).classes("w-full h-96").props("data-testid=plan-chart")
+        self.chart = ui.echart(plan_chart_options(self._scenario_frame(), self.actuals, self.config.timezone)).classes("w-full h-96").props("data-testid=plan-chart")
         self.scenario_output = ui.column().classes("w-full min-w-0 gap-3")
         self._render_scenario()
 
@@ -292,10 +419,17 @@ class PlanTab:
         load, solar = self.load_scenario.value, self.solar_scenario.value
         return "base" if load == solar == "base" else f"{load}_{solar}"
 
+    def _scenario_frame(self) -> pd.DataFrame:
+        frame = self.result.results[self.scenario_name]
+        extra = self.result.lookahead_results.get(self.scenario_name)
+        if self.detail_view == "Advanced" and extra is not None and not extra.empty:
+            return pd.concat([frame, extra], ignore_index=True)
+        return frame
+
     def _render_scenario(self) -> None:
         frame = self.result.results[self.scenario_name]
         summary = scenario_summary(frame, self.config.energy_plan.preferred_reserve_kwh)
-        series = plan_chart_options(frame, self.actuals, self.config.timezone)["series"]
+        series = plan_chart_options(self._scenario_frame(), self.actuals, self.config.timezone)["series"]
         self.chart.options["series"] = series
         self.chart.run_chart_method("setOption", {"series": series}, {"replaceMerge": ["series"]})
         self.summary_output.clear()
@@ -316,11 +450,12 @@ class PlanTab:
 
     def _detail_view_changed(self, event) -> None:
         self.detail_view = event.value
-        self._render_detail()
+        self._render_scenario()
 
     def _render_detail(self) -> None:
-        frame = detail_frame(self.result.results[self.scenario_name], self.battery_capacity_kwh)
+        frame = detail_frame(self._scenario_frame(), self.battery_capacity_kwh)
         if self.detail_view == "Compact":
+            frame["losses_kwh"] += frame["solar_clipped_kwh"]
             frame = hourly_detail_frame(frame, self.config.timezone, self.result.next_action.mode)
         self.scenario_output.clear()
         with self.scenario_output:
@@ -329,36 +464,10 @@ class PlanTab:
                 with ui.row().classes("items-center gap-2 flex-wrap"):
                     ui.toggle(["Compact", "Advanced"], value=self.detail_view, on_change=self._detail_view_changed).props("dense no-caps")
                     ui.button("Download Excel", icon="download", on_click=lambda: self._download_detail(frame, columns)).props("flat dense")
-            labels = {"starts_at": "Start", "ends_at": "End", "plan_action": "Action", "tariff_name": "Tariff", "load_kwh": "House (kWh)",
-                      "solar_kwh": "Solar (kWh)", "grid_import_kwh": "Import (kWh)", "grid_export_kwh": "Export (kWh)",
-                      "losses_kwh": "Loss (kWh)", "solar_clipped_kwh": "Clipped (kWh)",
-                      "battery_start_kwh": "Start battery (kWh)", "battery_end_kwh": "Battery (kWh)",
-                      "battery_start_soc_percent": "Start SOC (%)", "battery_end_soc_percent": "SOC (%)",
-                      "import_rate": "Import rate (€/kWh)", "export_rate": "Export rate (€/kWh)",
-                      "net_cost": "Net (€)", "import_cost": "Cost (€)", "export_revenue": "Revenue (€)",
-                      "minimum_battery_kwh": "Min battery (kWh)", "maximum_battery_kwh": "Max battery (kWh)",
-                      "limit_battery_export_rate_to_grid_kw": "Export limit (kW)", "battery_charging": "Charging"}
-            names = ["starts_at", "ends_at", "plan_action", *frame.columns.drop(["starts_at", "ends_at", "plan_action"], errors="ignore")]
-            if self.detail_view == "Compact":
-                core = ["starts_at", "ends_at", "plan_action", "tariff_name", "import_rate", "export_rate",
-                        "load_kwh", "solar_kwh", "losses_kwh", "solar_clipped_kwh", "grid_import_kwh", "grid_export_kwh",
-                        "battery_end_kwh", "battery_end_soc_percent", "import_cost", "export_revenue", "net_cost"]
-                names = [name for name in core if name in names]
-            else:
-                labels = {"starts_at": "Start", "ends_at": "End", "plan_action": "Plan action", "load_kwh": "House Load (kWh)",
-                          "import_rate": "Import rate (€/kWh)", "export_rate": "Export rate (€/kWh)",
-                          "battery_start_kwh": "Battery start (kWh)", "battery_end_kwh": "Battery end (kWh)",
-                          "battery_start_soc_percent": "Battery start SOC (%)", "battery_end_soc_percent": "Battery end SOC (%)",
-                          "net_cost": "Net cost (€)", "import_cost": "Import cost (€)", "export_revenue": "Export revenue (€)"}
-            columns = [{"name": name, "label": labels.get(name, name.replace("_", " ").title().replace("Kwh", "kWh").replace("Kw", "kW")), "field": name,
-                        "align": "left" if name in ("starts_at", "ends_at", "plan_action", "tariff_name") else "right", "sortable": False}
-                       for name in names]
-            for column in columns:
-                digits = detail_decimal_places(column["name"])
-                if digits is not None:
-                    column[":format"] = f"value => value == null ? '' : Number(value).toFixed({digits})"
-            table = ui.table(columns=columns, rows=detail_rows(frame, self.config.timezone, self.result.next_action.mode), row_key="period", pagination=None).props("dense flat bordered").classes("w-full max-w-full")
-            totals = detail_totals(frame)
+            columns = detail_columns(frame, compact=self.detail_view == "Compact")
+            display = table_detail_frame(frame)
+            table = ui.table(columns=columns, rows=detail_rows(display, self.config.timezone, self.result.next_action.mode), row_key="period", pagination=None).props("dense flat bordered").classes("w-full max-w-full")
+            totals = detail_totals(frame.assign(t=display.t))
             for column in columns:
                 name = column["name"]
                 if totals.get(name) is not None and detail_decimal_places(name) is not None:
@@ -373,6 +482,7 @@ class PlanTab:
 
     def _download_detail(self, frame: pd.DataFrame, columns: list[dict]) -> None:
         try:
+            columns = [column for column in columns if detail_column(column["name"]).export]
             rows = detail_rows(frame, self.config.timezone, self.result.next_action.mode)
             exported = pd.DataFrame([*rows, detail_totals(frame)])
             exported = exported.reindex(columns=[column["name"] for column in columns])

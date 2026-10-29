@@ -38,7 +38,7 @@ def scoring_inputs(probabilities=(1.,), preference=50.):
                      battery_discharge_cut_off_soc_percent=40.)
     config = load_config()
     rule = TariffRule(("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"), "00:00", "24:00", .3, "flat")
-    config = replace(config, tariffs=TariffsConfig((TariffPeriod("2000-01-01", (rule,), (rule,)),)),
+    config = replace(config, timezone="UTC", tariffs=TariffsConfig((TariffPeriod("2000-01-01", (rule,), (rule,)),)),
         energy_plan=replace(config.energy_plan, num_projection_hours=24,
                             preferred_reserve_kwh=4., protection_preference=preference))
     return scenarios, device, config, start
@@ -52,7 +52,8 @@ def test_tariff_scaled_tradeoff_without_reference_solves(preference, monkeypatch
     # Score construction must never solve a reference problem.
     with monkeypatch.context() as context:
         context.setattr(cp.Problem, "solve", lambda *a, **k: pytest.fail("reference solve"))
-        score = score_simulation([[10 + .5 * fill]], [[4 * fill]], scenarios, device, config, constraints, start)
+        # Offset the 1.2*fill terminal credit to isolate the protection trade-off.
+        score = score_simulation([[10 + 1.7 * fill]], [[4 * fill]], scenarios, device, config, constraints, start)
     problem = cp.Problem(cp.Maximize(score), constraints)
     problem.solve(solver=cp.HIGHS)
     assert problem.status == cp.OPTIMAL
@@ -68,7 +69,7 @@ def test_full_preference_still_rejects_expensive_protection():
     scenarios, device, config, start = scoring_inputs(preference=100.)
     fill = cp.Variable()
     constraints = [fill >= 0, fill <= 1]
-    score = score_simulation([[10 + 2 * fill]], [[4 * fill]], scenarios, device, config, constraints, start)
+    score = score_simulation([[10 + 3.2 * fill]], [[4 * fill]], scenarios, device, config, constraints, start)
     cp.Problem(cp.Maximize(score), constraints).solve(solver=cp.HIGHS)
     assert fill.value == pytest.approx(0., abs=1e-5)
 
@@ -92,7 +93,7 @@ def test_probabilities_weight_cost_and_protection(probabilities, expected):
     problem = cp.Problem(cp.Maximize(score), constraints)
     problem.solve(solver=cp.HIGHS)
     assert choice.value == pytest.approx(expected, abs=1e-5)
-    assert problem.value == pytest.approx(-.1 + .6 * .7)
+    assert problem.value == pytest.approx(-.1 + .6 * .7 + 1.2)
 
 
 @pytest.mark.parametrize("hours", [12, 24, 48])
@@ -104,7 +105,7 @@ def test_reward_uses_zero_based_energy_and_scales_with_horizon(hours):
     problem = cp.Problem(cp.Maximize(score), constraints)
     problem.solve(solver=cp.HIGHS)
     # Device cut-off is 4 kWh, but 4 stored kWh still scores 70, not zero.
-    assert problem.value == pytest.approx(-10 + .6 * .7 * hours / 24)
+    assert problem.value == pytest.approx(-10 + .6 * .7 * hours / 24 + 1.2)
 
 
 @pytest.mark.parametrize("energy,expected", [(4., 70.), (8., 80.), (10., 70 + 30 * 6 / 14)])
@@ -143,11 +144,23 @@ def test_tariff_average_samples_elapsed_hours_across_dst_and_effective_dates(sta
     assert _reference_import_rate(config, start, start + timedelta(hours=24)) == pytest.approx(expected)
 
 
-@pytest.mark.parametrize("preference", [-1., 101., float("nan"), float("inf")])
+@pytest.mark.parametrize("preference", [-1., float("nan"), float("inf")])
 def test_preference_validation(preference):
     _, _, config, _ = scoring_inputs(preference=preference)
     with pytest.raises(ValueError, match="protection_preference"):
         validate_config(config)
+
+
+def test_adjustment_above_100_scales_reward_beyond_reserve_replacement_value():
+    scenarios, device, config, start = scoring_inputs(preference=200.)
+    validate_config(config)
+    constraints = []
+    score = score_simulation([[cp.Constant(10.)]], [[cp.Constant(4.)]], scenarios, device, config,
+                             constraints, start)
+    problem = cp.Problem(cp.Maximize(score), constraints)
+    problem.solve(solver=cp.HIGHS)
+    # R=4, reference tariff=.3: X=200 gives V=2.4 and utility at R is 70.
+    assert problem.value == pytest.approx(-10. + 2.4 * .7 + 1.2)
 
 
 def test_reference_range_samples_exactly_24_hourly_values(monkeypatch):
@@ -167,6 +180,51 @@ def test_reference_range_samples_exactly_24_hourly_values(monkeypatch):
     rate = _reference_import_rate(config, start, start + timedelta(hours=24))
     assert rate == pytest.approx((16 * .4 + 8 * .1) / 24)
     assert calls == [start + timedelta(hours=hour) for hour in range(24)]
+
+
+def test_terminal_rate_samples_both_tariffs_after_end_across_dst(monkeypatch):
+    from solar_model.planning import optimisation
+
+    _, _, config, _ = scoring_inputs()
+    end = datetime(2026, 10, 25, 0, 30, tzinfo=timezone.utc)
+    days = config.tariffs.periods[0].import_[0].days
+    cheap = TariffRule(days, "00:00", "06:00", .2, "cheap")
+    peak = replace(cheap, start_time="06:00", end_time="24:00", rate=.6)
+    export = replace(cheap, end_time="24:00", rate=.1)
+    config = replace(config, timezone="Europe/Dublin", tariffs=TariffsConfig((
+        TariffPeriod("2000-01-01", (replace(export, rate=.99),), (export,)),
+        TariffPeriod("2026-10-25", (cheap, peak), (export,)),
+    )))
+    calls = []
+    lookup = optimisation.tariff_rule
+
+    def tracked(rules, timestamp):
+        calls.append(timestamp.astimezone(timezone.utc))
+        return lookup(rules, timestamp)
+
+    monkeypatch.setattr(optimisation, "tariff_rule", tracked)
+    assert optimisation._terminal_rate(config, end) == pytest.approx(.25)
+    assert calls == [end + timedelta(hours=hour) for hour in range(12) for _ in range(2)]
+
+
+@pytest.mark.parametrize("vector", [False, True])
+def test_terminal_credit_uses_only_final_energy_full_horizon_and_probabilities(vector):
+    scenarios, device, config, start = scoring_inputs((.25, .75), preference=0.)
+    device = replace(device, discharge_efficiency=.9)
+    period = config.tariffs.periods[0]
+    config = replace(config, tariffs=TariffsConfig((period, TariffPeriod(
+        (start + timedelta(hours=48)).date().isoformat(),
+        (replace(period.import_[0], rate=.6),), (replace(period.export[0], rate=.2),),
+    ))))
+    levels = [[cp.Constant(9.), cp.Constant(final)] for final in (4., 8.)]
+    if vector:
+        levels = [cp.hstack(values) for values in levels]
+    constraints = []
+    score = score_simulation([[0., 0.], [0., 0.]], levels, scenarios, device, config,
+                             constraints, start, [24., 24.])
+    problem = cp.Problem(cp.Maximize(score), constraints)
+    problem.solve(solver=cp.HIGHS)
+    assert problem.value == pytest.approx(.4 * .9 * (.25 * 4 + .75 * 8))
 
 
 @pytest.mark.parametrize("offset", [0, -1])

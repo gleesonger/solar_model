@@ -219,7 +219,7 @@ def render_dashboard_styles() -> None:
         }
         .plan-detail-table .q-table th,
         .plan-detail-table .q-table td {
-            padding: 4px 6px;
+            padding: 4px 3px;
             font-size: 0.75rem;
         }
         .plan-detail-table .q-table th {
@@ -232,7 +232,6 @@ def render_dashboard_styles() -> None:
         }
         .plan-detail-advanced .q-table th,
         .plan-detail-advanced .q-table td {
-            padding: 6px 12px;
             font-size: 0.8125rem;
         }
         .plan-detail-advanced .q-table th {

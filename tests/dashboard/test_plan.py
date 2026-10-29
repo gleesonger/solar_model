@@ -6,7 +6,7 @@ import pandas as pd
 import pytest
 
 from solar_model.config import load_config
-from solar_model.dashboard.tabs.plan import detail_frame, detail_rows, detail_totals, hourly_detail_frame, plan_chart_options, scenario_summary
+from solar_model.dashboard.tabs.plan import detail_frame, detail_rows, detail_totals, hourly_detail_frame, plan_chart_options, scenario_summary, table_detail_frame
 from solar_model.planning.types import NextAction, OperatingMode, SimulationResult
 
 
@@ -23,9 +23,44 @@ def sample_result():
         "solar_to_battery_loss_kwh": [.01, .02], "grid_to_battery_loss_kwh": [.02, .03],
         "battery_to_ac_loss_kwh": [.03, .04], "solar_clipped_kwh": [0., .1],
         "import_cost": [.12, .32], "export_revenue": [0., .02],
+        "cost_score": [-1., .25], "protection_score": [.01, .02], "total_score": [-.99, .27],
     })
     action = NextAction(OperatingMode.SELF_CONSUMPTION, 0., 0., 100., 0.)
     return SimulationResult(action, {"base": frame, "low_high": frame.assign(net_cost=2.)})
+
+
+def test_column_metadata_controls_views_and_keeps_unknown_advanced_fields():
+    from solar_model.dashboard.tabs.plan import detail_columns
+
+    frame = sample_result().results["base"].assign(extra_power_kw=1.)
+    compact = detail_columns(frame, compact=True)
+    names = [column["name"] for column in compact]
+    assert names[:9] == ["starts_at", "ends_at", "t", "plan_action", "tariff_name",
+                         "import_rate", "export_rate", "load_kwh", "solar_kwh"]
+    assert "extra_power_kw" not in names
+    assert next(column for column in compact if column["name"] == "load_kwh")["label"] == "House (kWh)"
+    advanced = detail_columns(frame, compact=False)
+    assert next(column for column in advanced if column["name"] == "load_kwh")["label"] == "House Load (kWh)"
+    assert advanced[-1]["name"] == "extra_power_kw"
+    assert all(column["sortable"] is False for column in advanced)
+
+
+def test_aggregation_uses_metadata_instead_of_column_units(monkeypatch):
+    from solar_model.dashboard.tabs.plan import Aggregation, PLAN_COLUMNS, PlanColumn
+
+    # A kWh setting must not be prorated/summed; a kW average must be weighted.
+    monkeypatch.setitem(PLAN_COLUMNS, "configured_kwh", PlanColumn(
+        "configured_kwh", "Configured", None, None, "number", 2, Aggregation.SETTING, False, True))
+    monkeypatch.setitem(PLAN_COLUMNS, "power_kw", PlanColumn(
+        "power_kw", "Power", None, None, "number", 2, Aggregation.AVERAGE, False, True))
+    frame = sample_result().results["base"].assign(configured_kwh=[10., 20.], power_kw=[2., 8.])
+    hourly = hourly_detail_frame(frame, "UTC", OperatingMode.SELF_CONSUMPTION)
+    assert hourly.configured_kwh.tolist() == [20., 20.]
+    assert hourly.power_kw.iloc[0] == pytest.approx((2 * 15 + 8 * 40) / 55)
+    assert hourly.power_kw.iloc[1] == 8.
+    assert detail_totals(frame)["configured_kwh"] is None
+    assert detail_totals(frame)["power_kw"] is None
+    assert hourly.solar_kwh.sum() == pytest.approx(frame.solar_kwh.sum())
 
 
 def test_summary_and_chart_use_duration_weighting_and_consistent_units():
@@ -52,6 +87,9 @@ def test_summary_and_chart_use_duration_weighting_and_consistent_units():
     assert options["series"][7]["data"][1][1] == pytest.approx(.8)
     assert options["series"][9]["data"][1][1] == pytest.approx(.1)
     assert options["series"][7]["yAxisIndex"] == options["series"][9]["yAxisIndex"] == 0
+    for index in (7, 9):
+        assert options["series"][index]["step"] == "end"
+        assert options["series"][index]["smooth"] is False
 
 
 def test_detail_rows_show_local_time_only_and_preserve_missing_values():
@@ -67,6 +105,18 @@ def test_detail_rows_show_local_time_only_and_preserve_missing_values():
     assert frame.solar_kwh.isna().iloc[0]
 
 
+def test_table_scores_are_hourly_rates_whose_time_weighted_sum_matches_contributions():
+    original = sample_result().results["base"]
+    display = table_detail_frame(original)
+    assert display.t.tolist() == [.25, 1.]
+    assert display.cost_score.tolist() == [-4., .25]
+    assert display.protection_score.tolist() == [.04, .02]
+    for column in ("cost_score", "protection_score", "total_score"):
+        assert (display[column] * display.t).sum() == pytest.approx(original[column].sum())
+    assert "t" not in original
+    assert original.protection_score.tolist() == [.01, .02]
+
+
 def test_detail_totals_sum_flows_and_costs_without_summing_levels_or_rates():
     frame = sample_result().results["base"].assign(
         minimum_battery_kwh=4., maximum_battery_kwh=18., import_rate=.4,
@@ -77,6 +127,9 @@ def test_detail_totals_sum_flows_and_costs_without_summing_levels_or_rates():
     assert totals["solar_kwh"] == 2.5
     assert totals["load_kwh"] == 1.25
     assert totals["net_cost"] == .75
+    assert totals["cost_score"] == -.75
+    assert totals["protection_score"] == .03
+    assert totals["total_score"] == -.72
     for column in ("ends_at", "battery_start_kwh", "battery_end_kwh", "minimum_battery_kwh",
                    "maximum_battery_kwh", "import_rate", "limit_battery_export_rate_to_grid_kw", "solar_clipped_kwh"):
         assert totals[column] is None
@@ -163,7 +216,8 @@ def test_actuals_use_physical_units_preserve_gaps_and_exclude_future(tmp_path):
 
 
 @pytest.mark.parametrize("fails", [False, True])
-def test_preference_is_request_local_and_database_is_closed(monkeypatch, fails):
+@pytest.mark.parametrize("preference", [75., 200.])
+def test_preference_is_request_local_and_database_is_closed(monkeypatch, fails, preference):
     from solar_model.services import planning
     closed = []
     fake_db = SimpleNamespace(close=lambda: closed.append(True))
@@ -176,7 +230,7 @@ def test_preference_is_request_local_and_database_is_closed(monkeypatch, fails):
     result = sample_result()
 
     def plan(db, configured, when):
-        assert configured.energy_plan.protection_preference == 75.
+        assert configured.energy_plan.protection_preference == preference
         if fails:
             raise ValueError("missing forecast")
         return result
@@ -184,9 +238,9 @@ def test_preference_is_request_local_and_database_is_closed(monkeypatch, fails):
     monkeypatch.setattr(planning, "plan_as_of", plan)
     if fails:
         with pytest.raises(ValueError, match="missing forecast"):
-            planning.plan_with_preference(config, datetime.now(timezone.utc), 75.)
+            planning.plan_with_preference(config, datetime.now(timezone.utc), preference)
     else:
-        assert planning.plan_with_preference(config, datetime.now(timezone.utc), 75.).simulation is result
+        assert planning.plan_with_preference(config, datetime.now(timezone.utc), preference).simulation is result
     assert config.energy_plan.protection_preference == original
     assert closed == [True]
 

@@ -114,7 +114,7 @@ class ForecastConfig:
 class EnergyPlanConfig:
     num_projection_hours: int
     projection_resolution_mins: tuple[int, ...]
-    protection_preference: float
+    protection_preference: float = 50.
     minimum_battery_kwh: tuple[TariffRule, ...] = ()
     maximum_battery_kwh: tuple[TariffRule, ...] = ()
     limit_battery_export_rate_to_grid_kw: tuple[TariffRule, ...] = ()
@@ -263,8 +263,8 @@ def validate_config(config: Config) -> None:
         raise ValueError("energy_plan projection duration and resolution entries must be greater than zero")
     if sum(energy_plan.projection_resolution_mins) < energy_plan.num_projection_hours * 60:
         raise ValueError("projection_resolution_mins must cover num_projection_hours")
-    if not math.isfinite(energy_plan.protection_preference) or not 0 <= energy_plan.protection_preference <= 100:
-        raise ValueError("energy_plan.protection_preference must be finite and between 0 and 100")
+    if not math.isfinite(energy_plan.protection_preference) or energy_plan.protection_preference < 0:
+        raise ValueError("energy_plan.protection_preference must be finite and non-negative")
     additional_device_info = config.additional_device_info
     if not 0 < additional_device_info.charge_efficiency <= 1 or not 0 < additional_device_info.discharge_efficiency <= 1:
         raise ValueError("additional_device_info battery efficiencies must be greater than zero and at most one")

@@ -104,9 +104,12 @@ solar_model.dashboard.app.main()
   ui.page('/') -> render_dashboard_page()
   ui.run(..., favicon=SVG file path, reload=False)
 
-app startup
-  await snapshots.refresh()
-  background_tasks.create(snapshots.run_forever())
+app startup callbacks (scheduled independently)
+  start_snapshot_worker(): await snapshots.refresh(); start snapshots.run_forever()
+  ensure_planning_worker(): await one shared asynchronous warm-up task
+    await run.cpu_bound(services.planning.warm_planning_worker)
+    import planning dependencies, initialise highspy.Highs(), return worker PID
+    log worker ready/startup seconds; log failures without aborting dashboard startup
 
 each browser page
   DashboardLayout(config, live_collector)
@@ -126,6 +129,16 @@ At startup, `main_dashboard` passes the source-relative `solar_model/dashboard/a
 `apply_snapshot` uses `client.safe_invoke` to update that client's UI context. Reconnect replaces the subscription and reapplies the current snapshot. Disconnect unsubscribes and reevaluates whether live polling should pause. The server snapshot worker continues refreshing without a connected browser; live Modbus polling does not.
 
 ## 5. Paths, timestamps, and utilities
+
+`solar_model.utils.table_to_object_list(class_type, *args)` returns `[class_type(*row) for row in args]`. Each row is an iterable of positional constructor arguments, such as a tuple, list or generator. Rows are consumed once in their iteration order; callers should supply ordered iterables. Row order is preserved, omitted trailing arguments use constructor defaults, and no rows returns an empty list. Constructor errors propagate to the caller. The generic return type is `list[T]` for a supplied `type[T]`.
+
+```python
+columns = table_to_object_list(Column,
+    # key       label     decimals
+    ("solar",   "Solar",   2),
+    ("load",    "Load",    2),
+)
+```
 
 - Config and relative database paths resolve against **process working directory**. Register maps and assets resolve inside the installed package (`package_path()` for shared resource lookup); subprocesses run package modules.
 - Docker stores source under `/app` but runs from `/config`; its entrypoint creates YAML only if absent. It does not copy updated settings over an existing volume.

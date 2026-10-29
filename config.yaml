@@ -125,11 +125,11 @@ energy_plan:
   num_projection_hours: 24
   # Initial grid: six hours of 15 minutes, then eighteen hourly blocks.
   # The first action stays intact; later boundaries align from the preceding UTC hour.
-  projection_resolution_mins: [15*24, 60*18]
+  projection_resolution_mins: [15*4, 60*23]
 
-  protection_preference: 5              # X: 0-100; cost still matters at 100
+  protection_preference: 50             # X >= 0; may exceed 100 to increase protection value
 
-  preferred_reserve_kwh: 4               # Target stored kWh measured from zero
+  preferred_reserve_kwh: 3               # Target stored kWh measured from zero
 
   minimum_battery_kwh:
     - days: [Mon, Tue, Wed, Thu, Fri, Sat, Sun]

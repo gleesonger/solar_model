@@ -108,3 +108,14 @@ def test_invalid_projection_repetitions_are_rejected(tmp_path, entry):
     path.write_text(yaml.safe_dump(raw), encoding="utf-8")
     with pytest.raises(ValueError, match="invalid configuration"):
         load_config(path)
+
+
+def test_protection_adjustment_defaults_to_50_and_accepts_values_above_100(tmp_path):
+    raw = yaml.safe_load(Path("config.yaml").read_text(encoding="utf-8"))
+    del raw["energy_plan"]["protection_preference"]
+    path = tmp_path / "config.yaml"
+    path.write_text(yaml.safe_dump(raw), encoding="utf-8")
+    assert load_config(path).energy_plan.protection_preference == 50.
+    raw["energy_plan"]["protection_preference"] = 200.
+    path.write_text(yaml.safe_dump(raw), encoding="utf-8")
+    assert load_config(path).energy_plan.protection_preference == 200.

@@ -77,7 +77,7 @@ The Plan chart sets `alignTicks=True` on the battery y-axis so its tick/gridline
 
 All dashboard table headers stay below the dashboard topbar during page scrolling and leave the viewport at the end of their own table. Shared `assets/table_headers.js` translates the real header within the table bounds on scroll/resize, preserving column widths, sorting and horizontal scrolling without a second header or an inner vertical scrollbar. Updates use animation frames; child-list observation also handles newly displayed tables and refreshed rows. Styling applies to all Quasar table headers.
 
-Plan detail defaults to Compact with an Advanced toggle beside Download Excel. Short core labels, wrapping headers and scoped 12px table text with 4px/6px cell padding reduce column widths; numeric cells remain unwrapped and horizontal scrolling remains available. Start/end SOC columns sit beside their kWh counterparts in Advanced; Compact shows ending kWh and SOC. Adjustment guidance lives in its tooltip, and the next action has its own line and scenario selection shares the average-cost/range row rather than a separate card.
+Plan detail defaults to Compact with an Advanced toggle beside Download Excel. Short core labels, wrapping headers and scoped 12px table text with 4px/3px cell padding reduce column widths; numeric cells remain unwrapped and horizontal scrolling remains available. Start/end SOC columns sit beside their kWh counterparts in Advanced; Compact shows ending kWh and SOC. Adjustment guidance lives in its tooltip, and the next action has its own line and scenario selection shares the average-cost/range row rather than a separate card.
 
 Plan numeric cells use tabular digits with fixed trailing decimal places per column: two for kWh/kW/cost, four for tariff rates and one for SOC, including Total values. Compact detail aggregates by local clock hour; Advanced retains source timesteps.
 
@@ -87,6 +87,8 @@ After a successful plan run, Refresh uses its normal disabled/grey state until t
 
 Solar/Load scenario controls use individual bordered fieldsets with centred legends above the buttons. Unselected buttons use Quasar grey-2 with dark text; the selected button retains the primary colour and white text. The groups have a 24px gap (twice the former 12px) and wrap on narrow screens. Border/legend rules are scoped to `.plan-scenario-group`.
 
-Advanced Plan detail adds `.plan-detail-advanced`: 13px text, 6px/12px cell padding, headers at least 110px wide (70px for Start/End) and up to 220px before wrapping. Compact retains its tighter existing styling; both remain horizontally scrollable.
+Advanced Plan detail adds `.plan-detail-advanced`: 13px text, shared 4px/3px cell padding matching Compact, headers at least 110px wide (70px for Start/End) and up to 220px before wrapping. Compact retains its tighter existing styling; both remain horizontally scrollable.
 
 Advanced Plan detail keeps full descriptive column names alongside its wider columns. Compact alone uses the shortened headers; underlying field keys and numeric formatting are unchanged.
+
+Plan table t is elapsed row duration in hours and shows two decimals. Score headers remain Cost Score, Protection Score and Total Score; their cells show hourly rates to two decimals; the Total row is time-weighted, rather than summing hourly rates. This presentation does not change other interval totals or Excel score contributions.

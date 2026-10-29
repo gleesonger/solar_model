@@ -2,6 +2,7 @@
 from datetime import datetime
 from dataclasses import dataclass, replace
 import math
+import os
 from zoneinfo import ZoneInfo
 import pandas as pd
 
@@ -17,6 +18,13 @@ from solar_model.storage.queries.planning import (
     load_forecast_as_of,
     load_plan_actuals,
 )
+
+
+def warm_planning_worker() -> int:
+    """Import planning dependencies and initialise HiGHS without loading or solving a plan."""
+    import highspy
+    highspy.Highs()
+    return os.getpid()
 
 
 def plan_as_of(database: SolarDatabase, config: Config, as_of: datetime) -> SimulationResult:
@@ -36,8 +44,8 @@ class PlanReport:
 
 def plan_with_preference(config: Config, as_of: datetime, preference: float) -> PlanReport:
     """Generate a report with a request-local preference, without migrating storage."""
-    if not math.isfinite(preference) or not 0 <= preference <= 100:
-        raise ValueError("Protection adjustment must be between 0 and 100")
+    if not math.isfinite(preference) or preference < 0:
+        raise ValueError("Protection adjustment must be finite and non-negative")
     configure_logging(config.logging.level)
     config = replace(config, energy_plan=replace(config.energy_plan, protection_preference=preference))
     database = SolarDatabase(create_engine_for_database(config.database.path))

@@ -31,7 +31,11 @@ from solar_model.dashboard.tabs.plan import PlanTab
 from solar_model.services.planning import PlanReport
 from tests.dashboard.test_plan import sample_result
 
-async def calculate(callback, config, as_of, preference):
+async def calculate(callback, *args):
+    if callback.__name__ == "warm_planning_worker":
+        await asyncio.sleep(.3)
+        return 123
+    config, as_of, preference = args
     await asyncio.sleep(.7)
     if preference == 99:
         raise ValueError('Synthetic forecast unavailable')
@@ -47,10 +51,17 @@ async def calculate(callback, config, as_of, preference):
         frame['starts_at'] = pd.date_range(as_of, periods=20, freq='15min')
         frame['ends_at'] = frame['starts_at'] + pd.Timedelta(minutes=15)
         frame['net_cost'] += (preference - 75) / 100
+        frame['terminal_score'] = 0.
         load, solar = ('base', 'base') if name == 'base' else name.split('_')
         frame['solar_kwh'] *= dict(low=.5, base=1., high=1.5)[solar]
         frame['load_kwh'] *= dict(low=.5, base=1., high=1.5)[load]
         result.results[name] = frame
+        extra = frame.iloc[[-1] * 6].copy().reset_index(drop=True)
+        extra['starts_at'] = pd.date_range(frame.ends_at.iloc[-1], periods=6, freq='4h')
+        extra['ends_at'] = extra['starts_at'] + pd.Timedelta(hours=4)
+        extra.loc[extra.index[-1], 'terminal_score'] = .5
+        extra.loc[extra.index[-1], 'total_score'] += .5
+        result.lookahead_results[name] = extra
     stamp = result.results['base'].starts_at.iloc[0]
     actuals = pd.DataFrame(dict(timestamp=[stamp - pd.Timedelta(hours=1), stamp], solar=[2.,2.], house_load=[1.,1.], battery=[4.,4.], grid_import=[.3,.4], grid_export=[.1,0.]))
     return PlanReport(result, actuals, 20.)
@@ -103,6 +114,8 @@ if __name__ == '__main__':
                 refresh = page.get_by_role("button", name="Refresh plan", exact=True)
                 refresh.wait_for()
                 adjustment = page.locator('input[type="number"]')
+                assert adjustment.input_value() == "50"
+                assert adjustment.get_attribute("max") is None
                 adjustment.fill("75")
                 refresh.click()
                 page.get_by_text("Calculating plan…", exact=True).wait_for()
@@ -135,25 +148,48 @@ if __name__ == '__main__':
                 assert page.locator(".q-table tbody tr").count() == 7
                 assert page.get_by_text("Records per page:", exact=True).count() == 0
                 assert page.locator(".q-table tbody tr").last.locator("td").first.inner_text() == "Total"
-                assert page.locator(".q-table tbody tr").last.locator("td").nth(7).inner_text() == "25.00"
+                assert page.locator(".q-table tbody tr").last.locator("td").nth(8).inner_text() == "25.00"
+                assert page.locator(".q-table tbody tr").last.locator("td").nth(9).inner_text() == "2.50"
                 assert page.locator(".q-table tbody tr").first.locator("td").nth(0).inner_text() == "10:05"
                 assert page.locator(".q-table tbody tr").first.locator("td").nth(1).inner_text() == "11:00"
-                assert page.locator(".q-table tbody tr").first.locator("td").nth(4).inner_text() == "0.4000"
+                assert page.locator(".q-table tbody tr").first.locator("td").nth(5).inner_text() == "0.4000"
+                assert page.locator(".q-table tbody tr").first.locator("td").nth(2).inner_text() == "0.92"
+                assert page.locator(".q-table tbody tr").last.locator("td").nth(2).inner_text() == "5.00"
                 page.get_by_role("columnheader", name="SOC (%)", exact=True).wait_for()
-                expected_headers = ["Start", "End", "Action", "Tariff", "Import rate", "Export rate",
-                                    "House", "Solar", "Loss", "Clipped", "Import", "Export",
+                expected_headers = ["Start", "End", "t", "Action", "Tariff", "Import rate", "Export rate",
+                                    "House", "Solar", "Losses", "Import", "Export",
                                     "Battery", "SOC", "Cost", "Revenue", "Net"]
                 headers = page.get_by_role("columnheader").all_text_contents()
                 assert page.locator(".plan-detail-table th.sortable").count() == 0
                 assert len(headers) == len(expected_headers)
                 assert all(expected in actual for expected, actual in zip(expected_headers, headers))
                 compact_count = page.get_by_role("columnheader").count()
+                compact_end = page.get_by_test_id("plan-chart").evaluate("element => echarts.getInstanceByDom(element).getOption().series[1].data.at(-1)[0]")
                 page.get_by_role("button", name="Advanced", exact=True).click()
                 page.get_by_role("columnheader", name="Battery start (kWh)", exact=True).wait_for()
-                assert page.locator(".q-table tbody tr").count() == 21
+                for label in ("Cost Score", "Protection Score", "Terminal Score", "Total Score"):
+                    page.get_by_role("columnheader", name=label, exact=True).wait_for()
+                advanced_headers = page.get_by_role("columnheader").all_text_contents()
+                loss_index = advanced_headers.index("Losses kWh")
+                assert page.locator(".q-table tbody tr").last.locator("td").nth(loss_index).inner_text() == "2.04"
+                assert advanced_headers[:5] == ["Start", "End", "t", "Plan action", "Tariff Name"]
+                assert advanced_headers.index("House Load (kWh)") < advanced_headers.index("Solar kWh")
+                ordered_sections = ["Solar To Battery Loss kWh", "Grid To Battery Loss kWh", "Battery To Ac Loss kWh",
+                                    "Losses kWh", "Grid Import kWh", "Grid Export kWh", "Battery start (kWh)",
+                                    "Battery end (kWh)", "Cost Score", "Protection Score", "Terminal Score", "Total Score"]
+                assert [advanced_headers.index(name) for name in ordered_sections] == sorted(advanced_headers.index(name) for name in ordered_sections)
+                terminal_index = advanced_headers.index("Terminal Score")
+                assert page.locator(".q-table tbody tr").first.locator("td").nth(terminal_index).inner_text() == "0.00"
+                assert page.locator(".q-table tbody tr").nth(-2).locator("td").nth(terminal_index).inner_text() == "0.13"
+                assert page.locator(".q-table tbody tr").last.locator("td").nth(terminal_index).inner_text() == "0.50"
+                assert page.locator(".q-table tbody tr").first.locator("td").nth(2).inner_text() == "0.25"
+                assert page.locator(".q-table tbody tr").count() == 27
+                assert page.locator(".q-table tbody tr").last.locator("td").nth(2).inner_text() == "29.00"
+                assert page.get_by_test_id("plan-chart").evaluate("element => echarts.getInstanceByDom(element).getOption().series[1].data.at(-1)[0]") == compact_end + 24 * 3600 * 1000
                 assert page.get_by_role("columnheader").count() > compact_count
                 page.get_by_role("button", name="Compact", exact=True).click()
                 page.wait_for_function("!Array.from(document.querySelectorAll('th')).some(e => e.textContent.includes('Battery start'))")
+                assert page.get_by_test_id("plan-chart").evaluate("element => echarts.getInstanceByDom(element).getOption().series[1].data.at(-1)[0]") == compact_end
                 with page.expect_download() as download_info:
                     page.get_by_role("button", name="Download Excel", exact=True).click()
                 download = download_info.value

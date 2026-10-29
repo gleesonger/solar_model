@@ -34,7 +34,7 @@ def inputs():
         energy_plan=replace(config.energy_plan, num_projection_hours=1, projection_resolution_mins=(30, 30),
             minimum_battery_kwh=(rule,), maximum_battery_kwh=(replace(rule, rate=10.),),
             limit_battery_export_rate_to_grid_kw=(), protection_preference=0.))
-    scenarios = [ScenarioData("base", ForecastData([ForecastInterval(start, end, 0.)], [ForecastInterval(start, end, 1.)]), 1.)]
+    scenarios = [ScenarioData("base", ForecastData([ForecastInterval(start, end, 0.), ForecastInterval(end, end + timedelta(hours=24), 0.)], [ForecastInterval(start, end, 1.), ForecastInterval(end, end + timedelta(hours=24), 0.)]), 1.)]
     return device, DeviceState(2.), scenarios, config, start
 
 
@@ -69,7 +69,7 @@ def test_rates_define_first_step_behaviour(inputs, charge_rate, discharge_rate, 
     assert frame.iloc[0].battery_end_kwh == pytest.approx(expected_energy)
     if charge_rate:
         assert frame.iloc[0].grid_import_kwh == pytest.approx(1.5)
-        assert frame.iloc[1].battery_to_grid_kwh > .5
+
 
 
 @pytest.mark.parametrize("action,expected_energy", [

@@ -43,7 +43,7 @@ def _worker(connection, case: str, config_path: str) -> None:
         config = load_config(Path(config_path))
         start = datetime(2026, 10, 27, 10, 5, tzinfo=timezone.utc)
         timestamp = start.replace(minute=0)
-        coverage_end = timestamp + timedelta(hours=25)
+        coverage_end = timestamp + timedelta(hours=49)
         solar, load = [], []
         while timestamp < coverage_end:
             hour = timestamp.hour + timestamp.minute / 60

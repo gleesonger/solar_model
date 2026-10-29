@@ -10,6 +10,7 @@ from solar_model.dashboard.live import LivePowerCollector
 from solar_model.dashboard.snapshot import DashboardSnapshotStore
 from solar_model.logging_setup import LOGGER, configure_logging
 from solar_model.paths import package_path
+from solar_model.dashboard.planning_worker import ensure_planning_worker
 
 def main() -> None:
     config = load_config()
@@ -34,11 +35,11 @@ def main() -> None:
     app.on_shutdown(snapshots.stop)
 
     async def start_snapshot_worker() -> None:
-        # Load once before accepting browser pages, so first render uses cached
-        # data rather than blocking every connecting client on database work.
+        # Load once so browser pages can use shared cached data.
         await snapshots.refresh()
         background_tasks.create(snapshots.run_forever(), name="dashboard snapshot worker")
 
+    app.on_startup(ensure_planning_worker)
     app.on_startup(start_snapshot_worker)
 
     @ui.page("/")

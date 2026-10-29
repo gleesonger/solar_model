@@ -49,6 +49,10 @@ def _simulate_energy_plan(device_info: DeviceInfo, device_state: DeviceState, sc
 
     projection_starts_at = utc_instant(projection_starts_at)
     periods = _projection_intervals(config, projection_starts_at)
+    visible_periods = len(periods)
+    visible_end = periods[-1][1]
+    periods += [(visible_end + timedelta(hours=h), visible_end + timedelta(hours=h + 4))
+                for h in range(0, 24, 4)]
     durations = tuple((end - start).total_seconds() / 3600 for start, end in periods)
     # #### Build Model
     num_time_periods, scenario_count = len(durations), len(scenarios)
@@ -165,8 +169,8 @@ def _simulate_energy_plan(device_info: DeviceInfo, device_state: DeviceState, sc
 
     steps = [(end - start).total_seconds() / 60 for start, end in periods]
     summary = ", ".join(f"{minutes:g}*{sum(1 for _ in group)}" for minutes, group in groupby(steps))
-    LOGGER.info("plan_model projection: periods=%d scenarios=%d time_steps=[%s]",
-                len(periods), len(scenarios), summary)
+    LOGGER.info("plan_model projection: periods=%d visible_periods=%d lookahead_periods=6 scenarios=%d time_steps=[%s]",
+                len(periods), visible_periods, len(scenarios), summary)
     metrics = problem.size_metrics
     booleans = sum(variable.size for variable in problem.variables() if variable.attributes["boolean"])
     LOGGER.info("plan_model complexity: variables=%d booleans=%d constraints=%d parameters=%d",
@@ -208,6 +212,10 @@ def _simulate_energy_plan(device_info: DeviceInfo, device_state: DeviceState, sc
         "grid_to_battery": grid_to_battery,
     }
 
+    protection_value = _protection_value(config, projection_starts_at, sum(durations))
+    terminal_rate = _terminal_rate(config, periods[-1][1]) * device_info.discharge_efficiency
+    score_segments = _protection_segments(capacity_kwh, config.energy_plan.preferred_reserve_kwh)
+    score_weights = np.array(durations) / sum(durations)
     for s, (scenario_name, df) in enumerate(dict_df_results.items()):
 
         battery_end_values = battery_levels[s].value
@@ -227,6 +235,12 @@ def _simulate_energy_plan(device_info: DeviceInfo, device_state: DeviceState, sc
         df["import_cost"] = df["grid_import_kwh"] * df["import_rate"]
         df["export_revenue"] = df["grid_export_kwh"] * df["export_rate"]
         df["net_cost"] = df["import_cost"] - df["export_revenue"]
+        protection = np.minimum.reduce([slope * battery_end_values + intercept for slope, intercept in score_segments])
+        df["cost_score"] = -df["net_cost"]
+        df["protection_score"] = protection_value * np.clip(protection, 0, 100) / 100 * score_weights
+        df["terminal_score"] = 0.
+        df.loc[df.index[-1], "terminal_score"] = terminal_rate * battery_end_values[-1]
+        df["total_score"] = df["cost_score"] + df["protection_score"] + df["terminal_score"]
 
         # check
         solar_accounted_kwh = df["solar_to_load_kwh"] + df["solar_to_battery_kwh"] + df["solar_to_battery_loss_kwh"] + df["solar_to_grid_kwh"] + df["solar_clipped_kwh"]
@@ -237,7 +251,9 @@ def _simulate_energy_plan(device_info: DeviceInfo, device_state: DeviceState, sc
 
     return SimulationResult(
         next_action=next_action,
-        results=dict_df_results,
+        results={name: frame.iloc[:visible_periods].copy() for name, frame in dict_df_results.items()},
+        lookahead_results={name: frame.iloc[visible_periods:].reset_index(drop=True)
+                           for name, frame in dict_df_results.items()},
     )
 
 
@@ -278,27 +294,46 @@ def score_simulation(
         projection_starts_at: datetime,
         durations: list[float] | tuple[float, ...] | None = None,
     ) -> cp.Expression:
-    """Maximise protection reward minus electricity cost, averaged over scenarios.
+    """Maximise protection reward minus electricity cost across the full horizon.
 
-    R is stored kWh measured from zero; X is protection_preference (0-100).
+    R is stored kWh measured from zero; X is non-negative protection_preference.
     The maximum reward is X/100 * R * average import rate * horizon hours/24.
     Price is time-weighted over the next 24 elapsed hours, independent of load.
     Each scenario earns that reward times its average diminishing-return score
-    divided by 100. Cost always matters, including at X=100. No reference solves
-    or min/max normalisation are needed.
+    divided by 100. Supplied durations include the hidden lookahead periods, so
+    the protection reward per elapsed hour is unchanged. Terminal energy earns
+    the following 12 hours' import/export midpoint, after discharge losses.
     """
     projection_starts_at = utc_instant(projection_starts_at)
     settings = config.energy_plan
     projection_hours = sum(durations) if durations is not None else settings.num_projection_hours
-    protection_value = (settings.protection_preference / 100 * settings.preferred_reserve_kwh
-                        * _reference_import_rate(config, projection_starts_at, projection_starts_at + timedelta(hours=24))
-                        * projection_hours / 24)
+    protection_value = _protection_value(config, projection_starts_at, projection_hours)
+    terminal_rate = _terminal_rate(config, projection_starts_at + timedelta(hours=projection_hours)) * device.discharge_efficiency
     scores = []
     for scenario, costs, levels in zip(scenarios, net_cost_flows, battery_levels):
         cost, protection = score_scenario(costs, levels, device, config, constraints, durations)
-        scores.append(scenario.probability * (-cost + protection_value * protection / 100))
+        scores.append(scenario.probability * (-cost + protection_value * protection / 100 + terminal_rate * levels[-1]))
 
     return cp.sum(scores) / sum(s.probability for s in scenarios)
+
+
+def _terminal_rate(config: Config, ends_at: datetime) -> float:
+    """Mean hourly import/export midpoint over the 12 hours after the model end."""
+    end = utc_instant(ends_at)
+    zone = ZoneInfo(config.timezone)
+    rates = []
+    for hour in range(12):
+        local = (end + timedelta(hours=hour)).astimezone(zone)
+        imports, exports = tariff_rules_for_timestamp(config.tariffs, local)
+        rates.append((tariff_rule(imports, local).rate + tariff_rule(exports, local).rate) / 2)
+    return sum(rates) / len(rates)
+
+
+def _protection_value(config: Config, starts_at: datetime, projection_hours: float) -> float:
+    settings = config.energy_plan
+    return (settings.protection_preference / 100 * settings.preferred_reserve_kwh
+            * _reference_import_rate(config, starts_at, starts_at + timedelta(hours=24))
+            * projection_hours / 24)
 
 
 def _reference_import_rate(config: Config, starts_at: datetime, ends_at: datetime) -> float:

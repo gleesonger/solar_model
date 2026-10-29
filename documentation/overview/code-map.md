@@ -29,6 +29,8 @@ solar_model/
 
 ## Responsibility boundaries
 
+Shared general-purpose helpers live in `solar_model/utils.py`. `table_to_object_list(class_type, *rows)` constructs a list of typed objects from iterable rows of positional arguments (such as tuples, lists or generators), allowing definitions to align as a compact table in source. Arguments follow each row's iteration order; use ordered iterables.
+
 | Area | Responsibility and entry points |
 | --- | --- |
 | [Planning simulation](../../solar_model/planning/optimisation.py) | `simulate_energy_plan`: in-memory device/state/scenarios to `SimulationResult`. The service creates scenarios directly; planning has no storage/network/UI imports |
@@ -53,7 +55,7 @@ storage.queries → dashboard.snapshot / dashboard.tabs → components / formatt
                                     -> scenarios -> optimisation -> reports
 ```
 
-Production forecasting and offline planning share the house-load prediction helper and train on integrated House Load; planning limits observations to those before its as-of local midnight. The [plan-model design](plan-model.md) describes the future shared next action and protection scoring; the simulation now shares first controls and uses the agreed cost/protection score; forecast/scenario changes and command-response verification remain separate work.
+Production forecasting and offline planning share the house-load prediction helper and train on integrated House Load; planning limits observations to those before its as-of local midnight. The [plan-model reference](plan-model.md) describes the implemented shared first action, forecast/scenario construction and tariff-scaled scoring, with outstanding command-response and execution limitations recorded separately.
 
 ## Tests and change routing
 

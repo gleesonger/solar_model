@@ -1,35 +1,30 @@
 from __future__ import annotations
 from datetime import datetime, timedelta
+from solar_model.config import ScenariosConfig
 from solar_model.planning.types import ForecastData, ForecastInterval, ScenarioData
 
-# Scenario name -> (energy multiplier, optional first/second half-hour split).
-LOAD_SCENARIOS = {
-    'low': (0.5, None),
-    'base': (1.0, None),
-    'high': (1.5, (0.8, 0.2)),
-}
+def scenario_probabilities(settings: ScenariosConfig) -> dict[str, float]:
+    """Combine independent house-load and solar probabilities."""
+    return {"med" if load == solar == "med" else f"{load}_{solar}": load_level.probability * solar_level.probability
+            for load, load_level in settings.house_load.items() for solar, solar_level in settings.solar.items()}
 
-SOLAR_SCENARIOS = {
-    'low': (0.5, None),
-    'base': (1.0, None),
-    'high': (1.5, (0.25, 0.75)),
-}
 
-def create_scenarios(forecast_baseline: ForecastData) -> list[ScenarioData]:
-    """Create load_solar scenarios with ±50% totals and high-case timing stress."""
+def create_scenarios(forecast_baseline: ForecastData, settings: ScenariosConfig) -> list[ScenarioData]:
+    """Create nine configured low/med/high combinations with high-case timing stress."""
     solar_half_hours = _half_hour_intervals(forecast_baseline.solar)
     load_half_hours = _half_hour_intervals(forecast_baseline.load)
     scenarios = []
-    probability = 1 / (len(LOAD_SCENARIOS) * len(SOLAR_SCENARIOS))
-    for load_name, (load_multiplier, load_split) in LOAD_SCENARIOS.items():
-        for solar_name, (solar_multiplier,
-        solar_split) in SOLAR_SCENARIOS.items():
-            name = "base" if load_name == solar_name == "base" else f"{load_name}_{solar_name}"
+    probabilities = scenario_probabilities(settings)
+    for load_name, load_level in settings.house_load.items():
+        for solar_name, solar_level in settings.solar.items():
+            name = "med" if load_name == solar_name == "med" else f"{load_name}_{solar_name}"
+            load_split = (0.8, 0.2) if load_name == "high" else None
+            solar_split = (0.25, 0.75) if solar_name == "high" else None
 
-            stressed_solar = _scenario_intervals(solar_half_hours, solar_multiplier, solar_split)
-            stressed_load = _scenario_intervals(load_half_hours, load_multiplier, load_split)
+            stressed_solar = _scenario_intervals(solar_half_hours, solar_level.multiplier, solar_split)
+            stressed_load = _scenario_intervals(load_half_hours, load_level.multiplier, load_split)
 
-            scenarios.append(ScenarioData(name, ForecastData(stressed_solar, stressed_load), probability))
+            scenarios.append(ScenarioData(name, ForecastData(stressed_solar, stressed_load), probabilities[name]))
     return scenarios
 
 def _half_hour_intervals(intervals: tuple[ForecastInterval, ...]) -> list[tuple[datetime, float]]:

@@ -32,7 +32,7 @@ def plan_as_of(database: SolarDatabase, config: Config, as_of: datetime) -> Simu
     device = load_device_info_as_of(database, config, as_of)
     state = load_battery_state_as_of(database, as_of, device)
     forecast = load_forecast_as_of(database, as_of, config)
-    return simulate_energy_plan(device, state, create_scenarios(forecast), config, as_of)
+    return simulate_energy_plan(device, state, create_scenarios(forecast, config.scenarios), config, as_of)
 
 
 @dataclass

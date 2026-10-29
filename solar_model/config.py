@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 import math
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import date
 from pathlib import Path
 from urllib.parse import urlparse
@@ -111,6 +111,45 @@ class ForecastConfig:
 
 
 @dataclass(frozen=True)
+class ScenarioLevelConfig:
+    multiplier: float
+    probability: float
+
+    def __post_init__(self) -> None:
+        for name in ("multiplier", "probability"):
+            value = getattr(self, name)
+            if isinstance(value, bool) or not math.isfinite(value) or value < 0:
+                raise ValueError(f"scenario {name} must be finite and non-negative")
+        if self.probability > 1:
+            raise ValueError("scenario probability must be at most one")
+
+
+@dataclass(frozen=True)
+class ScenarioDimensionConfig:
+    low: ScenarioLevelConfig
+    med: ScenarioLevelConfig
+    high: ScenarioLevelConfig
+
+    def items(self) -> tuple[tuple[str, ScenarioLevelConfig], ...]:
+        return (("low", self.low), ("med", self.med), ("high", self.high))
+
+    def __post_init__(self) -> None:
+        total = sum(level.probability for _, level in self.items())
+        if not math.isclose(total, 1., rel_tol=0., abs_tol=.03 + 1e-12):
+            raise ValueError("scenario probabilities must sum to within 3% of one in each dimension")
+        for name, level in self.items():
+            object.__setattr__(self, name, replace(level, probability=level.probability / total))
+        if not self.low.multiplier <= self.med.multiplier <= self.high.multiplier:
+            raise ValueError("scenario multipliers must be in low, med, high order")
+
+
+@dataclass(frozen=True)
+class ScenariosConfig:
+    solar: ScenarioDimensionConfig
+    house_load: ScenarioDimensionConfig
+
+
+@dataclass(frozen=True)
 class EnergyPlanConfig:
     num_projection_hours: int
     projection_resolution_mins: tuple[int, ...]
@@ -188,6 +227,7 @@ class Config:
     dashboard: DashboardConfig
     tariffs: TariffsConfig
     actuals: ActualsConfig
+    scenarios: ScenariosConfig
 
     @property
     def actuals_to_forecast_panel_ids(self) -> dict[str, int]:
@@ -201,6 +241,15 @@ def load_config(path: str | Path = "config.yaml") -> Config:
         raw_config = yaml.safe_load(file)
 
     try:
+        scenario_data = raw_config.get("scenarios") if isinstance(raw_config, dict) else None
+        if isinstance(scenario_data, dict):
+            for name in ("solar", "house_load"):
+                levels = scenario_data.get(name)
+                if not isinstance(levels, dict) or set(levels) != {"low", "med", "high"}:
+                    raise ValueError(f"scenarios.{name} requires exactly low, med, high entries")
+                for level in levels.values():
+                    if not isinstance(level, dict) or set(level) != {"multiplier", "probability"}:
+                        raise ValueError(f"scenarios.{name} entries require multiplier and probability")
         energy_plan_data = raw_config.get("energy_plan") if isinstance(raw_config, dict) else None
         if isinstance(energy_plan_data, dict):
             resolutions = energy_plan_data.get("projection_resolution_mins")

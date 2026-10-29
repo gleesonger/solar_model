@@ -4,7 +4,7 @@ For database queries, intermediate DataFrame fields, calibration arrays, update 
 
 ## Production model
 
-The live hook is [solar_model.services.forecasting.refresh_adjusted_forecast](../../solar_model/planning/forecasts/solar.py), called by [solar_model/services/forecasting.py](../../solar_model/services/forecasting.py).
+The live hook is [solar_model.services.forecasting.refresh_adjusted_forecast](../../solar_model/services/forecasting.py), called by [solar_model/services/forecasting.py](../../solar_model/services/forecasting.py).
 
 - Raw provider W, cumulative Wh, and daily Wh are preserved separately from adjusted output.
 - For each local target day, correction uses the latest provider snapshot at/before midnight. A new installation without one uses its first same-day snapshot.
@@ -60,4 +60,4 @@ A numeric intraday `lookback` imposes an additional limit in hours, within today
 
 Commands and write effects are in [operations.md](../operations/runbook.md).
 
-The general boosted load/solar training script and its dependent intraday backtest were removed on 2026-10-23. The older boosted solar-only correction/backfill script was also removed. Load-profile evaluation remains in `evaluate_load_profile.py`; production load prediction and solar correction live in `operational_model.py`. Scikit-learn is no longer a runtime dependency.
+Production load prediction and solar correction live in `planning/forecasts/house_load.py` and `planning/forecasts/solar.py`; evaluation uses `tools/evaluate_load.py` and `tools/evaluate_forecasts.py`.

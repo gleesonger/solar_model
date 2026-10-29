@@ -9,6 +9,87 @@ import yaml
 from solar_model.config import load_config
 
 
+def test_scenario_levels_load_multiplier_and_probability(tmp_path):
+    raw = yaml.safe_load(Path("config.yaml").read_text(encoding="utf-8"))
+    raw["scenarios"]["solar"]["low"] = {"multiplier": .4, "probability": .1}
+    raw["scenarios"]["solar"]["high"]["probability"] = .3
+    path = tmp_path / "config.yaml"
+    path.write_text(yaml.safe_dump(raw), encoding="utf-8")
+    config = load_config(path)
+    assert config.scenarios.solar.low.multiplier == .4
+    assert config.scenarios.solar.low.probability == .1
+    assert config.scenarios.house_load.med.probability == .6
+
+
+@pytest.mark.parametrize("dimension", ["solar", "house_load"])
+@pytest.mark.parametrize("total", [.97, .98, 1., 1.02, 1.03])
+def test_scenario_probabilities_within_three_percent_are_normalised(tmp_path, dimension, total):
+    raw = yaml.safe_load(Path("config.yaml").read_text(encoding="utf-8"))
+    for entry in raw["scenarios"][dimension].values():
+        entry["probability"] *= total
+    path = tmp_path / "config.yaml"
+    path.write_text(yaml.safe_dump(raw), encoding="utf-8")
+    loaded = getattr(load_config(path).scenarios, dimension)
+    assert [level.probability for _, level in loaded.items()] == pytest.approx([.2, .6, .2])
+    assert sum(level.probability for _, level in loaded.items()) == pytest.approx(1., abs=1e-12)
+
+
+@pytest.mark.parametrize("total", [.969999, 1.030001, 0.])
+def test_scenario_probability_totals_outside_tolerance_are_rejected(tmp_path, total):
+    raw = yaml.safe_load(Path("config.yaml").read_text(encoding="utf-8"))
+    for entry in raw["scenarios"]["solar"].values():
+        entry["probability"] *= total
+    path = tmp_path / "config.yaml"
+    path.write_text(yaml.safe_dump(raw), encoding="utf-8")
+    with pytest.raises(ValueError, match="within 3%"):
+        load_config(path)
+
+
+@pytest.mark.parametrize("dimension", ["solar", "house_load"])
+@pytest.mark.parametrize("field,value", [("multiplier", -.5), ("multiplier", float("nan")),
+    ("multiplier", float("inf")), ("multiplier", False), ("multiplier", 2.),
+    ("probability", -.1), ("probability", float("nan")), ("probability", float("inf")),
+    ("probability", True), ("probability", 1.1), ("probability", .3)])
+def test_scenario_levels_reject_invalid_values_and_probability_sums(tmp_path, dimension, field, value):
+    raw = yaml.safe_load(Path("config.yaml").read_text(encoding="utf-8"))
+    raw["scenarios"][dimension]["low"][field] = value
+    path = tmp_path / "config.yaml"
+    path.write_text(yaml.safe_dump(raw), encoding="utf-8")
+    with pytest.raises(ValueError, match="scenario"):
+        load_config(path)
+
+
+@pytest.mark.parametrize("levels", [[.5, 1., 1.5], "0.5, 1, 1.5", {},
+    {"low": {}, "med": {}}, {"low": {}, "med": {}, "high": {}, "extra": {}}])
+def test_scenarios_require_exact_named_levels(tmp_path, levels):
+    raw = yaml.safe_load(Path("config.yaml").read_text(encoding="utf-8"))
+    raw["scenarios"]["solar"] = levels
+    path = tmp_path / "config.yaml"
+    path.write_text(yaml.safe_dump(raw), encoding="utf-8")
+    with pytest.raises(ValueError, match="scenarios"):
+        load_config(path)
+
+
+@pytest.mark.parametrize("entry", [{"multiplier": 1.}, {"probability": .6},
+                                  {"multiplier": 1., "probability": .6, "extra": 1}])
+def test_scenario_entries_require_exact_multiplier_and_probability(tmp_path, entry):
+    raw = yaml.safe_load(Path("config.yaml").read_text(encoding="utf-8"))
+    raw["scenarios"]["solar"]["med"] = entry
+    path = tmp_path / "config.yaml"
+    path.write_text(yaml.safe_dump(raw), encoding="utf-8")
+    with pytest.raises(ValueError, match="scenarios"):
+        load_config(path)
+
+
+def test_scenario_settings_are_required(tmp_path):
+    raw = yaml.safe_load(Path("config.yaml").read_text(encoding="utf-8"))
+    del raw["scenarios"]
+    path = tmp_path / "config.yaml"
+    path.write_text(yaml.safe_dump(raw), encoding="utf-8")
+    with pytest.raises(ValueError, match="scenarios"):
+        load_config(path)
+
+
 def test_load_config_parses_minimum_battery_backup_rules_and_ignores_comment(
     tmp_path: Path,
 ) -> None:
@@ -26,6 +107,15 @@ forecast:
     arrays: [{panel_id: 1, name: East, latitude: 0, longitude: 0, declination: 0, azimuth: 0, peak_kw: 1}]
 dashboard: {host: 127.0.0.1, port: 8090, actuals_to_forecast: {pv1: East}}
 additional_device_info: {charge_efficiency: 0.95, discharge_efficiency: 0.95}
+scenarios:
+  solar:
+    low: {multiplier: 0.5, probability: 0.2}
+    med: {multiplier: 1, probability: 0.6}
+    high: {multiplier: 1.5, probability: 0.2}
+  house_load:
+    low: {multiplier: 0.5, probability: 0.2}
+    med: {multiplier: 1, probability: 0.6}
+    high: {multiplier: 1.5, probability: 0.2}
 energy_plan:
   num_projection_hours: 24
   projection_resolution_mins: [15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15]

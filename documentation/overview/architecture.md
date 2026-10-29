@@ -7,7 +7,7 @@ Detailed startup/call hierarchies and object ownership are in [runtime.md](../im
 - Root launchers forward to `solar_model.runtime.supervisor`, `solar_model.runtime.collector` and `solar_model.dashboard.app`, preserving existing commands.
 - The supervisor initialises storage and manages the persisted collector and NiceGUI server. The collector calls collection/forecasting services; the dashboard owns its snapshot worker and browser-activated live collector.
 - `solar_model.storage` owns schema, migrations, measurements, forecast persistence and queries. Data-only query results do not depend on NiceGUI.
-- `solar_model.planning` owns pure forecasts, planning inputs, scenarios, physical limits, scoring and optimisation. `services.planning` loads as-of data; `tools.plan_as_of` writes reports. Planning is not called by the running dashboard and sends no device commands.
+- `solar_model.planning` owns pure forecasts, planning inputs, scenarios, physical limits, scoring and optimisation. `services.planning` loads as-of data; `tools.plan_as_of` writes reports. The dashboard Plan tab invokes the planning service in a process worker on manual refresh. Planning sends no device commands.
 
 ```mermaid
 flowchart LR

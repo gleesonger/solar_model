@@ -228,8 +228,8 @@ def test_dst_overlap_scenarios_and_solver_use_real_elapsed_hours(day, end_hour):
     forecast = ForecastData([interval, tail], [interval, tail])
     for hour in range(4):
         assert forecast.sum(add_elapsed(start, timedelta(hours=hour)), add_elapsed(start, timedelta(hours=hour + 1))).solar_kwh == 1.
-    scenarios = create_scenarios(forecast)
-    assert next(scenario.forecast_data for scenario in scenarios if scenario.name == "base").sum(start, end).solar_kwh == 4.
+    scenarios = create_scenarios(forecast, load_config().scenarios)
+    assert next(scenario.forecast_data for scenario in scenarios if scenario.name == "med").sum(start, end).solar_kwh == 4.
     cfg = load_config()
     cfg = replace(cfg, tariffs=tariffs(), energy_plan=replace(cfg.energy_plan, num_projection_hours=4,
                   projection_resolution_mins=(60,) * 24, minimum_battery_kwh=(rule(0.),), maximum_battery_kwh=(rule(10.),)))

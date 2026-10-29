@@ -33,7 +33,7 @@ def test_in_memory_plan_preserves_scenario_energy_and_cost(resolution, expected_
         protection_preference=0.,
     ))
 
-    scenarios = create_scenarios(baseline)
+    scenarios = create_scenarios(baseline, config.scenarios)
     forecasts = {scenario.name: scenario.forecast_data for scenario in scenarios}
     plans = simulate_energy_plan(device, DeviceState(0.), scenarios, config, start).results
 
@@ -57,14 +57,43 @@ def test_generated_scenarios_separate_names_and_probabilities_from_forecasts():
     start = datetime(2026, 10, 24, tzinfo=timezone.utc)
     end = start + timedelta(hours=1)
     forecast = ForecastData([ForecastInterval(start, end, 1.)], [ForecastInterval(start, end, 2.)])
-    scenarios = create_scenarios(forecast)
+    scenarios = create_scenarios(forecast, load_config().scenarios)
     assert isinstance(scenarios, list)
     assert len({scenario.name for scenario in scenarios}) == 9
     assert sum(scenario.probability for scenario in scenarios) == pytest.approx(1.)
-    assert all(scenario.probability == pytest.approx(1 / 9) for scenario in scenarios)
-    base = next(scenario for scenario in scenarios if scenario.name == "base")
+    assert next(s.probability for s in scenarios if s.name == "med") == pytest.approx(.36)
+    assert next(s.probability for s in scenarios if s.name == "low_low") == pytest.approx(.04)
+    base = next(scenario for scenario in scenarios if scenario.name == "med")
     assert base.forecast_data.sum(start, end) == forecast.sum(start, end)
     assert not hasattr(forecast, "name")
+
+
+def test_scenarios_use_independent_configured_multipliers_and_fixed_three_levels():
+    from solar_model.config import ScenarioDimensionConfig, ScenarioLevelConfig, ScenariosConfig
+
+    start = datetime(2026, 10, 24, tzinfo=timezone.utc)
+    middle, end = start + timedelta(minutes=30), start + timedelta(hours=1)
+    forecast = ForecastData([ForecastInterval(start, middle, 1.), ForecastInterval(middle, end, 3.)],
+                            [ForecastInterval(start, end, 2.)])
+    settings = ScenariosConfig(
+        ScenarioDimensionConfig(ScenarioLevelConfig(.2, .1), ScenarioLevelConfig(1.2, .6), ScenarioLevelConfig(2.1, .3)),
+        ScenarioDimensionConfig(ScenarioLevelConfig(.4, .2), ScenarioLevelConfig(.9, .8), ScenarioLevelConfig(1.8, 0.)),
+    )
+    scenarios = {scenario.name: scenario for scenario in create_scenarios(forecast, settings)}
+    assert set(scenarios) == {"low_low", "low_med", "low_high", "med_low", "med", "med_high",
+                              "high_low", "high_med", "high_high"}
+    for load, load_level in settings.house_load.items():
+        for solar, solar_level in settings.solar.items():
+            name = "med" if load == solar == "med" else f"{load}_{solar}"
+            scenario = scenarios[name]
+            energy = scenario.forecast_data.sum(start, end)
+            assert energy.solar_kwh == pytest.approx(4 * solar_level.multiplier)
+            assert energy.load_kwh == pytest.approx(2 * load_level.multiplier)
+            assert scenario.probability == pytest.approx(load_level.probability * solar_level.probability)
+    stressed = scenarios["high_high"].forecast_data.sum(start, middle)
+    assert stressed.solar_kwh == pytest.approx(4 * 2.1 * .25)
+    assert stressed.load_kwh == pytest.approx(2 * 1.8 * .8)
+    assert forecast.sum(start, end).solar_kwh == 4.
 
 
 @pytest.mark.parametrize("hidden_load", [0., 4.])

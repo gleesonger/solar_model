@@ -73,6 +73,7 @@ def _simulate_energy_plan(device_info: DeviceInfo, device_state: DeviceState, sc
     grid_to_load = cp.Variable((num_time_periods, scenario_count), nonneg=True, name="grid_to_load")
     grid_to_battery = cp.Variable((num_time_periods, scenario_count), nonneg=True, name="grid_to_battery")
     battery_charging = cp.Variable((num_time_periods, scenario_count), boolean=True, name="battery_charging")
+    grid_importing = cp.Variable((num_time_periods, scenario_count), boolean=True, name="grid_importing")
 
     charge_loss_factor = limits.charge_loss_factor
     discharge_loss_factor = limits.discharge_loss_factor
@@ -133,6 +134,13 @@ def _simulate_energy_plan(device_info: DeviceInfo, device_state: DeviceState, sc
     max_discharge = np.broadcast_to(np.array([limit.max_discharge_kwh for limit in period_limits])[:, None], solar_to_load.shape)
     inverter_flows_dc_to_ac = solar_to_load + solar_to_grid + battery_to_load + battery_to_grid
     inverter_flows_ac_to_dc = grid_to_battery + grid_to_battery_loss
+    grid_import = grid_to_load + inverter_flows_ac_to_dc
+    grid_export = solar_to_grid + battery_to_grid
+    # Bounds for direction selection, not additional site-meter power limits.
+    max_grid_charge = np.minimum(max_charge, min(device_info.inverter_max_active_power_kw,
+                                                device_info.inverter_max_absorption_power_kw) * hours)
+    max_grid_import = inputs["load_kwh"] + max_grid_charge
+    max_grid_export = device_info.inverter_max_active_power_kw * hours
     battery_charge_input = solar_to_battery + solar_to_battery_loss + inverter_flows_ac_to_dc
     battery_discharge_output = battery_to_load + battery_to_grid
     battery_level_bop = (cp.vstack([np.full((1, scenario_count), initial_battery), battery_level_eop[:-1, :]])
@@ -151,13 +159,15 @@ def _simulate_energy_plan(device_info: DeviceInfo, device_state: DeviceState, sc
         battery_discharge_output <= cp.multiply(max_discharge, 1 - battery_charging),
         inverter_flows_dc_to_ac + inverter_flows_ac_to_dc <= device_info.inverter_max_active_power_kw * hours,
         inverter_flows_ac_to_dc <= device_info.inverter_max_absorption_power_kw * hours,
+        grid_import <= cp.multiply(max_grid_import, grid_importing),
+        grid_export <= cp.multiply(max_grid_export, 1 - grid_importing),
         battery_to_grid <= cp.multiply(inputs["limit_battery_export_rate_to_grid_kw"], hours),
         battery_level_eop == battery_level_bop + solar_to_battery + grid_to_battery - battery_to_load - battery_to_grid - battery_to_ac_loss,
         inputs["minimum_battery_kwh"] <= battery_level_eop,
         battery_level_eop <= inputs["maximum_battery_kwh"],
     ]
-    net_cost = (cp.multiply(inputs["import_rate"], grid_to_load + inverter_flows_ac_to_dc)
-                - cp.multiply(inputs["export_rate"], solar_to_grid + battery_to_grid))
+    net_cost = (cp.multiply(inputs["import_rate"], grid_import)
+                - cp.multiply(inputs["export_rate"], grid_export))
     net_cost_flows = [net_cost[:, s] for s in range(scenario_count)]
     battery_levels = [battery_level_eop[:, s] for s in range(scenario_count)]
 

@@ -117,7 +117,7 @@ Run only queries for tables present in the backup; a legacy schema may lack hour
 
 ## Troubleshooting
 
-The first startup after the R06 valid-count upgrade rebuilds hourly history once for databases lacking `hourly_rollup_initialized_v3` (including v1/v2 databases), inside a write transaction. This populates per-field valid counts and split grid statistics without changing raw data. Large histories may take longer and temporarily block other writers. Use the managed launcher so this completes before its children start; later opens only check readiness. Failed/interrupted initialization rolls back and retries.
+The first startup after the valid-count upgrade rebuilds hourly history once for databases lacking `hourly_rollup_initialized_v3` (including v1/v2 databases), inside a write transaction. This populates per-field valid counts and split grid statistics without changing raw data. Large histories may take longer and temporarily block other writers. Use the managed launcher so this completes before its children start; later opens only check readiness. Failed/interrupted initialization rolls back and retries.
 
 - Invalid config: inspect startup `ValueError`, field spelling, complete rule coverage, effective dates, and YAML types.
 - Missing readings: check device/network/map IDs, server logs, and warning timestamp age. Failed reads retain old live values.

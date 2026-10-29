@@ -26,13 +26,13 @@ def sample_result():
         "cost_score": [-1., .25], "protection_score": [.01, .02], "total_score": [-.99, .27],
     })
     action = NextAction(OperatingMode.SELF_CONSUMPTION, 0., 0., 100., 0.)
-    return SimulationResult(action, {"base": frame, "low_high": frame.assign(net_cost=2.)})
+    return SimulationResult(action, {"med": frame, "low_high": frame.assign(net_cost=2.)})
 
 
 def test_column_metadata_controls_views_and_keeps_unknown_advanced_fields():
     from solar_model.dashboard.tabs.plan import detail_columns
 
-    frame = sample_result().results["base"].assign(extra_power_kw=1.)
+    frame = sample_result().results["med"].assign(extra_power_kw=1.)
     compact = detail_columns(frame, compact=True)
     names = [column["name"] for column in compact]
     assert names[:9] == ["starts_at", "ends_at", "t", "plan_action", "tariff_name",
@@ -45,6 +45,16 @@ def test_column_metadata_controls_views_and_keeps_unknown_advanced_fields():
     assert all(column["sortable"] is False for column in advanced)
 
 
+def test_scenario_average_cost_uses_joint_probabilities():
+    from solar_model.dashboard.tabs.plan import scenario_average_cost
+    from solar_model.planning.scenarios import scenario_probabilities
+
+    settings = load_config().scenarios
+    results = {name: pd.DataFrame({"net_cost": [10. if name == "med" else 0.]})
+               for name in scenario_probabilities(settings)}
+    assert scenario_average_cost(results, settings) == pytest.approx(3.6)
+
+
 def test_aggregation_uses_metadata_instead_of_column_units(monkeypatch):
     from solar_model.dashboard.tabs.plan import Aggregation, PLAN_COLUMNS, PlanColumn
 
@@ -53,7 +63,7 @@ def test_aggregation_uses_metadata_instead_of_column_units(monkeypatch):
         "configured_kwh", "Configured", None, None, "number", 2, Aggregation.SETTING, False, True))
     monkeypatch.setitem(PLAN_COLUMNS, "power_kw", PlanColumn(
         "power_kw", "Power", None, None, "number", 2, Aggregation.AVERAGE, False, True))
-    frame = sample_result().results["base"].assign(configured_kwh=[10., 20.], power_kw=[2., 8.])
+    frame = sample_result().results["med"].assign(configured_kwh=[10., 20.], power_kw=[2., 8.])
     hourly = hourly_detail_frame(frame, "UTC", OperatingMode.SELF_CONSUMPTION)
     assert hourly.configured_kwh.tolist() == [20., 20.]
     assert hourly.power_kw.iloc[0] == pytest.approx((2 * 15 + 8 * 40) / 55)
@@ -65,7 +75,7 @@ def test_aggregation_uses_metadata_instead_of_column_units(monkeypatch):
 
 def test_summary_and_chart_use_duration_weighting_and_consistent_units():
     from solar_model.planning.optimisation import battery_protection_score
-    frame = sample_result().results["base"]
+    frame = sample_result().results["med"]
     summary = scenario_summary(frame, 4.)
     assert summary["cost"] == .75
     assert summary["solar"] == 2.5
@@ -93,7 +103,7 @@ def test_summary_and_chart_use_duration_weighting_and_consistent_units():
 
 
 def test_detail_rows_show_local_time_only_and_preserve_missing_values():
-    frame = sample_result().results["base"].copy()
+    frame = sample_result().results["med"].copy()
     frame["starts_at"] = pd.to_datetime(["2026-10-25T00:30Z", "2026-10-25T01:30Z"])
     frame.loc[0, "solar_kwh"] = float("nan")
     rows = detail_rows(frame, "Europe/Dublin")
@@ -106,7 +116,7 @@ def test_detail_rows_show_local_time_only_and_preserve_missing_values():
 
 
 def test_table_scores_are_hourly_rates_whose_time_weighted_sum_matches_contributions():
-    original = sample_result().results["base"]
+    original = sample_result().results["med"]
     display = table_detail_frame(original)
     assert display.t.tolist() == [.25, 1.]
     assert display.cost_score.tolist() == [-4., .25]
@@ -118,7 +128,7 @@ def test_table_scores_are_hourly_rates_whose_time_weighted_sum_matches_contribut
 
 
 def test_detail_totals_sum_flows_and_costs_without_summing_levels_or_rates():
-    frame = sample_result().results["base"].assign(
+    frame = sample_result().results["med"].assign(
         minimum_battery_kwh=4., maximum_battery_kwh=18., import_rate=.4,
         limit_battery_export_rate_to_grid_kw=5., solar_clipped_kwh=float("nan"),
     )
@@ -136,7 +146,7 @@ def test_detail_totals_sum_flows_and_costs_without_summing_levels_or_rates():
 
 
 def test_detail_actions_use_shared_first_mode_and_later_grid_battery_flows():
-    frame = sample_result().results["base"]
+    frame = sample_result().results["med"]
     frame = pd.concat([frame, frame.iloc[[1]]], ignore_index=True).assign(
         grid_to_battery_kwh=[0., .5, 0.], battery_to_grid_kwh=[0., 0., .4],
     )
@@ -149,7 +159,7 @@ def test_detail_actions_use_shared_first_mode_and_later_grid_battery_flows():
 
 
 def test_detail_soc_uses_nameplate_capacity_and_stays_beside_energy():
-    original = sample_result().results["base"]
+    original = sample_result().results["med"]
     frame = detail_frame(original, 20.)
     assert frame.battery_start_soc_percent.tolist() == pytest.approx([20., 21.])
     assert frame.battery_end_soc_percent.tolist() == pytest.approx([21., 15.])
@@ -162,7 +172,7 @@ def test_detail_soc_uses_nameplate_capacity_and_stays_beside_energy():
 
 
 def test_compact_hours_split_flows_preserve_totals_and_interpolate_battery():
-    frame = detail_frame(sample_result().results["base"], 20.)
+    frame = detail_frame(sample_result().results["med"], 20.)
     frame["import_rate"] = [.2, .5]
     frame["tariff_name"] = ["night", "day"]
     hourly = hourly_detail_frame(frame, "Europe/Dublin", OperatingMode.CHARGE_PV_FIRST)
@@ -179,7 +189,7 @@ def test_compact_hours_split_flows_preserve_totals_and_interpolate_battery():
 
 
 def test_compact_hours_keep_repeated_local_hours_separate():
-    frame = sample_result().results["base"].iloc[[0]].copy()
+    frame = sample_result().results["med"].iloc[[0]].copy()
     frame["starts_at"] = pd.to_datetime(["2026-10-25T00:45Z"])
     frame["ends_at"] = pd.to_datetime(["2026-10-25T02:15Z"])
     hourly = hourly_detail_frame(detail_frame(frame, 20.), "Europe/Dublin", OperatingMode.SELF_CONSUMPTION)
@@ -281,7 +291,7 @@ def test_real_report_from_off_hour_inputs_excludes_future_data(tmp_path):
         db.close()
     report = plan_with_preference(config, start, 0.)
     assert len(report.simulation.results) == 9
-    base = report.simulation.results["base"]
+    base = report.simulation.results["med"]
     assert base.starts_at.iloc[0] == start
     assert base.ends_at.iloc[-1] == start + timedelta(hours=1)
     assert base.solar_kwh.sum() == pytest.approx(1.)

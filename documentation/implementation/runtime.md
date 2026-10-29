@@ -33,6 +33,7 @@ If either child launch fails, `start_processes()` terminates and reaps any child
 ```text
 load_config(path='config.yaml')
   yaml.safe_load(file) -> Python mapping/lists/scalars
+  validate scenarios dimensions contain exactly low/med/high multiplier/probability entries
   expand projection_resolution_mins repetitions (e.g. 15*24)
   normalise minimum_battery_kwh wrapper if supplied
   rename each tariff period's import key to import_
@@ -42,6 +43,8 @@ load_config(path='config.yaml')
 ```
 
 The intermediate YAML object is mutable. The normalisation steps alter it before constructing frozen dataclasses. Unknown keys are ignored because dacite strict mode is not enabled; this is why descriptive `name`/`comment` keys in YAML do not become runtime fields.
+
+Required `Config.scenarios: ScenariosConfig` contains `solar` and `house_load` as frozen `ScenarioDimensionConfig` objects, each with low/med/high `ScenarioLevelConfig(multiplier, probability)` entries. `items()` returns the fixed low/med/high order. Multipliers are finite, non-negative and nondecreasing; probabilities are finite in [0,1] and must total 97%-103% per dimension, then are normalised to sum to one during construction. Scenario mappings reject extra/missing levels and entry fields. Planning and dashboard share these settings; joint probabilities assume independence.
 
 ```python
 # Abbreviated raw YAML-derived mapping

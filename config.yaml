@@ -121,6 +121,16 @@ forecast:
       halflife: 14                          # days
       prior_effective_observations: 0.2     # influence after one day of weekend evidence (blending from all days to seperate weekend experiance)
 
+scenarios:
+  solar:
+    low:  {multiplier: 0.5, probability: 0.2}
+    med:  {multiplier: 1.0, probability: 0.6}
+    high: {multiplier: 1.5, probability: 0.2}
+  house_load:
+    low:  {multiplier: 0.5, probability: 0.2}
+    med:  {multiplier: 1.0, probability: 0.6}
+    high: {multiplier: 1.5, probability: 0.2}
+
 energy_plan:
   num_projection_hours: 24
   # Initial grid: six hours of 15 minutes, then eighteen hourly blocks.

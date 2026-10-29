@@ -1,6 +1,6 @@
 # Plan model
 
-Current planning and scoring reference, checked against the working-tree implementation on **2026-10-28**. The model produces reports and a proposed next action; the application does not send battery-control commands or automatically replan. Remaining implementation and hardware-verification work is separated in section 6.
+Current planning and scoring contracts. The model produces reports and a proposed next action; the application does not send battery-control commands or automatically replan. Remaining implementation and hardware-verification work is separated in section 6.
 
 Sources: [optimisation](../../solar_model/planning/optimisation.py), [scenarios](../../solar_model/planning/scenarios.py), [as-of inputs](../../solar_model/storage/queries/planning.py), [planning service](../../solar_model/services/planning.py), [configuration](../../solar_model/config.py), and [Plan tab](../../solar_model/dashboard/tabs/plan.py). See the [implementation guide](../implementation/planning.md) for field-level details.
 
@@ -215,13 +215,13 @@ Forecasts supply interval solar and house-load energy for the planning horizon, 
 
 | Variant | Baseline multiplier | Initial weight in each dimension |
 | --- | --- | --- |
-| Low | 0.5 | $1/3$ |
-| Base | 1.0 | $1/3$ |
-| High | 1.5 | $1/3$ |
+| Low | 0.5 | 0.2 |
+| Med | 1.0 | 0.6 |
+| High | 1.5 | 0.2 |
 
-`create_scenarios()` combines every load/solar pair and assigns each of nine scenarios probability 1/9. These are fixed planning cases, not calibrated probabilities or user-configured dimension weights. The pure solver API also accepts custom `ScenarioData` probabilities, requiring finite non-negative weights with positive total and normalising the combined objective.
+The required top-level `scenarios.solar` and `scenarios.house_load` mappings configure low/med/high entries with explicit multipliers and probabilities (shipped values above). `create_scenarios(forecast, config.scenarios)` combines every load/solar pair and assigns each of nine scenarios the product of its configured dimension probabilities, assuming independence. These are planning assumptions, not calibrated probabilities. The pure solver API also accepts custom `ScenarioData` probabilities, requiring finite non-negative weights with positive total and normalising the combined objective.
 
-The generator first samples contiguous whole-hour coverage into paired half-hours. Low/base preserve those half-hour proportions. High load scales each hour to 1.5x and redistributes 80% into its first half-hour and 20% into its second; high solar uses 25% then 75%. Thus the high cases change timing as well as totals. Names are `load_solar` (for example `low_high`), except both base is named `base`.
+The generator first samples contiguous whole-hour coverage into paired half-hours. Low/med preserve those half-hour proportions. High load scales each hour by its configured multiplier and redistributes 80% into its first half-hour and 20% into its second; high solar uses 25% then 75%. Thus the high cases change timing as well as totals. Names are `load_solar` (for example `low_high`), except both med is named `med`.
 
 The existing forecast parameter names are `lookback`, `halflife`, and `prior_effective_observations`, under `forecast.solar.model_calibration_parameters.day_ahead`/`intraday` and `forecast.load.model_calibration_parameters`. Despite its name, the last parameter is a decimal influence fraction $f$, not an observation count. The configured fraction f gives prior strength $a=1/f-1$; evidence n then receives influence $n/(n+a)$. Here n is the matching-day weight sum for load, or the effective sample size for solar intraday.
 
@@ -296,7 +296,9 @@ The resulting `battery_end` is $E_{t,s}$ used by the protection curve; `grid_imp
 
 Implemented constraints include health-adjusted capacity, configured hard minimum/maximum battery schedules, mutually exclusive charging/discharging, duration-scaled battery limits, shared inverter active-power/absorption bounds and the configured battery-to-grid export limit. The preferred reserve R is separate and soft. Current power settings constrain battery/inverter routes; they do not establish general site import/export meter limits.
 
-Solar may be explicitly clipped when it cannot be used/stored/exported. Flow equalities conserve solar, household load and battery energy. There is no explicit grid-direction constraint excluding simultaneous grid import/export, nor a complete PV-priority/self-consumption policy; do not treat tariff-driven route choices as verified device behaviour. These limits and the SOC-convention issue are tracked in [review findings](../reviews/findings.md). Infeasible solves raise an error; initial measured energy is not itself constrained by interval-end minimum/maximum schedules.
+Solar may be explicitly clipped when it cannot be used/stored/exported. Flow equalities conserve solar, household load and battery energy. Separate import/export flows are mutually exclusive within each interval and scenario, using a Boolean grid direction independent of battery direction. The same shared battery action can therefore produce importing and exporting outcomes in different scenarios. Import bounds include household demand plus feasible grid charging; export bounds follow inverter output capability. These bounds implement direction selection, not general site-meter limits. Opposite grid directions at different times require separate model intervals; long hidden slots retain this aggregation approximation.
+
+A complete PV-priority/self-consumption policy is still absent; do not treat tariff-driven route choices as verified device behaviour. This limitation and the SOC-convention issue are tracked in [review findings](../reviews/findings.md). Infeasible solves raise an error; initial measured energy is not itself constrained by interval-end minimum/maximum schedules.
 
 ### 5.5 Units, Time and Data Conventions
 
@@ -319,7 +321,7 @@ Scoring checks cover preference endpoints, zero-based reserve, non-positive refe
 | Component | Implemented behaviour |
 | --- | --- |
 | Input assembly | `services.planning.plan_as_of` loads cutoff-aware device/state/solar inputs and uses the shared house-load helper for visible plus hidden horizon coverage |
-| Scenarios | `planning.scenarios.create_scenarios` creates nine equally weighted 0.5/1/1.5 cases with high-case half-hour timing stress |
+| Scenarios | `planning.scenarios.create_scenarios` creates nine configured low/med/high cases weighted by independent dimension probability products with high-case half-hour timing stress |
 | Projection | YAML minute vector with repetition shorthand, intact first action, UTC-clock alignment and full elapsed horizon |
 | Solver | Vectorised joint CVXPY mixed-integer linear problem; one HiGHS solve, fresh build/compile per call, no compiled cache or warm start |
 | Objective | Tariff-scaled, duration-weighted diminishing protection reward minus net cost across visible and hidden periods, with normalised scenario probabilities |
@@ -330,7 +332,7 @@ Scoring checks cover preference endpoints, zero-based reserve, non-positive refe
 
 CLI grouping currently retains only the first score contribution per output bucket rather than summing it; this is a [tracked reporting defect](../reviews/findings.md). Use original simulation periods or Advanced dashboard/Excel for score totals until that path is corrected.
 
-The Plan tab offers protection adjustment, a one-line proposed action, expected-cost/range summary, separate Solar/Load Low/Base/High button groups, selected-scenario summary and an actual/forecast chart. Compact detail groups the core columns by local clock hour; crossing periods are split proportionally and battery states interpolated, retaining repeated DST hours. Advanced retains all original visible and lookahead periods/fields plus SOC/losses and the score contributions. Its chart and Excel export also include the lookahead; summary boxes continue to describe the visible day. Headers are not sortable; fixed decimals and Excel exports follow the selected view. See the [dashboard guide](dashboard.md) for exact presentation contracts.
+The Plan tab offers protection adjustment, a one-line proposed action, expected-cost/range summary, separate Solar/Load Low/Med/High button groups, selected-scenario summary and an actual/forecast chart. Compact detail groups the core columns by local clock hour; crossing periods are split proportionally and battery states interpolated, retaining repeated DST hours. Advanced retains all original visible and lookahead periods/fields plus SOC/losses and the score contributions. Its chart and Excel export also include the lookahead; summary boxes continue to describe the visible day. Headers are not sortable; fixed decimals and Excel exports follow the selected view. See the [dashboard guide](dashboard.md) for exact presentation contracts.
 
 ### 6.3 Remaining Limitations and Execution Boundary
 
@@ -338,7 +340,7 @@ The model assumes independent scenario probabilities and full scenario-specific 
 
 - Full PV-priority, saturation and self-consumption command response, plus installed-firmware validation.
 - A consistent nameplate/health-adjusted SOC convention and mapping metadata cut-offs into physical bounds.
-- Grid-direction/site-meter constraints and behaviour under unusual import/export tariff relationships.
+- General site-meter power limits; grid import/export direction is already exclusive within each interval/scenario, including when export prices exceed import prices.
 - Solar target-time semantics, fallback/padding visibility, forecast input validation and age policy.
 - Numerical/approximation tolerances and any deliberate tie-breaking policy; no exact-score secondary solve currently exists.
 

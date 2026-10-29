@@ -18,6 +18,7 @@ Source: [config.yaml](../../config.yaml), [solar_model/config.py](../../solar_mo
 | `tariffs.periods` | Effective-dated import/export schedules |
 | `energy_plan` | 24-hour projection, intact 15-minute action, six hours of UTC-clock-aligned fine intervals, then hourly intervals, reserve/protection preference, scheduled battery limits |
 | `additional_device_info` | Charge/discharge efficiencies, both shipped as 0.95 |
+| `scenarios` | Required solar/house-load low, med, high entries, each with multiplier and probability |
 
 These are current file values, not universal defaults. Preserve exact configuration spellings, including `data_retrival_schedule` and `full_updated_interval_seconds`.
 
@@ -33,8 +34,24 @@ The live collector passes these settings to solar correction and the fixed daily
 
 ## Validation and parsing
 
+`scenarios.solar` and `scenarios.house_load` each require exactly `low`, `med`, `high`, with explicit `multiplier` and `probability` fields. Multipliers must be finite, non-negative and nondecreasing; probabilities must be finite and in [0, 1], totalling 97%-103% per dimension (inclusive); accepted probabilities are normalised to sum to one during loading. Replace former triples/comma-separated settings with this mapping:
+
+```yaml
+scenarios:
+  solar:
+    low:  {multiplier: 0.5, probability: 0.2}
+    med:  {multiplier: 1.0, probability: 0.6}
+    high: {multiplier: 1.5, probability: 0.2}
+  house_load:
+    low:  {multiplier: 0.5, probability: 0.2}
+    med:  {multiplier: 1.0, probability: 0.6}
+    high: {multiplier: 1.5, probability: 0.2}
+```
+
+Joint probabilities multiply the two dimension probabilities, assuming independence (Med/Med = 0.36). Zero-probability cases remain available for inspection. Dashboard labels use the configured multipliers and its scenario-average cost uses the joint probabilities.
+
 - YAML is deserialised through dacite into frozen dataclasses; lists become tuples. Required dataclass fields must be present.
-- Unknown keys are currently ignored: `dacite.Config` does **not** enable strict mode. This permits descriptive `comment`/period `name` keys but can hide misspellings.
+- Unknown keys outside the validated scenario mappings are currently ignored: `dacite.Config` does **not** enable strict mode. This permits descriptive `comment`/period `name` keys but can hide misspellings.
 - Optional planning-rule tuples default empty; minimum battery also accepts `{comment: ..., rules: [...]}`. The optimiser currently still requires usable minimum/maximum rules.
 - Intervals/timeouts/history lengths must be positive. `energy_plan.projection_resolution_mins` is a YAML list of positive integer minutes, for example `[15, 15, 15, 15, 60, 60]`, covering at least `num_projection_hours`. Replace the former scalar value in deployed YAML files. The shipped vector is 24 quarter-hour entries followed by 18 hourly entries. Its first entry is the intact next action; subsequent cumulative boundaries align from the preceding full UTC hour, dropping boundaries overtaken by the first action. A final partial interval preserves the full elapsed horizon. At 10:05 the shipped vector produces 43 periods. Tariff, battery-limit and midnight boundaries do not add splits.
 - Protection preference must be finite and non-negative, with no upper bound; efficiencies must be in `(0, 1]`.

@@ -6,17 +6,13 @@ These tools sit outside the managed collection/UI loop. Some mutate history; oth
 
 Run `python -m solar_model.tools.migrate_database <database.db>` to apply the 0.3.0 → 0.3.1 migration explicitly; normal app startup runs it too. It overwrites the existing No Solar Cost series using integrated House Load and each sample's stored import tariff, then rebuilds hourly aggregates. Missing inputs become null. Repeating the command skips completed work. Raw values, hourly history and the version update commit together; failed conversion retries on the next run. See [storage](storage.md#no-solar-cost-migration-031).
 
-## House-load comparison investigation
+## House-load backfill and comparison
 
-To migrate an existing database and backfill the production house-load series, run `python -m solar_model.tools.migrate_database <database.db>`. The CLI requires an existing file and invokes the same migrations as normal startup. Verify on a copy first. Successful migration stores `database_version = 0.3.1`; repeating it skips the completed house-load backfill. See [storage](storage.md) for transaction and gap semantics.
+To backfill the production house-load series in an existing database, run `python -m solar_model.tools.migrate_database <database.db>`. The command requires an existing file and runs the same migrations as startup. Verify on a copy first. Completed migrations are skipped; see [storage](storage.md) for version, transaction and gap semantics.
 
-A read-only analysis on 2026-10-26 compared stored load-counter energy with estimated house-load energy for the 30 complete Europe/Dublin calendar days from 2026-09-26 through 2026-10-25. Counter deltas totalled **774.870 kWh**; integrated house load totalled **702.264 kWh**, a difference of **72.606 kWh (9.37% of counter load)**. Accepted power intervals covered **99.9%** of the elapsed time.
+The read-only [comparison tool](../../solar_model/tools/compare_house_load.py) compares stored Load counter deltas with trapezoidally integrated household power. Run `python -m solar_model.tools.compare_house_load [solar.db]`. Options include `--days` (default 30), `--end` (exclusive ISO date, default latest measurement's local date), `--timezone` (default `Europe/Dublin`) and `--max-gap-seconds` (default 120).
 
-The analysis read raw `plant_load_total_kwh_period` and `plant_load_power_kw`, dividing stored integers by 10,000. Counter deltas retained collection-date attribution. House energy used trapezoidal integration of consecutive non-null power readings, skipped intervals longer than 120 seconds, and split accepted intervals at local midnight with interpolated boundary power. Coverage used actual local-day durations, including the 25-hour DST day. Synthetic checks verified constant-power integration across that DST day, midnight endpoints and gap handling.
-
-The difference is a diagnostic comparison, not a verified loss measurement: sampling, gaps and counter attribution can also contribute. SQLite is opened read-only without application initialization, migrations or backfills. Dashboard metrics and database contents are unchanged.
-
-The [comparison script](../../solar_model/tools/compare_house_load.py) is retained. Run `python -m solar_model.tools.compare_house_load [solar.db]` from the repository root. Options include `--days` (default 30), `--end` (exclusive ISO date, default latest measurement's local date), `--timezone` (default `Europe/Dublin`) and `--max-gap-seconds` (default 120). Temporary verification fixtures were removed.
+Raw SQL converts scaled measurements by dividing by 10,000. Counter deltas retain collection-date attribution; integrated power splits accepted intervals at local midnight with interpolated boundary power and uses actual DST-day durations. Gaps longer than the configured limit are skipped. The difference is diagnostic, not a verified loss measurement: sampling, gaps and counter attribution can contribute. The tool opens SQLite read-only without migrations or backfills.
 
 ## 1. Tariff recalculation
 

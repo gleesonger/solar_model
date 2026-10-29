@@ -1,6 +1,6 @@
 # Implementation and data-flow reference
 
-This is the detailed companion to the [project overview](../index.md). It explains the reviewed code's function hierarchy, object ownership, queries, intermediate data, transformations, and persistence boundaries. Read the relevant overview first, then follow the pipeline below.
+This is the detailed companion to the [project overview](../index.md). It describes implementation contracts: function hierarchy, object ownership, queries, intermediate data, transformations, and persistence boundaries. Read the relevant overview first, then follow the pipeline below. The [documentation usage guide](../index.md#using-this-documentation) explains source roles and uncertainty when answering questions.
 
 ## Pipeline guides
 
@@ -64,8 +64,6 @@ flowchart TD
 | `panel_n_raw_watts` | Raw SQL: W × 10,000; ORM: physical W; model's `raw_n_kw`: physical kW |
 | `collected_at_local` | Device table: stored text; electrical/forecast models: host-timezone-derived hybrid property |
 
-## Baseline and verification
+## Maintenance and limitations
 
-- Source rechecked on 2026-10-14 at `6452e13ae3d8828580ae9df489ef341a2a8e263b`, including the local untracked load-profile experiment.
-- These guides describe existing implementation, including limitations. They do not change algorithms or define new program requirements.
-- The [review findings](../reviews/findings.md) remain the record of unresolved issues. Current instructions in [AGENTS.md](../../AGENTS.md) require reviewing and maintaining both overview and implementation guides with future changes.
+These guides describe implementation contracts, including limitations; examples do not define new requirements. Keep them synchronized with source changes under [AGENTS.md](../../AGENTS.md). Consult [findings](../reviews/findings.md) for unresolved issues and [verification scope](../reviews/verification.md) for checks that still require integration testing. Source links may refer to uncommitted workspace changes; no single historical revision certifies the entire guide.

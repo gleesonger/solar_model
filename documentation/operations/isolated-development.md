@@ -5,21 +5,21 @@ Run from the repository root with dependencies installed as in [development and 
 ## Server/data checks without hardware
 
 ```powershell
-.\.venv\Scripts\python.exe -m pytest -q tests/test_review_recovery.py tests/test_grid_power_rollup.py tests/test_remaining_review_fixes.py tests/test_forecast_schedule.py
+.\.venv\Scripts\python.exe -m pytest -q tests/regressions/test_review_recovery.py tests/storage/test_grid_power_rollup.py tests/regressions/test_remaining_review_fixes.py tests/forecasting/test_forecast_schedule.py
 ```
 
 These tests create temporary databases and fake readings/requests. For new fixtures, use pytest `tmp_path`, `open_database(tmp_path / "fixture.db")`, and fake the provider/Modbus boundary. Never substitute the configured production path. For migration tests, create the legacy fixture first, then call the opener and check repeated opening.
 
 ## Full dashboard with synthetic data
 
-The existing [review fixture launcher](../reviews/system-review-evidence/browser/server.py) seeds sample telemetry/forecasts/device metadata, replaces `LivePowerCollector`, and mocks Control recalculation/restart. It starts only the dashboard; no external forecast collector runs. Reuse it from a **fresh temporary copy**, leaving archived evidence intact:
+The existing [dashboard fixture launcher](../../tests/browser/dashboard_fixture.py) seeds sample telemetry/forecasts/device metadata, replaces `LivePowerCollector`, and mocks Control recalculation/restart. It starts only the dashboard; no external forecast collector runs. Reuse it from a **fresh temporary copy**, keeping generated data outside the repository:
 
 ```powershell
 $projectRoot = (Get-Location).Path
 $projectPython = Join-Path $projectRoot '.venv\Scripts\python.exe'
 $fixtureDirectory = Join-Path ([IO.Path]::GetTempPath()) ('solar-dev-' + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $fixtureDirectory | Out-Null
-Copy-Item -LiteralPath (Join-Path $projectRoot 'documentation\reviews\system-review-evidence\browser\server.py') -Destination (Join-Path $fixtureDirectory 'server.py')
+Copy-Item -LiteralPath (Join-Path $projectRoot 'tests\browser\dashboard_fixture.py') -Destination (Join-Path $fixtureDirectory 'server.py')
 & $projectPython -X utf8 (Join-Path $fixtureDirectory 'server.py')
 ```
 
@@ -37,7 +37,7 @@ The shutdown endpoint belongs only to this loopback fixture. Generated database/
 
 ## Browser automation and boundaries
 
-Install Playwright/browser separately if needed; the [warning browser tests](../../tests/browser/test_dashboard_freshness_browser.py) exercise synthetic DOM/socket state. Full-app scripts under the archived review's `browser/` directory target port 18091 and may write results beside themselves: copy them into the temporary directory before adapting/running them. Some deliberately reproduce old defects and are not current passing regression tests.
+Install Playwright/browser separately if needed; the [warning browser tests](../../tests/browser/test_dashboard_freshness_browser.py) exercise synthetic DOM/socket state. Maintain repeatable browser checks under `tests/browser/`; use the copied fixture for manual full-app checks.
 
 This workflow verifies presentation against synthetic inputs. It does not exercise real register compatibility, provider limits, Docker deployment, persisted collector scheduling under real load, or actual administrative subprocesses. Use targeted temporary-database tests for those server contracts before controlled integration checks.
 

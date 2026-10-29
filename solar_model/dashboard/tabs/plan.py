@@ -13,14 +13,14 @@ from typing import Literal
 from nicegui import run, ui
 import pandas as pd
 
-from solar_model.config import Config
+from solar_model.config import Config, ScenariosConfig
 from solar_model.dashboard.components.warnings import notify_error
 from solar_model.dashboard.planning_worker import ensure_planning_worker
 from solar_model.dashboard.components.tables import mark_final_total_row
 from solar_model.dashboard.components.download_dialog import excel_bytes
 from solar_model.logging_setup import LOGGER
 from solar_model.planning.optimisation import battery_protection_score
-from solar_model.planning.scenarios import LOAD_SCENARIOS, SOLAR_SCENARIOS
+from solar_model.planning.scenarios import scenario_probabilities
 from solar_model.planning.types import OperatingMode, SimulationResult
 from solar_model.services.planning import plan_with_preference
 from solar_model.utils import table_to_object_list
@@ -126,6 +126,12 @@ def detail_columns(frame: pd.DataFrame, compact: bool) -> list[dict]:
             column[":format"] = f"value => value == null ? '' : Number(value).toFixed({definition.decimals})"
         columns.append(column)
     return columns
+
+
+def scenario_average_cost(results: dict[str, pd.DataFrame], settings: ScenariosConfig) -> float:
+    """Use the same joint probabilities as planning for the displayed mean cost."""
+    weights = scenario_probabilities(settings)
+    return sum(weights[name] * float(frame.net_cost.sum()) for name, frame in results.items()) / sum(weights[name] for name in results)
 
 
 def scenario_summary(frame: pd.DataFrame, reserve: float) -> dict[str, float]:
@@ -393,15 +399,16 @@ class PlanTab:
         ui.label(f"Action for next {minutes:g} mins - {description}").classes("text-base font-semibold")
         costs = [float(frame.net_cost.sum()) for frame in result.results.values()]
         with ui.row().classes("w-full items-center justify-between flex-wrap gap-2"):
-            ui.label(f"Scenario-average net cost: €{sum(costs) / len(costs):.2f} · Range €{min(costs):.2f} to €{max(costs):.2f}").classes("text-base font-semibold")
+            average_cost = scenario_average_cost(result.results, self.config.scenarios)
+            ui.label(f"Scenario-average net cost: €{average_cost:.2f} · Range €{min(costs):.2f} to €{max(costs):.2f}").classes("text-base font-semibold")
             with ui.row().classes("items-center flex-wrap gap-6"):
-                for label, scenarios in (("Solar", SOLAR_SCENARIOS), ("Load", LOAD_SCENARIOS)):
+                for label, dimension in (("Solar", self.config.scenarios.solar), ("Load", self.config.scenarios.house_load)):
                     with ui.element("fieldset").classes("plan-scenario-group").props(f"data-testid=plan-{label.lower()}-scenario"):
                         ui.html(label, tag="legend").classes("text-sm font-semibold")
                         control = ui.toggle(
-                            {name: "Base" if name == "base" else f"{name.title()} ({factor:g}x)"
-                             for name, (factor, _) in scenarios.items()},
-                            value="base", on_change=self._render_scenario,
+                            {name: f"{name.title()} ({level.multiplier:g}x)"
+                             for name, level in dimension.items()},
+                            value="med", on_change=self._render_scenario,
                         ).props(f'dense no-caps unelevated color=grey-2 text-color=grey-9 toggle-color=primary toggle-text-color=white aria-label="{label} scenario"')
                     if label == "Solar":
                         self.solar_scenario = control
@@ -417,7 +424,7 @@ class PlanTab:
     @property
     def scenario_name(self) -> str:
         load, solar = self.load_scenario.value, self.solar_scenario.value
-        return "base" if load == solar == "base" else f"{load}_{solar}"
+        return "med" if load == solar == "med" else f"{load}_{solar}"
 
     def _scenario_frame(self) -> pd.DataFrame:
         frame = self.result.results[self.scenario_name]

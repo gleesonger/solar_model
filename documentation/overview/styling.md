@@ -1,5 +1,7 @@
 # Styling
 
+Current dashboard styling locations and visual conventions. Use this guide for layout, chart, loading and stale-state changes; verify actual desktop and mobile rendering.
+
 ## Where styles live
 
 | Location | Ownership |
@@ -17,7 +19,7 @@ There is no standalone theme stylesheet or central typography/token system. Curr
 
 [create_solar_icon.py](../../solar_model/dashboard/assets/create_solar_icon.py) writes `solar_power.svg` beside the generator script, regardless of the current working directory.
 
-Regenerate it from the repository root with `python dashboard/assets/create_solar_icon.py`. The asset must be valid SVG without Git conflict markers. On 2026-10-22, committed conflict markers caused NiceGUI to emit `/favicon.ico` instead of an embedded SVG and return HTTP 500 for the icon; regenerating the asset restored valid XML, an embedded favicon URL and browser image decoding.
+Regenerate it from the repository root with `python -m solar_model.dashboard.assets.create_solar_icon`. Deploy valid SVG, restart the dashboard and reload the page. NiceGUI serves the asset through `/favicon.ico`; browser caching can require a refresh after image changes.
 
 ## Existing layout conventions
 

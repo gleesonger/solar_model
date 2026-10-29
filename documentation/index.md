@@ -2,6 +2,23 @@
 
 Solar_model collects Sigenergy solar/battery telemetry and Forecast.Solar predictions, stores their history in SQLite, and presents a NiceGUI dashboard. Separate scripts evaluate forecasts, compare tariffs, and optimise hypothetical battery-energy plans.
 
+## Using this documentation
+
+This is a reference for people and AI assistants answering questions about the application. Preserve file paths when sharing or indexing the documentation so links and citations remain meaningful.
+
+| Question | Primary source |
+| --- | --- |
+| What does the application do? | `overview/`: behavior, concepts and subsystem boundaries |
+| How is it implemented? | `implementation/`: calls, calculations, queries and data contracts |
+| What exactly does a field mean? | `reference/`: schema, units, signs and aggregation semantics |
+| How do I run, test or maintain it? | `operations/`: commands, prerequisites and write effects |
+| What is broken, undecided or unverified? | `reviews/findings.md` and `reviews/verification.md` |
+| What did an investigation measure? | Dated performance/register investigations in `reviews/` |
+
+Use subsystem guides and exact references for current behavior. Findings qualify that behavior with known limitations; proposals and unresolved decisions are not implemented features. Historical measurements describe their stated dataset, date and environment, not current performance or universal device behavior. Synthetic examples illustrate contracts and are not readings from the user's installation.
+
+For answers, name the relevant file and section, retain units and timestamp/vintage distinctions, and distinguish documented facts from inference. If documents disagree, report the discrepancy and consult the relevant source when available; do not silently combine incompatible descriptions. If the supplied material does not establish an answer, state what is unknown. A documentation edit date is not evidence that the code or hardware was reverified that day.
+
 ## Reading order
 
 1. [Architecture](overview/architecture.md): processes and data flow.
@@ -40,17 +57,10 @@ Keep concise explanations in `overview/`, detailed code/data contracts in `imple
 | [Isolated development](operations/isolated-development.md) | Temporary-database tests and synthetic full-dashboard walkthrough |
 | [Adding a metric](implementation/adding-a-metric.md) | Worked ingestion → storage → statistics → query → chart/export change recipe |
 | [Operations](operations/runbook.md) | Launch, Docker, restart, maintenance, troubleshooting |
-| [Review findings](reviews/findings.md) | Confirmed defects and open questions |
-| [Sigenergy Home Assistant register review](reviews/sigenergy-home-assistant-register-review.md) | Register comparison, household versus total load, conversion residuals and collection lessons |
-| [System review plan](reviews/system-review-plan.md) | Approved deep review scope, independent reviewers, browser/output checks, and consolidation assessment |
-| [System review report](reviews/system-review-report.md) | Validated correctness/recovery findings, independent assessments, and explicit limitations |
-| [System review coverage](reviews/system-review-coverage.md) | Website interactions/output checks and server/data verification statuses |
-| [System review recommendations](reviews/system-review-recommendations.md) | Prioritized fixes, acceptance criteria, policy decisions, and consolidation work |
-| [Documentation development trial](reviews/documentation-development-trial.md) | Fresh-agent proposals tested against source, and resulting documentation gaps |
-| [Download performance](reviews/download-performance.md) | Profiling findings, SQL/Excel optimisations, measured timings, and regression coverage |
-| [Recent summary performance](reviews/recent-summary-performance.md) | Native SQL implementation, profiling, before/after timings and parity checks |
-| [Planning setup performance](reviews/planning-it-performance.md) | Independent setup optimisations, remote timings, parameter reuse and validation |
-| [Planning alignment investigation](reviews/planning-alignment-investigation.md) | Controlled grid/forecast comparisons, solver-input equality and auxiliary MIP work |
+| [Review findings](reviews/findings.md) | Unresolved defects, policy decisions and verification gaps |
+| [Verification scope](reviews/verification.md) | Regression coverage and remaining integration/verification limits |
+| [Performance conclusions](reviews/performance.md) | Key download, summary, forecasting and planning measurements |
+| [Sigenergy register review](reviews/sigenergy-home-assistant-register-review.md) | Load boundaries, electrical residuals and diagnostic priorities |
 | [Schema reference](reference/schema.md) | Every declared database column, key, type, and index |
 | [Metric semantics](reference/metric-semantics.md) | Units, signs, missing values, time attribution and chart/download aggregation differences |
 
@@ -62,10 +72,9 @@ Keep concise explanations in `overview/`, detailed code/data contracts in `imple
 - Planning produces reports; it is not connected to device control.
 - Research/backfill scripts can use different models from the production collector.
 
-## Review baseline and maintenance
+## Maintenance and verification
 
-- Reviewed on **2026-10-14**, using source, configuration, tests, and the conversation visible to this session.
-- Initial Git baseline: `c6b1e81776b58ecf98502de21c7637fdd45fb6d1`, plus existing dashboard/warning changes. During review those changes were committed externally as `6452e13` (`consolidate warnings`); final source check used that revision plus existing README edits and untracked load evaluation. This documentation change does not modify application code.
-- Chat decisions included: concise guides with distinct points; a dedicated styling guide; documentation maintained with future changes through root [AGENTS.md](../AGENTS.md). Other historical chats were not available for review.
-- Source links use file paths and symbol names rather than fragile line numbers. Each guide describes the reviewed implementation, not a promise of intended behavior.
-- The [Modbus protocol PDF](reference/Sigenergy%20Modbus%20Protocol%20EN_V2.9.pdf) is retained under `reference/`; this review did not independently validate hardware behavior against the full PDF.
+- Maintain overview, implementation and reference contracts with their code changes, as required by [AGENTS.md](../AGENTS.md). Keep unresolved defects and decisions in [findings](reviews/findings.md), removing them when resolved.
+- Use source paths and symbol names for implementation links. The workspace can include uncommitted changes; Git HEAD alone does not establish the implementation being described.
+- Run the checks in [development and testing](operations/development-and-testing.md) for the revision being assessed. Old test counts and review revisions do not establish its status.
+- The [Modbus protocol PDF](reference/Sigenergy%20Modbus%20Protocol%20EN_V2.9.pdf) describes vendor contracts; installed-firmware behavior still requires device verification. See [verification scope](reviews/verification.md).

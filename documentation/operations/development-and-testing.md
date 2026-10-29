@@ -1,8 +1,10 @@
 # Development and testing
 
+Setup, test entry points and validation boundaries for the current package. Run checks against the workspace being assessed; this page does not record a current test result.
+
 ## Setup
 
-Run from the repository root. Docker uses Python 3.12.10; the reviewed local virtual environment uses Python 3.12.
+Run from the repository root. The Docker image uses Python 3.12.10; see [Dockerfile](../../Dockerfile) for the deployment interpreter.
 
 ```powershell
 python -m venv .venv
@@ -20,10 +22,6 @@ python -m venv .venv
 
 Tests are grouped by subsystem. Run `python -m pytest -q` from the repository root. `python -m pip wheel . --no-deps` verifies package construction; the wheel must include dashboard CSS/JS/SVG and both register maps. Module CLIs support `--help` without opening a database. Tests use temporary databases and synthetic browser data.
 
-Verified on **2026-10-24** after the package restructure: **309 passed**, including the desktop/mobile browser checks and the in-memory planning API using HiGHS. The wheel built successfully; all five tool CLIs loaded from an extracted wheel in a separate configuration directory. Dashboard bootstrap found the packaged favicon and register maps and created only a temporary database. Documentation links were checked. No production database or hardware was used for this verification; a Docker image build was not performed.
-
-Cleanup removed the superseded lab sketch, unmounted Hourly UI and unused helpers, old package folders, Python/pytest caches, generated build metadata and task-generated temporary scripts/wheels. Existing databases, research CSV/workbooks and archived review evidence were retained.
-
 ## Test map
 
 Use the [isolated development walkthrough](isolated-development.md) for synthetic full-dashboard checks without hardware/provider calls. For a feature change spanning layers, follow the [worked metric recipe](../implementation/adding-a-metric.md).
@@ -38,8 +36,8 @@ Use the [isolated development walkthrough](isolated-development.md) for syntheti
 | [test_custom_chart_sql.py](../../tests/dashboard/test_custom_chart_sql.py) | SQL/pandas parity, batching, selected-field reads, grouping/splits, timezone/DST, minute telemetry, tariff quoting |
 | [test_recent_summary_sql.py](../../tests/dashboard/test_recent_summary_sql.py) | Native summary/Python parity, DST/timezone boundaries, nulls/resets/vintages, empty months, leap-day/lifetime totals and shared single-aggregation refresh |
 | [test_dashboard_forecasts.py](../../tests/dashboard/test_dashboard_forecasts.py) | Raw/adjusted selection, summary semantics, battery-level custom charts, stable colours/dashes/markers |
-| [test_grid_power_rollup.py](../../tests/storage/test_grid_power_rollup.py) | R04 sign-separated import/export means, zeros/nulls, tariff-split hours, raw/hourly parity, incremental/rebuild statistics and interrupted legacy-to-current upgrade |
-| [test_review_recovery.py](../../tests/regressions/test_review_recovery.py) | R01 finite/neutral residuals and real adjusted writes; R02 startup/midnight baseline retry and partial PV rollback; R03 transactional creation/rebuild, interruption/retry and no repeated history scan |
+| [test_grid_power_rollup.py](../../tests/storage/test_grid_power_rollup.py) | sign-separated import/export means, zeros/nulls, tariff-split hours, raw/hourly parity, incremental/rebuild statistics and interrupted legacy-to-current upgrade |
+| [test_review_recovery.py](../../tests/regressions/test_review_recovery.py) | finite/neutral residuals and real adjusted writes; startup/midnight baseline retry and partial PV rollback; transactional creation/rebuild, interruption/retry and no repeated history scan |
 | [test_analysis_download.py](../../tests/dashboard/test_analysis_download.py) | CSV/Excel downloads, SQL/pandas parity across every timestep and DST, optional/empty forecasts, single-query execution/forecast skipping, tariff labels, XlsxTurbo Excel values/dates/blanks |
 | [test_forecast_schema_migration.py](../../tests/storage/test_forecast_schema_migration.py) | Legacy forecast renaming and repeat-open preservation |
 | [test_sigenstor_schema_migration.py](../../tests/storage/test_sigenstor_schema_migration.py) | Battery-availability rename preserves values |
@@ -48,21 +46,11 @@ Use the [isolated development walkthrough](isolated-development.md) for syntheti
 | [test_live_grid_energy_day_start.py](../../tests/dashboard/test_live_grid_energy_day_start.py) | Configured-timezone meter baseline |
 | [test_dashboard_freshness_browser.py](../../tests/browser/test_dashboard_freshness_browser.py) | Offline/socket/server-silence/resume/stale behavior; CSS expiry without JS timeouts, reduced motion, indicator health gating, timestamp placement/style on phone/desktop widths; isolated NiceGUI test server |
 
-## Browser freshness follow-up: 2026-10-19
+## Verification limits
 
-`.venv/Scripts/python.exe -m pytest -q --disable-warnings` completed with **264 passed** (2,130 dependency/deprecation warnings). Playwright and Chromium were installed separately for local verification. Browser regressions exercised the real assets and a synthetic NiceGUI Recent table at 390px/1280px widths, including timestamp refresh/placement, light-grey 12px styling, CSS animation expiry without a JavaScript timeout, reduced motion, brief/long resume, offline/reconnect and stale-data suppression. No production database/hardware was used. Chrome Android saved offline archives still require actual-device verification.
+Run the ordinary full suite, including the legacy-named migration regression; do not use old exclusions for resolved collection failures. Record the command, revision/workspace, environment and any skipped checks with each new verification result. Browser skips indicate missing prerequisites, not verified browser behavior.
 
-## Current follow-up verification: 2026-10-15
-
-Full collection is restored (R18). [test_remaining_review_fixes.py](../../tests/regressions/test_remaining_review_fixes.py) adds independent numerical/recovery checks for R05-R17, including the real HiGHS solver across both DST transitions. See [follow-up verification](../reviews/system-review-follow-up.md) for current suite counts, browser evidence and model benchmarks.
-
-## Original review verification: 2026-10-14
-
-- Full `python -m pytest -q`: collection stopped because `migrate_database_0_1_0` is missing.
-- Temporary subset: `python -m pytest -q --ignore=tests/test_database_0_1_0_migration.py` → **82 passed, 1 skipped** (Playwright module unavailable), 215 dependency/NumPy deprecation warnings.
-- HiGHS was available in the reviewed environment. Pytest was installed into the existing `.venv` to run checks.
-- No live device/API collection, production database migrations, backfills, or planning workbook execution was performed.
-- Documentation links were checked against local files. These results describe the review snapshot, not future revisions.
+[test_remaining_review_fixes.py](../../tests/regressions/test_remaining_review_fixes.py) supplies additional independent numerical/recovery checks, including real HiGHS plans through both DST transitions. See [verification scope](../reviews/verification.md) for integration gaps. Desktop Chromium tests do not establish Android saved-page behavior; unit tests and package builds do not establish Docker or hardware compatibility.
 
 ## Appropriate verification
 

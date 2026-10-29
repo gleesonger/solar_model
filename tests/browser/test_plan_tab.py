@@ -23,6 +23,7 @@ def test_plan_refresh_scenarios_loading_and_failure(tmp_path):
 import sys
 sys.path.insert(0, {str(repo)!r})
 import asyncio
+from dataclasses import replace
 import pandas as pd
 from nicegui import ui, run
 from solar_model.config import load_config
@@ -40,11 +41,11 @@ async def calculate(callback, *args):
     if preference == 99:
         raise ValueError('Synthetic forecast unavailable')
     result = sample_result()
-    for load in ['low', 'base', 'high']:
-        for solar in ['low', 'base', 'high']:
-            name = 'base' if load == solar == 'base' else load + '_' + solar
+    for load in ['low', 'med', 'high']:
+        for solar in ['low', 'med', 'high']:
+            name = 'med' if load == solar == 'med' else load + '_' + solar
             if name not in result.results:
-                result.results[name] = result.results['base'].copy()
+                result.results[name] = result.results['med'].copy()
     as_of = as_of.replace(hour=10, minute=5, second=0, microsecond=0)
     for name, frame in result.results.items():
         frame = pd.concat([frame] * 10, ignore_index=True)
@@ -52,9 +53,9 @@ async def calculate(callback, *args):
         frame['ends_at'] = frame['starts_at'] + pd.Timedelta(minutes=15)
         frame['net_cost'] += (preference - 75) / 100
         frame['terminal_score'] = 0.
-        load, solar = ('base', 'base') if name == 'base' else name.split('_')
-        frame['solar_kwh'] *= dict(low=.5, base=1., high=1.5)[solar]
-        frame['load_kwh'] *= dict(low=.5, base=1., high=1.5)[load]
+        load, solar = ('med', 'med') if name == 'med' else name.split('_')
+        frame['solar_kwh'] *= getattr(config.scenarios.solar, solar).multiplier
+        frame['load_kwh'] *= getattr(config.scenarios.house_load, load).multiplier
         result.results[name] = frame
         extra = frame.iloc[[-1] * 6].copy().reset_index(drop=True)
         extra['starts_at'] = pd.date_range(frame.ends_at.iloc[-1], periods=6, freq='4h')
@@ -62,7 +63,7 @@ async def calculate(callback, *args):
         extra.loc[extra.index[-1], 'terminal_score'] = .5
         extra.loc[extra.index[-1], 'total_score'] += .5
         result.lookahead_results[name] = extra
-    stamp = result.results['base'].starts_at.iloc[0]
+    stamp = result.results['med'].starts_at.iloc[0]
     actuals = pd.DataFrame(dict(timestamp=[stamp - pd.Timedelta(hours=1), stamp], solar=[2.,2.], house_load=[1.,1.], battery=[4.,4.], grid_import=[.3,.4], grid_export=[.1,0.]))
     return PlanReport(result, actuals, 20.)
 run.cpu_bound = calculate
@@ -78,7 +79,10 @@ def page():
                     ui.tab(name)
         with ui.tab_panels(tabs, value='Plan').classes('w-full'):
             with ui.tab_panel('Plan').classes('p-0 min-w-0'):
-                PlanTab(load_config()).render_plan_tab()
+                config = load_config()
+                config = replace(config, scenarios=replace(config.scenarios,
+                    solar=replace(config.scenarios.solar, low=replace(config.scenarios.solar.low, multiplier=.4))))
+                PlanTab(config).render_plan_tab()
 
 if __name__ == '__main__':
     ui.run(host='127.0.0.1', port={port}, reload=False, show=False)
@@ -140,10 +144,10 @@ if __name__ == '__main__':
                 assert solar_buttons.get_by_role("button").count() == 3
                 assert load_buttons.get_by_role("button").count() == 3
                 assert solar_buttons.evaluate("element => element.tagName") == "FIELDSET"
-                assert solar_buttons.get_by_role("button", name="Low (0.5x)", exact=True).evaluate("element => getComputedStyle(element).backgroundColor") == "rgb(245, 245, 245)"
-                solar_buttons.get_by_role("button", name="Low (0.5x)", exact=True).click()
-                page.get_by_text("12.50 / 12.50 kWh", exact=True).wait_for()
-                solar_buttons.get_by_role("button", name="Base", exact=True).click()
+                assert solar_buttons.get_by_role("button", name="Low (0.4x)", exact=True).evaluate("element => getComputedStyle(element).backgroundColor") == "rgb(245, 245, 245)"
+                solar_buttons.get_by_role("button", name="Low (0.4x)", exact=True).click()
+                page.get_by_text("10.00 / 12.50 kWh", exact=True).wait_for()
+                solar_buttons.get_by_role("button", name="Med (1x)", exact=True).click()
                 page.get_by_text("25.00 / 12.50 kWh", exact=True).wait_for()
                 assert page.locator(".q-table tbody tr").count() == 7
                 assert page.get_by_text("Records per page:", exact=True).count() == 0
@@ -193,7 +197,7 @@ if __name__ == '__main__':
                 with page.expect_download() as download_info:
                     page.get_by_role("button", name="Download Excel", exact=True).click()
                 download = download_info.value
-                assert download.suggested_filename.startswith("plan-base-")
+                assert download.suggested_filename.startswith("plan-med-")
                 assert download.suggested_filename.endswith(".xlsx")
                 with ZipFile(download.path()) as workbook:
                     assert 'name="Plan detail"' in workbook.read("xl/workbook.xml").decode()
@@ -251,8 +255,8 @@ if __name__ == '__main__':
                 page.get_by_test_id("plan-chart").evaluate("element => echarts.getInstanceByDom(element).dispatchAction({type:'legendUnSelect', name:'Solar'})")
                 assert page.get_by_test_id("plan-chart").evaluate("element => echarts.getInstanceByDom(element).getOption().legend[0].selected.Solar === false")
                 page.get_by_test_id("plan-chart").evaluate("element => echarts.getInstanceByDom(element).dispatchAction({type:'dataZoom', start:20, end:80})")
-                load_buttons.get_by_role("button", name="Base", exact=True).click()
-                solar_buttons.get_by_role("button", name="Base", exact=True).click()
+                load_buttons.get_by_role("button", name="Med (1x)", exact=True).click()
+                solar_buttons.get_by_role("button", name="Med (1x)", exact=True).click()
                 page.wait_for_function("echarts.getInstanceByDom(document.querySelector('[data-testid=plan-chart]')).getOption().series[1].data[0][1] === 2")
                 assert page.get_by_test_id("plan-chart").evaluate("element => {const o = echarts.getInstanceByDom(element).getOption(); return o.legend[0].selected.Solar === false && o.dataZoom[0].start === 20 && o.dataZoom[0].end === 80;}")
                 adjustment.fill("25")

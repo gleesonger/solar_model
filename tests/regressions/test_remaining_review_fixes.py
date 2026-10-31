@@ -16,7 +16,7 @@ from solar_model.storage.schema import HOURLY_ROLLUP_MARKER, ForecastSolarSample
 from solar_model.storage.connection import SolarDatabase
 from solar_model.storage.migrations import open_database
 from solar_model.planning.types import DeviceInfo, DeviceState, ForecastData, ForecastInterval, ScenarioData
-from solar_model.planning.optimisation import simulate_energy_plan
+from solar_model.planning.plan_optimisation_milp import simulate_energy_plan
 from solar_model.tools.evaluate_forecasts import forecast_performance
 from solar_model.planning.forecasts.solar import _fit_scalars, _official_day_frame, _training_frames, add_adjusted_energy_values, calculate_adjusted_forecast
 from solar_model.storage.queries.forecasting import load_operational_inputs
@@ -232,7 +232,7 @@ def test_dst_overlap_scenarios_and_solver_use_real_elapsed_hours(day, end_hour):
     assert next(scenario.forecast_data for scenario in scenarios if scenario.name == "med").sum(start, end).solar_kwh == 4.
     cfg = load_config()
     cfg = replace(cfg, tariffs=tariffs(), energy_plan=replace(cfg.energy_plan, num_projection_hours=4,
-                  projection_resolution_mins=(60,) * 24, minimum_battery_kwh=(rule(0.),), maximum_battery_kwh=(rule(10.),)))
+                  optimiser_specific=replace(cfg.energy_plan.optimiser_specific, mix_integer_linear_prog=replace(cfg.energy_plan.optimiser_specific.mix_integer_linear_prog, projection_resolution_mins=(60,) * 24)), minimum_battery_kwh=(rule(0.),), maximum_battery_kwh=(rule(10.),)))
     device = DeviceInfo(**{f.name: 1. for f in fields(DeviceInfo)})
     device = replace(device, system_battery_capacity_kwh=10., battery_state_of_health_percent=100.,
                      inverter_max_active_power_kw=5., inverter_max_absorption_power_kw=5.,

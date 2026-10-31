@@ -9,6 +9,96 @@ import yaml
 from solar_model.config import load_config
 
 
+def test_optimiser_specific_sections_load_independently(tmp_path):
+    raw = yaml.safe_load(Path("config.yaml").read_text(encoding="utf-8"))
+    settings = raw["energy_plan"]["optimiser_specific"]
+    settings["mix_integer_linear_prog"]["projection_resolution_mins"] = ["60*24"]
+    settings["dynamic_programing"]["visible_timestep_minutes"] = 10
+    path = tmp_path / "config.yaml"
+    path.write_text(yaml.safe_dump(raw), encoding="utf-8")
+    loaded = load_config(path).energy_plan.optimiser_specific
+    assert loaded.mix_integer_linear_prog.projection_resolution_mins == (60,) * 24
+    assert loaded.dynamic_programing.visible_timestep_minutes == 10
+
+
+@pytest.mark.parametrize("name,value", [("projection_resolution_mins", [15] * 96), ("dynamic_programming", {})])
+def test_legacy_flat_optimiser_settings_require_explicit_migration(tmp_path, name, value):
+    raw = yaml.safe_load(Path("config.yaml").read_text(encoding="utf-8"))
+    raw["energy_plan"][name] = value
+    path = tmp_path / "config.yaml"
+    path.write_text(yaml.safe_dump(raw), encoding="utf-8")
+    with pytest.raises(ValueError, match="move optimiser settings under energy_plan.optimiser_specific"):
+        load_config(path)
+
+
+def test_dp_defaults_and_custom_refinement_settings_load(tmp_path):
+    raw = yaml.safe_load(Path("config.yaml").read_text(encoding="utf-8"))
+    raw["energy_plan"]["optimiser_specific"].pop("dynamic_programing")
+    path = tmp_path / "config.yaml"
+    path.write_text(yaml.safe_dump(raw), encoding="utf-8")
+    settings = load_config(path).energy_plan.optimiser_specific.dynamic_programing
+    assert settings.visible_timestep_minutes == 15
+    assert [(s.grid_step_percent, s.power_divisions, s.band_percent) for s in settings.refinement_stages] == [(2., 5, None), (1., 10, 5.), (1., 20, 3.), (1., 40, 1.)]
+    raw["energy_plan"]["optimiser_specific"]["dynamic_programing"] = {"visible_timestep_minutes": 30, "refinement_stages": [{"grid_step_percent": 4., "power_divisions": 3, "band_percent": None}, {"grid_step_percent": .5, "power_divisions": 20, "band_percent": 2.}]}
+    path.write_text(yaml.safe_dump(raw), encoding="utf-8")
+    settings = load_config(path).energy_plan.optimiser_specific.dynamic_programing
+    assert settings.visible_timestep_minutes == 30
+    assert settings.refinement_stages[0].grid_step_percent == 4.
+    assert settings.refinement_stages[0].power_divisions == 3
+    assert settings.refinement_stages[0].band_percent is None
+    assert settings.refinement_stages[1].grid_step_percent == .5
+
+
+@pytest.mark.parametrize("changes", [
+    {"visible_timestep_minutes": 0},
+    {"coarse_grid_step_percent": float("nan")},
+    {"coarse_power_divisions": 0},
+    {"refinement_stages": []},
+    {"refinement_stages": [{"grid_step_percent": 1., "power_divisions": 0, "band_percent": None}]},
+    {"refinement_stages": [{"grid_step_percent": 0., "power_divisions": 5, "band_percent": None}]},
+    {"refinement_stages": [{"grid_step_percent": 2., "power_divisions": 5, "band_percent": None}, {"grid_step_percent": 1., "power_divisions": 10, "band_percent": None}]},
+    {"refinement_stages": [{"grid_step_percent": 1., "power_divisions": 10, "band_percent": 101.}]},
+])
+def test_invalid_dp_settings_are_rejected(tmp_path, changes):
+    raw = yaml.safe_load(Path("config.yaml").read_text(encoding="utf-8"))
+    raw["energy_plan"]["optimiser_specific"]["dynamic_programing"].update(changes)
+    path = tmp_path / "config.yaml"
+    path.write_text(yaml.safe_dump(raw), encoding="utf-8")
+    with pytest.raises(ValueError, match="dynamic_programing"):
+        load_config(path)
+
+
+def test_forced_command_minimums_default_and_load_separately(tmp_path):
+    raw = yaml.safe_load(Path("config.yaml").read_text(encoding="utf-8"))
+    for name in ("min_forced_charge_power_kw", "min_forced_discharge_power_kw", "max_forced_charge_power_kw", "max_forced_discharge_power_kw"):
+        raw["energy_plan"].pop(name, None)
+    path = tmp_path / "config.yaml"
+    path.write_text(yaml.safe_dump(raw), encoding="utf-8")
+    settings = load_config(path).energy_plan
+    assert settings.min_forced_charge_power_kw == .1
+    assert settings.min_forced_discharge_power_kw == .1
+    assert settings.max_forced_charge_power_kw == 999.
+    assert settings.max_forced_discharge_power_kw == 999.
+    raw["energy_plan"].update(min_forced_charge_power_kw=.7, min_forced_discharge_power_kw=1.2, max_forced_charge_power_kw=3., max_forced_discharge_power_kw=4.)
+    path.write_text(yaml.safe_dump(raw), encoding="utf-8")
+    settings = load_config(path).energy_plan
+    assert settings.min_forced_charge_power_kw == .7
+    assert settings.min_forced_discharge_power_kw == 1.2
+    assert settings.max_forced_charge_power_kw == 3.
+    assert settings.max_forced_discharge_power_kw == 4.
+
+
+@pytest.mark.parametrize("name", ["min_forced_charge_power_kw", "min_forced_discharge_power_kw", "max_forced_charge_power_kw", "max_forced_discharge_power_kw"])
+@pytest.mark.parametrize("value", [0., -.1, float("nan"), float("inf")])
+def test_forced_command_minimums_reject_invalid_values(tmp_path, name, value):
+    raw = yaml.safe_load(Path("config.yaml").read_text(encoding="utf-8"))
+    raw["energy_plan"][name] = value
+    path = tmp_path / "config.yaml"
+    path.write_text(yaml.safe_dump(raw), encoding="utf-8")
+    with pytest.raises(ValueError, match=name):
+        load_config(path)
+
+
 def test_scenario_levels_load_multiplier_and_probability(tmp_path):
     raw = yaml.safe_load(Path("config.yaml").read_text(encoding="utf-8"))
     raw["scenarios"]["solar"]["low"] = {"multiplier": .4, "probability": .1}
@@ -118,7 +208,9 @@ scenarios:
     high: {multiplier: 1.5, probability: 0.2}
 energy_plan:
   num_projection_hours: 24
-  projection_resolution_mins: [15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15]
+  optimiser_specific:
+    mix_integer_linear_prog:
+      projection_resolution_mins: [15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15]
   protection_preference: 10
   limit_battery_export_rate_to_grid_kw:
     - days: [Mon, Tue, Wed, Thu, Fri, Sat, Sun]
@@ -184,16 +276,16 @@ def test_array_mapping_resolves_names_independently_of_order_and_rejects_ambigui
                                      ["15", "15*23", "60*18"]])
 def test_projection_repetitions_expand_during_config_loading(tmp_path, entries):
     raw = yaml.safe_load(Path("config.yaml").read_text(encoding="utf-8"))
-    raw["energy_plan"]["projection_resolution_mins"] = entries
+    raw["energy_plan"]["optimiser_specific"]["mix_integer_linear_prog"]["projection_resolution_mins"] = entries
     path = tmp_path / "config.yaml"
     path.write_text(yaml.safe_dump(raw), encoding="utf-8")
-    assert load_config(path).energy_plan.projection_resolution_mins == (15,) * 24 + (60,) * 18
+    assert load_config(path).energy_plan.optimiser_specific.mix_integer_linear_prog.projection_resolution_mins == (15,) * 24 + (60,) * 18
 
 
 @pytest.mark.parametrize("entry", ["15*", "15*  ", "15*0", "15*-2", "0*24", "15*2*3", "15+24"])
 def test_invalid_projection_repetitions_are_rejected(tmp_path, entry):
     raw = yaml.safe_load(Path("config.yaml").read_text(encoding="utf-8"))
-    raw["energy_plan"]["projection_resolution_mins"] = [entry, "60*24"]
+    raw["energy_plan"]["optimiser_specific"]["mix_integer_linear_prog"]["projection_resolution_mins"] = [entry, "60*24"]
     path = tmp_path / "config.yaml"
     path.write_text(yaml.safe_dump(raw), encoding="utf-8")
     with pytest.raises(ValueError, match="invalid configuration"):

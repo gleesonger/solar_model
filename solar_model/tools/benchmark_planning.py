@@ -1,4 +1,4 @@
-"""Run 19 independent nine-scenario sensitivity cases with a hard five-second cap."""
+"""Compare planning models on isolated synthetic cases with a hard process deadline."""
 from __future__ import annotations
 
 import argparse
@@ -25,20 +25,26 @@ STEPS = [15, 10, 15, 15] + [15] * 20 + [60] * 18 + [5]
 CAP_SECONDS = 5.0
 
 
-def _worker(connection, case: str, config_path: str, grid: str = "historical") -> None:
+def _worker(connection, case: str, config_path: str, grid: str = "historical", model: str = "lp", grid_step_percent: float | None = None, power_divisions: int | None = None, refine_band_percent: float | None = None, refinement_stages: list[tuple[float, int, float]] | None = None) -> None:
     if os.name != "nt":
         os.setsid()  # The deadline controller must also stop nested mode workers.
     # Heavy imports and synthetic inputs are prepared outside the timed budget.
     try:
+        from contextlib import ExitStack
         from dataclasses import asdict, fields, replace
         from datetime import datetime, timedelta, timezone
         import math
         from unittest.mock import patch
 
-        import cvxpy as cp
         import numpy as np
         from solar_model.config import load_config
-        from solar_model.planning import optimisation
+        if model == "dp":
+            from solar_model.planning import plan_optimisation_dynamic_programming as dynamic_programming
+            calculator = dynamic_programming
+        else:
+            import cvxpy as cp
+            from solar_model.planning import plan_optimisation_milp as optimisation
+            calculator = optimisation
         from solar_model.planning.scenarios import create_scenarios
         from solar_model.planning.types import (
             DeviceInfo, DeviceState, ForecastData, ForecastInterval,
@@ -75,7 +81,7 @@ def _worker(connection, case: str, config_path: str, grid: str = "historical") -
             key = "protection_preference" if case.startswith("preference_") else "preferred_reserve_kwh"
             config = replace(config, energy_plan=replace(config.energy_plan, **{key: value}))
         elif case.startswith("tariff_"):
-            mean = optimisation._reference_import_rate(config, start, start + timedelta(hours=24))
+            mean = (calculator.reference_import_rate if model == "dp" else calculator._reference_import_rate)(config, start, start + timedelta(hours=24))
             periods = tuple(
                 replace(period, import_=tuple(
                     replace(rule, rate=mean) if case == "tariff_flat"
@@ -104,15 +110,17 @@ def _worker(connection, case: str, config_path: str, grid: str = "historical") -
                 when = end
             return intervals
 
-        periods = (historical_intervals(config, start) if grid == "historical"
-                   else optimisation._projection_intervals(config, start))
+        if grid == "quarter-hour":
+            periods = [(start + timedelta(minutes=15 * i), start + timedelta(minutes=15 * (i + 1))) for i in range(96)]
+        else:
+            periods = historical_intervals(config, start) if grid == "historical" else (calculator.projection_intervals(config, start) if model == "dp" else calculator._projection_intervals(config, start))
         steps = [(end - begin).total_seconds() / 60 for begin, end in periods]
 
         def projection_intervals(cfg, when):
-            return periods
+            return list(periods)
 
-        metrics = {"build_seconds": None, "compile_seconds": None, "highs_solve_seconds": None}
-        original_solve = cp.Problem.solve
+        metrics = {"dp_settings": asdict(config.energy_plan.optimiser_specific.dynamic_programing) if model == "dp" else None, "build_seconds": None, "compile_seconds": None, "highs_solve_seconds": None}
+        original_solve = cp.Problem.solve if model == "lp" else None
 
         def timed_solve(problem, *args, **kwargs):
             metrics["build_seconds"] = perf_counter() - begin
@@ -131,11 +139,45 @@ def _worker(connection, case: str, config_path: str, grid: str = "historical") -
         connection.send({"event": "ready"})
         connection.recv()  # Parent arms the process deadline before starting work.
         begin, cpu_begin = perf_counter(), process_time()
-        with patch.object(optimisation, "_projection_intervals", projection_intervals), \
-                patch.object(cp.Problem, "solve", timed_solve):
-            result = optimisation.simulate_energy_plan(
-                device, DeviceState(initial_battery), scenarios, config, start,
-            )
+        simulate = calculator.simulate_energy_plan
+        with ExitStack() as stack:
+            stack.enter_context(patch.object(calculator, "projection_intervals" if model == "dp" else "_projection_intervals", projection_intervals))
+            if model == "lp":
+                stack.enter_context(patch.object(cp.Problem, "solve", timed_solve))
+            options = {"grid_step_percent": grid_step_percent, "power_divisions": power_divisions} if model == "dp" else {}
+            initial_stage = config.energy_plan.optimiser_specific.dynamic_programing.refinement_stages[0]
+            stages = refinement_stages or ([(initial_stage.grid_step_percent if grid_step_percent is None else grid_step_percent, initial_stage.power_divisions if power_divisions is None else power_divisions, refine_band_percent)] if refine_band_percent is not None else [])
+            if not stages:
+                result = simulate(device, DeviceState(initial_battery), scenarios, config, start, **options)
+            else:
+                coarse_at = perf_counter()
+                coarse = simulate(device, DeviceState(initial_battery), scenarios, config, start, grid_step_percent=initial_stage.grid_step_percent, power_divisions=initial_stage.power_divisions)
+                metrics["coarse_seconds"] = perf_counter() - coarse_at
+                coarse_score = sum(s.probability * (coarse.results[s.name].total_score.sum() + coarse.lookahead_results[s.name].total_score.sum()) for s in scenarios)
+                capacity = device.system_battery_capacity_kwh * device.battery_state_of_health_percent / 100
+                result, best_score = coarse, coarse_score
+                stage_records = []
+                for stage_index, (stage_grid, stage_divisions, band) in enumerate(stages, 1):
+                    bounds = {}
+                    for scenario in scenarios:
+                        energies = [*result.results[scenario.name].battery_end_kwh, *result.lookahead_results[scenario.name].battery_end_kwh]
+                        bounds[scenario.name] = [(max(0., energy / capacity - band / 100), min(1., energy / capacity + band / 100)) for energy in energies]
+                    refined_at = perf_counter()
+                    try:
+                        refined = simulate(device, DeviceState(initial_battery), scenarios, config, start, battery_bounds=bounds, grid_step_percent=stage_grid, power_divisions=stage_divisions)
+                    except ValueError as error:
+                        if str(error) != "unable to find a feasible energy plan on the dynamic-programming grid":
+                            raise
+                        refined = None
+                    stage_seconds = perf_counter() - refined_at
+                    refined_score = None if refined is None else sum(s.probability * (refined.results[s.name].total_score.sum() + refined.lookahead_results[s.name].total_score.sum()) for s in scenarios)
+                    accepted = bool(refined_score is not None and refined_score > best_score)
+                    if accepted:
+                        result, best_score = refined, refined_score
+                    stage_records.append({"grid_step_percent": stage_grid, "power_divisions": stage_divisions, "band_percent": band, "seconds": stage_seconds, "score": None if refined_score is None else float(refined_score), "retained_score": float(best_score), "accepted": accepted, "status": "infeasible" if refined is None else "completed"})
+                    print(f"dp_refinement stage={stage_index} accepted={accepted} seconds={stage_seconds:.6f} retained_score={best_score:.9f}", flush=True)
+                metrics.update(coarse_full_score=float(coarse_score), refinement_stages=stage_records, refinement_seconds=sum(stage["seconds"] for stage in stage_records), refined_full_score=stage_records[-1]["score"], selected_pass="coarse" if result is coarse else "refined", refinement_status=stage_records[-1]["status"])
+                print(f"dp_refinement end: selected_pass={metrics['selected_pass']} coarse_seconds={metrics['coarse_seconds']:.6f} refinement_seconds={metrics['refinement_seconds']:.6f}", flush=True)
         metrics["simulation_seconds"] = perf_counter() - begin
         assert len(result.results) == 9
         for frame in result.results.values():
@@ -178,6 +220,10 @@ def _worker(connection, case: str, config_path: str, grid: str = "historical") -
                 "visible_cost": float(visible.net_cost.sum()), "full_cost": full_cost,
                 "full_score": full_score, "visible_end_kwh": float(visible.battery_end_kwh.iloc[-1]),
                 "full_end_kwh": float(hidden.battery_end_kwh.iloc[-1]),
+                "cost_score": float(visible.cost_score.sum() + hidden.cost_score.sum()),
+                "protection_score": float(visible.protection_score.sum() + hidden.protection_score.sum()),
+                "terminal_score": float(visible.terminal_score.sum() + hidden.terminal_score.sum()),
+                "first_step": {name: float(visible.iloc[0][name]) for name in ("battery_end_kwh", "grid_import_kwh", "grid_export_kwh", "solar_clipped_kwh")},
             }
             # Validate port ratings, exclusions and limits in hidden rows too.
             for frame in (visible, hidden):
@@ -197,13 +243,16 @@ def _worker(connection, case: str, config_path: str, grid: str = "historical") -
                 assert not ((charge > 1e-5) & (discharge > 1e-5)).any()
         full_score = sum(s["probability"] * s["full_score"] for s in scenario_metrics.values())
         full_cost = sum(s["probability"] * s["full_cost"] for s in scenario_metrics.values())
-        np.testing.assert_allclose(full_score, metrics["objective"], atol=1e-6, rtol=0)
+        if model == "lp":
+            np.testing.assert_allclose(full_score, metrics["objective"], atol=1e-6, rtol=0)
+        else:
+            metrics["solver_status"] = "approximate_policy"
         metrics.update(
             total_seconds=perf_counter() - begin, cpu_seconds=process_time() - cpu_begin,
             expected_cost=float(sum(s.probability * result.results[s.name].net_cost.sum() for s in scenarios)),
             next_action=asdict(result.next_action), validation="passed",
             objective=full_score, weighted_full_score=full_score, weighted_full_cost=full_cost,
-            scenarios=scenario_metrics, visible_periods=len(periods),
+            scenarios=scenario_metrics, visible_periods=len(steps),
         )
         connection.send({"event": "result", "status": "completed", **metrics})
     except Exception:
@@ -212,9 +261,9 @@ def _worker(connection, case: str, config_path: str, grid: str = "historical") -
         connection.close()
 
 
-def _run_case(context, case: str, config_path: str, grid: str = "historical") -> dict:
+def _run_case(context, case: str, config_path: str, grid: str = "historical", model: str = "lp", cap_seconds: float = CAP_SECONDS, grid_step_percent: float | None = None, power_divisions: int | None = None, refine_band_percent: float | None = None, refinement_stages: list[tuple[float, int, float]] | None = None) -> dict:
     parent, child = context.Pipe()
-    process = context.Process(target=_worker, args=(child, case, config_path, grid))
+    process = context.Process(target=_worker, args=(child, case, config_path, grid, model, grid_step_percent, power_divisions, refine_band_percent, refinement_stages))
     process.start()
     child.close()
     try:
@@ -223,7 +272,7 @@ def _run_case(context, case: str, config_path: str, grid: str = "historical") ->
         message = parent.recv()
         if message["event"] != "ready":
             return message
-        deadline = perf_counter() + CAP_SECONDS
+        deadline = perf_counter() + cap_seconds
         parent.send("start")
         if not parent.poll(max(0., deadline - perf_counter())):
             return {"status": "timeout", "total_seconds": None}
@@ -254,24 +303,60 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", type=Path, default=Path("config.yaml"))
     parser.add_argument("--output", type=Path, default=Path("planning-benchmark.json"))
-    parser.add_argument("--grid", choices=("historical", "production"), default="historical")
+    parser.add_argument("--grid", choices=("historical", "production", "quarter-hour"), default=None)
+    parser.add_argument("--model", choices=("lp", "dp"), default="lp")
+    parser.add_argument("--cap-seconds", type=float, default=None)
     parser.add_argument("--cases", nargs="+", choices=(*CASES, "solar_4", "load_4"), default=CASES)
+    parser.add_argument("--soc-grid-step-percent", type=float, default=None)
+    parser.add_argument("--power-divisions", type=int, default=None)
+    parser.add_argument("--refine-band-percent", type=float, default=None)
+    parser.add_argument("--refinement-stages", nargs="+", metavar="GRID:DIVISIONS:BAND")
     args = parser.parse_args()
+    args.grid = args.grid or ("production" if args.model == "dp" else "historical")
+    refinement_stages = None
+    if args.refinement_stages:
+        if args.model != "dp" or args.refine_band_percent is not None:
+            parser.error("--refinement-stages requires DP and cannot be combined with --refine-band-percent")
+        try:
+            refinement_stages = []
+            for entry in args.refinement_stages:
+                step, divisions, band = entry.split(":")
+                stage = (float(step), int(divisions), float(band))
+                if not 0 < stage[0] <= 100 or stage[1] <= 0 or not 0 < stage[2] <= 100:
+                    raise ValueError
+                refinement_stages.append(stage)
+        except ValueError:
+            parser.error("stages must be GRID:DIVISIONS:BAND with positive values and GRID/BAND at most 100")
+    if args.refine_band_percent is not None and (args.model != "dp" or not 0 < args.refine_band_percent <= 100):
+        parser.error("--refine-band-percent requires DP and a width between 0 and 100")
+    if args.soc_grid_step_percent is not None and not 0 < args.soc_grid_step_percent <= 100:
+        parser.error("--soc-grid-step-percent must be between 0 and 100")
+    if args.power_divisions is not None and args.power_divisions <= 0:
+        parser.error("--power-divisions must be positive")
+    cap_seconds = args.cap_seconds if args.cap_seconds is not None else 300. if args.model == "dp" else CAP_SECONDS
+    if not 0 < cap_seconds < float("inf"):
+        parser.error("--cap-seconds must be finite and positive")
     for name in ("OPENBLAS_NUM_THREADS", "OMP_NUM_THREADS", "MKL_NUM_THREADS"):
         os.environ[name] = "1"
     report = {
         "platform": platform.platform(), "logical_cpus": os.cpu_count(),
-        "cap_seconds": CAP_SECONDS, "grid": args.grid,
-        "timesteps_minutes": STEPS if args.grid == "historical" else None,
+        "cap_seconds": cap_seconds, "grid": args.grid, "model": args.model,
+        "soc_grid_step_percent": args.soc_grid_step_percent if args.model == "dp" else None,
+        "power_divisions": args.power_divisions if args.model == "dp" else None,
+        "refine_band_percent": args.refine_band_percent,
+        "refinement_stages": refinement_stages,
+        "timesteps_minutes": STEPS if args.grid == "historical" else [15] * 96 if args.grid == "quarter-hour" else None,
         "timing_scope": "build, compile, solve, extraction and validation; controller startup excluded",
         "config_sha256": hashlib.sha256(args.config.read_bytes()).hexdigest(),
-        "model_sha256": hashlib.sha256(Path(__file__).parents[1].joinpath("planning/optimisation.py").read_bytes()).hexdigest(),
+        "model_sha256": hashlib.sha256(Path(__file__).parents[1].joinpath(f"planning/{'plan_optimisation_dynamic_programming' if args.model == 'dp' else 'plan_optimisation_milp'}.py").read_bytes()).hexdigest(),
+        "scoring_sha256": hashlib.sha256(Path(__file__).parents[1].joinpath("planning/plan_optimisation_dynamic_programming.py" if args.model == "dp" else "planning/plan_optimisation_milp.py").read_bytes()).hexdigest(),
+        "system_sha256": hashlib.sha256(Path(__file__).parents[1].joinpath("planning/plan_optimisation_dynamic_programming.py" if args.model == "dp" else "planning/system.py").read_bytes()).hexdigest(),
         "cases": [],
     }
     context = mp.get_context("spawn")
     print(f"{'Case':<20} {'Status':<10} {'Total s':>9} {'Build s':>9} {'Compile s':>10} {'HiGHS s':>9}", flush=True)
     for case in args.cases:
-        record = {"case": case, **_run_case(context, case, str(args.config.resolve()), args.grid)}
+        record = {"case": case, **_run_case(context, case, str(args.config.resolve()), args.grid, args.model, cap_seconds, args.soc_grid_step_percent, args.power_divisions, args.refine_band_percent, refinement_stages)}
         record.pop("event", None)
         report["cases"].append(record)
         args.output.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")

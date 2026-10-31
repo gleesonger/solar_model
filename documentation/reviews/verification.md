@@ -21,3 +21,5 @@ Coverage describes what tests exercise, not their latest pass status. Mocked fai
 - Extend independent browser output checks across null/forecast-only histories, date boundaries and interaction combinations. Test Android saved-page/freeze behavior on actual hardware.
 
 Performance and register investigations retain their own dates, workloads and limits. They do not establish production latency guarantees, universal device semantics or successful battery control. Planning remains report-only.
+
+The [DP experiment checks](../../tests/planning/test_dynamic_programming.py) compare backward values with exhaustive search on a small grid-aligned case, exercise exact-state interpolation and rejection of unsafe commands, and replay one selected command through LP across nine scenarios. The [benchmark comparison](planning-dynamic-programming-comparison.md) separately records matched runtime and physical/billing validation. Neither establishes optimality of the interpolated policy or installed-hardware behavior.

@@ -28,6 +28,7 @@ Use the [isolated development walkthrough](isolated-development.md) for syntheti
 
 | Tests | What they cover |
 | --- | --- |
+| [test_dynamic_programming.py](../../tests/planning/test_dynamic_programming.py) | Experimental DP physical transitions, command limits, small exhaustive-search equivalence, nine-scenario passive/forced first-command replay through MILP and audited probability-weighted shared-command selection |
 | [test_next_action.py](../../tests/planning/test_next_action.py) | Shared commands, equipment saturation, command SOC bounds, rejection of unsafe passive/forced responses and export-safe rates across nine scenarios, including early SOC stops |
 | [test_forecast_model_config.py](../../tests/forecasting/test_forecast_model_config.py) | YAML model parsing/defaults/validation, lookback and half-life effects, and model settings passed through collection, refresh and CLI entry points |
 | [test_forecast_influence.py](../../tests/forecasting/test_forecast_influence.py) | Decimal-fraction load/intraday influence, sparse day-type fallback, 100% influence and invalid fractions and old percentage inputs |

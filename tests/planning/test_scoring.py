@@ -7,7 +7,7 @@ import numpy as np
 import pytest
 
 from solar_model.config import TariffPeriod, TariffRule, TariffsConfig, load_config, validate_config
-from solar_model.planning.optimisation import (
+from solar_model.planning.plan_optimisation_milp import (
     PROTECTION_APPROXIMATION_ERROR, _protection_segments, _reference_import_rate, battery_protection_score, score_scenario, score_simulation,
 )
 from solar_model.planning.types import DeviceInfo, ForecastData, ForecastInterval, ScenarioData
@@ -164,7 +164,7 @@ def test_adjustment_above_100_scales_reward_beyond_reserve_replacement_value():
 
 
 def test_reference_range_samples_exactly_24_hourly_values(monkeypatch):
-    from solar_model.planning import optimisation
+    from solar_model.planning import plan_optimisation_milp as optimisation
     _, _, config, start = scoring_inputs()
     days = config.tariffs.periods[0].import_[0].days
     night = TariffRule(days, "22:00", "06:00", .1, "night")
@@ -183,7 +183,7 @@ def test_reference_range_samples_exactly_24_hourly_values(monkeypatch):
 
 
 def test_terminal_rate_samples_both_tariffs_after_end_across_dst(monkeypatch):
-    from solar_model.planning import optimisation
+    from solar_model.planning import plan_optimisation_milp as optimisation
 
     _, _, config, _ = scoring_inputs()
     end = datetime(2026, 10, 25, 0, 30, tzinfo=timezone.utc)

@@ -150,14 +150,47 @@ class ScenariosConfig:
 
 
 @dataclass(frozen=True)
+class DPRefinementConfig:
+    grid_step_percent: float
+    power_divisions: int
+    band_percent: float | None
+
+
+@dataclass(frozen=True)
+class DynamicProgrammingConfig:
+    visible_timestep_minutes: int = 15
+    refinement_stages: tuple[DPRefinementConfig, ...] = (
+        DPRefinementConfig(2., 5, None),
+        DPRefinementConfig(1., 10, 5.),
+        DPRefinementConfig(1., 20, 3.),
+        DPRefinementConfig(1., 40, 1.),
+    )
+
+
+@dataclass(frozen=True)
+class MixedIntegerLinearProgrammingConfig:
+    projection_resolution_mins: tuple[int, ...] = (15,) * 4 + (60,) * 23
+
+
+@dataclass(frozen=True)
+class OptimiserSpecificConfig:
+    mix_integer_linear_prog: MixedIntegerLinearProgrammingConfig = field(default_factory=MixedIntegerLinearProgrammingConfig)
+    dynamic_programing: DynamicProgrammingConfig = field(default_factory=DynamicProgrammingConfig)
+
+
+@dataclass(frozen=True)
 class EnergyPlanConfig:
     num_projection_hours: int
-    projection_resolution_mins: tuple[int, ...]
     protection_preference: float = 50.
     minimum_battery_kwh: tuple[TariffRule, ...] = ()
     maximum_battery_kwh: tuple[TariffRule, ...] = ()
     limit_battery_export_rate_to_grid_kw: tuple[TariffRule, ...] = ()
     preferred_reserve_kwh: float = 4.0
+    min_forced_charge_power_kw: float = 0.1
+    min_forced_discharge_power_kw: float = 0.1
+    max_forced_charge_power_kw: float = 999.
+    max_forced_discharge_power_kw: float = 999.
+    optimiser_specific: OptimiserSpecificConfig = field(default_factory=OptimiserSpecificConfig)
 
 
 @dataclass(frozen=True)
@@ -252,7 +285,14 @@ def load_config(path: str | Path = "config.yaml") -> Config:
                         raise ValueError(f"scenarios.{name} entries require multiplier and probability")
         energy_plan_data = raw_config.get("energy_plan") if isinstance(raw_config, dict) else None
         if isinstance(energy_plan_data, dict):
-            resolutions = energy_plan_data.get("projection_resolution_mins")
+            if "projection_resolution_mins" in energy_plan_data or "dynamic_programming" in energy_plan_data:
+                raise ValueError("move optimiser settings under energy_plan.optimiser_specific: mix_integer_linear_prog and dynamic_programing")
+            optimiser_data = energy_plan_data.get("optimiser_specific", {})
+            dp_data = optimiser_data.get("dynamic_programing", {}) if isinstance(optimiser_data, dict) else {}
+            if isinstance(dp_data, dict) and ("coarse_grid_step_percent" in dp_data or "coarse_power_divisions" in dp_data):
+                raise ValueError("dynamic_programing: move coarse settings into the first refinement_stages entry with band_percent: null")
+            milp_data = optimiser_data.get("mix_integer_linear_prog", {}) if isinstance(optimiser_data, dict) else {}
+            resolutions = milp_data.get("projection_resolution_mins") if isinstance(milp_data, dict) else None
             if isinstance(resolutions, list):
                 expanded = []
                 for entry in resolutions:
@@ -265,7 +305,7 @@ def load_config(path: str | Path = "config.yaml") -> Config:
                         expanded.extend([minutes] * count)
                     else:
                         expanded.append(entry)
-                energy_plan_data["projection_resolution_mins"] = expanded
+                milp_data["projection_resolution_mins"] = expanded
             backup_data = energy_plan_data.get("minimum_battery_kwh")
             if isinstance(backup_data, dict):
                 # This is documentation for people editing config.yaml, not configuration.
@@ -305,12 +345,31 @@ def validate_config(config: Config) -> None:
 
     config.forecast.models  # Validate model-specific requirements across both sections.
     energy_plan = config.energy_plan
+    dp = energy_plan.optimiser_specific.dynamic_programing
+    milp = energy_plan.optimiser_specific.mix_integer_linear_prog
+    if type(dp.visible_timestep_minutes) is not int or dp.visible_timestep_minutes <= 0:
+        raise ValueError("dynamic_programing.visible_timestep_minutes must be a positive integer")
+    if not dp.refinement_stages or dp.refinement_stages[0].band_percent is not None:
+        raise ValueError("dynamic_programing.refinement_stages must start with a full-range stage using band_percent: null")
+    for index, stage in enumerate(dp.refinement_stages):
+        step, divisions, band = stage.grid_step_percent, stage.power_divisions, stage.band_percent
+        if not math.isfinite(step) or not 0 < step <= 100 or type(divisions) is not int or divisions <= 0 or (index > 0 and (band is None or not math.isfinite(band) or not 0 < band <= 100)):
+            raise ValueError("dynamic_programing requires grid/band percentages in (0,100] and positive integer power divisions")
+    for name in (
+        "min_forced_charge_power_kw",
+        "min_forced_discharge_power_kw",
+        "max_forced_charge_power_kw",
+        "max_forced_discharge_power_kw",
+    ):
+        value = getattr(energy_plan, name)
+        if not math.isfinite(value) or value <= 0:
+            raise ValueError(f"energy_plan.{name} must be finite and greater than zero")
     if not math.isfinite(energy_plan.preferred_reserve_kwh) or energy_plan.preferred_reserve_kwh <= 0:
         raise ValueError("preferred_reserve_kwh must be finite and greater than zero")
-    if (energy_plan.num_projection_hours <= 0 or not energy_plan.projection_resolution_mins
-            or any(minutes <= 0 for minutes in energy_plan.projection_resolution_mins)):
+    if (energy_plan.num_projection_hours <= 0 or not milp.projection_resolution_mins
+            or any(minutes <= 0 for minutes in milp.projection_resolution_mins)):
         raise ValueError("energy_plan projection duration and resolution entries must be greater than zero")
-    if sum(energy_plan.projection_resolution_mins) < energy_plan.num_projection_hours * 60:
+    if sum(milp.projection_resolution_mins) < energy_plan.num_projection_hours * 60:
         raise ValueError("projection_resolution_mins must cover num_projection_hours")
     if not math.isfinite(energy_plan.protection_preference) or energy_plan.protection_preference < 0:
         raise ValueError("energy_plan.protection_preference must be finite and non-negative")

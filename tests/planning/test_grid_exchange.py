@@ -7,7 +7,7 @@ import pandas as pd
 import pytest
 
 from solar_model.config import TariffPeriod, TariffRule, TariffsConfig, load_config
-from solar_model.planning import optimisation
+from solar_model.planning import plan_optimisation_milp as optimisation
 from solar_model.planning.types import DeviceInfo, DeviceState, ForecastData, ForecastInterval, ScenarioData
 
 
@@ -19,7 +19,7 @@ def run_plan(monkeypatch):
     rule = TariffRule(("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"), "00:00", "24:00", .0859)
     tariffs = TariffsConfig((TariffPeriod("2000-01-01", (rule,), (replace(rule, rate=.1716),)),))
     config = replace(config, tariffs=tariffs, energy_plan=replace(config.energy_plan, num_projection_hours=1,
-        projection_resolution_mins=(15,) * 4, protection_preference=0.))
+        optimiser_specific=replace(config.energy_plan.optimiser_specific, mix_integer_linear_prog=replace(config.energy_plan.optimiser_specific.mix_integer_linear_prog, projection_resolution_mins=(15,) * 4)), protection_preference=0.))
     device = DeviceInfo(**{field.name: 1. for field in fields(DeviceInfo)})
     device = replace(device, system_battery_capacity_kwh=18.08, battery_state_of_health_percent=100.,
         inverter_max_active_power_kw=5.5, inverter_max_absorption_power_kw=5.5,

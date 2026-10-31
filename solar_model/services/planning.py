@@ -8,7 +8,7 @@ import pandas as pd
 
 from solar_model.config import Config
 from solar_model.logging_setup import configure_logging
-from solar_model.planning.optimisation import simulate_energy_plan
+from solar_model.planning.plan_optimisation_milp import simulate_energy_plan
 from solar_model.planning.scenarios import create_scenarios
 from solar_model.planning.types import SimulationResult
 from solar_model.storage.connection import SolarDatabase, create_engine_for_database

@@ -53,7 +53,7 @@ Joint probabilities multiply the two dimension probabilities, assuming independe
 - YAML is deserialised through dacite into frozen dataclasses; lists become tuples. Required dataclass fields must be present.
 - Unknown keys outside the validated scenario mappings are currently ignored: `dacite.Config` does **not** enable strict mode. This permits descriptive `comment`/period `name` keys but can hide misspellings.
 - Optional planning-rule tuples default empty; minimum battery also accepts `{comment: ..., rules: [...]}`. The optimiser currently still requires usable minimum/maximum rules.
-- Intervals/timeouts/history lengths must be positive. `energy_plan.projection_resolution_mins` is a YAML list of positive integer minutes, for example `[15, 15, 15, 15, 60, 60]`, covering at least `num_projection_hours`. Replace the former scalar value in deployed YAML files. The shipped vector is 24 quarter-hour entries followed by 18 hourly entries. Its first entry is the intact next action; subsequent cumulative boundaries align from the preceding full UTC hour, dropping boundaries overtaken by the first action. A final partial interval preserves the full elapsed horizon. At 10:05 the shipped vector produces 43 periods. Tariff, battery-limit and midnight boundaries do not add splits.
+- Intervals/timeouts/history lengths must be positive. `energy_plan.optimiser_specific.mix_integer_linear_prog.projection_resolution_mins` is a YAML list of positive integer minutes, for example `[15, 15, 15, 15, 60, 60]`, covering at least `num_projection_hours`. Replace the former scalar value in deployed YAML files. The shipped MILP vector is four quarter-hour entries followed by 23 hourly entries. Its first entry is the intact next action; subsequent cumulative boundaries align from the preceding full UTC hour, dropping boundaries overtaken by the first action. A final partial interval preserves the full elapsed horizon. At 10:05 the shipped MILP vector produces 28 periods. Tariff, battery-limit and midnight boundaries do not add splits.
 - Protection preference must be finite and non-negative, with no upper bound; efficiencies must be in `(0, 1]`.
 - Validation checks timezone/log level, URL shape, ports/device ID, coordinates/orientation, supported PV strings, and mapped array names.
 - Array IDs are unique integers 1–4; names must also be unique and are referenced by `dashboard.actuals_to_forecast` (for example `pv1: East`). Mapping names must match exactly; replace numeric mapping values in deployed YAML files. Empty arrays/mapping and non-positive `peak_kw` are not explicitly rejected.
@@ -73,7 +73,29 @@ Joint probabilities multiply the two dimension probabilities, assuming independe
 - Explicit map device IDs override the default. Current maps distinguish plant 247 and inverter 1.
 - Map `scale` is a **divisor** during decoding, separate from database fixed-point scaling.
 
+## Planning command preferences
+
+`energy_plan.min_forced_charge_power_kw` and `energy_plan.min_forced_discharge_power_kw` are finite, strictly positive minimum requested powers in kW, each defaulting to 0.1. Both DP and MILP use them. They are planning preferences, not verified hardware minimums, and actual flows may be lower when limited by SOC stops or physical capability. They do not scale with interval duration. `energy_plan.max_forced_charge_power_kw` and `max_forced_discharge_power_kw` are finite, strictly positive numeric ceilings, both defaulting to 999 kW and explicitly set in the shipped YAML; null is not supported. Each effective ceiling is the smaller of the configured maximum and hardware maximum. A minimum above that ceiling makes the forced mode unavailable; self-consumption remains available.
+
 ## Planning score
+
+DP-specific settings live under `energy_plan.optimiser_specific.dynamic_programing`:
+
+```yaml
+energy_plan:
+  optimiser_specific:
+    mix_integer_linear_prog:
+      projection_resolution_mins: [15*4, 60*23]
+    dynamic_programing:
+      visible_timestep_minutes: 15
+      refinement_stages:
+        - {grid_step_percent: 2, power_divisions: 5, band_percent: null}
+        - {grid_step_percent: 1, power_divisions: 10, band_percent: 5}
+        - {grid_step_percent: 1, power_divisions: 20, band_percent: 3}
+        - {grid_step_percent: 1, power_divisions: 40, band_percent: 1}
+```
+
+Shared horizon, protection, battery schedules and command power preferences remain directly under `energy_plan`. Move the former flat `projection_resolution_mins` and `dynamic_programming` blocks into the respective sections above; the loader rejects those legacy keys rather than silently ignoring them. These are also the defaults when omitted. Visible timestep and power divisions must be positive integers; grid steps and corridor half-widths must be finite percentages in `(0, 100]`. The non-empty stage list includes the initial full-range solve, whose `band_percent` must be YAML `null` (Python `None`); subsequent stages require numeric half-widths. A list containing only that initial entry requests one full-range solve. The former separate coarse-grid and power settings are rejected; put those values in the first entry instead. Each refinement uses scenario-specific period-end bounds around the best retained path, including the six hidden four-hour periods. Lower/equal scores and infeasible refinements retain the earlier policy. MILP continues to use `energy_plan.optimiser_specific.mix_integer_linear_prog.projection_resolution_mins`; these DP settings do not change its calculations. See the [DP walkthrough](../implementation/dynamic-programming.md).
 
 `energy_plan.preferred_reserve_kwh` is a positive, finite target of stored battery kWh measured from zero; it defaults to 4 kWh. Physical discharge cut-offs do not shift this scoring origin. `energy_plan.protection_preference` is X, any finite non-negative number, defaulting to 50 when omitted (also the shipped value). Values above 100 are supported. Replace the former `optimisation_weights` block with this scalar when updating separate YAML files; omitting the field now uses 50. The old battery share corresponds to X = 100 * maximise_battery / (maximise_profit + maximise_battery), but the revised objective changes its effect.
 

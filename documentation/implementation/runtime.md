@@ -34,7 +34,7 @@ If either child launch fails, `start_processes()` terminates and reaps any child
 load_config(path='config.yaml')
   yaml.safe_load(file) -> Python mapping/lists/scalars
   validate scenarios dimensions contain exactly low/med/high multiplier/probability entries
-  expand projection_resolution_mins repetitions (e.g. 15*24)
+  expand optimiser_specific.mix_integer_linear_prog.projection_resolution_mins repetitions (e.g. 15*24)
   normalise minimum_battery_kwh wrapper if supplied
   rename each tariff period's import key to import_
   dacite.from_dict(Config, cast=[tuple])
@@ -70,7 +70,7 @@ config.actuals_to_forecast_panel_ids   # resolves names to IDs for queries/chart
 | `actuals` | `ModbusConfig`, `DataRetrivalScheduleConfig`; full/live collection |
 | `forecast` | `ForecastConfig`, tuple of `SolarArrayConfig`; API requests, panel labels, model/UI selection |
 | `tariffs` | `TariffsConfig` → `TariffPeriod` → `TariffRule`; collection, planning, recalculation |
-| `energy_plan` | `EnergyPlanConfig`, scalar protection preference, limit-rule tuples; offline planner |
+| `energy_plan` | `EnergyPlanConfig`, scalar protection preference, limit-rule tuples and nested `OptimiserSpecificConfig` with `MixedIntegerLinearProgrammingConfig` and `DynamicProgrammingConfig` / `DPRefinementConfig` stages; offline planners |
 | `additional_device_info` | Charge/discharge efficiencies; overrides planner metadata inputs |
 | `dashboard` | Host/port and PV-string mapping; NiceGUI and array allocation |
 

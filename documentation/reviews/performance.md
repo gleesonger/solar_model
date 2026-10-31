@@ -2,6 +2,8 @@
 
 Historical investigations, 2026-10-15-27; condensed 2026-10-29. Measurements used copied/synthetic inputs and are not deployment guarantees or benchmarks of the latest working tree. Detailed logs, intermediate variants and generated evidence were removed.
 
+The [2026-10-29 DP versus LP experiment](planning-dynamic-programming-comparison.md) is a separate planning comparison: the seven-action DP completed eight cases in 0.61–1.66 seconds including validation. Four completed configured-grid pairs were 1.62–2.88 times faster than LP, with expected 48-hour net costs EUR 0.060–0.101 higher and combined scores 1.20–1.83% lower. All three 96-step LP runs exceeded five seconds; DP completed in 1.60–1.66 seconds, so their LP economic comparison is N/A. DP had the user-requested 300-second deadline. These are single synthetic observations; DP remains experimental and LP remains the application default.
+
 ## Downloads
 
 Native SQLite aggregation replaced ORM object loading and Python grouping; only final rows enter pandas. Dashboard XLSX output uses XlsxTurbo's Rust writer; XlsxWriter remains for report workbooks.

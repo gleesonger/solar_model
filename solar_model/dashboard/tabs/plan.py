@@ -19,7 +19,7 @@ from solar_model.dashboard.planning_worker import ensure_planning_worker
 from solar_model.dashboard.components.tables import mark_final_total_row
 from solar_model.dashboard.components.download_dialog import excel_bytes
 from solar_model.logging_setup import LOGGER
-from solar_model.planning.optimisation import battery_protection_score
+from solar_model.planning.plan_optimisation_milp import battery_protection_score
 from solar_model.planning.scenarios import scenario_probabilities
 from solar_model.planning.types import OperatingMode, SimulationResult
 from solar_model.services.planning import plan_with_preference

@@ -7,8 +7,8 @@ import cvxpy as cp
 import pytest
 
 from solar_model.config import TariffPeriod, TariffRule, TariffsConfig, load_config
-from solar_model.planning import optimisation
-from solar_model.planning.optimisation import simulate_energy_plan
+from solar_model.planning import plan_optimisation_milp as optimisation
+from solar_model.planning.plan_optimisation_milp import simulate_energy_plan
 from solar_model.planning.types import DeviceInfo, DeviceState, ForecastData, ForecastInterval, NextAction, OperatingMode, ScenarioData
 
 
@@ -31,7 +31,7 @@ def inputs():
     config = load_config()
     config = replace(config, tariffs=TariffsConfig((TariffPeriod("2000-01-01",
         (replace(rule, rate=.4),), (replace(rule, rate=.1),)),)),
-        energy_plan=replace(config.energy_plan, num_projection_hours=1, projection_resolution_mins=(30, 30),
+        energy_plan=replace(config.energy_plan, num_projection_hours=1, optimiser_specific=replace(config.energy_plan.optimiser_specific, mix_integer_linear_prog=replace(config.energy_plan.optimiser_specific.mix_integer_linear_prog, projection_resolution_mins=(30, 30))),
             minimum_battery_kwh=(rule,), maximum_battery_kwh=(replace(rule, rate=10.),),
             limit_battery_export_rate_to_grid_kw=(), protection_preference=0.))
     scenarios = [ScenarioData("base", ForecastData([ForecastInterval(start, end, 0.), ForecastInterval(end, end + timedelta(hours=24), 0.)], [ForecastInterval(start, end, 1.), ForecastInterval(end, end + timedelta(hours=24), 0.)]), 1.)]
@@ -60,6 +60,23 @@ def simulate(inputs, action=None, extra_constraints=None, *, return_result=False
 
 def solve(inputs, action=None):
     return simulate(inputs, action)["base"]
+
+
+@pytest.mark.parametrize("mode_index,field,minimum", [
+    (1, "force_battery_charge_rate", .7),
+    (2, "force_battery_discharge_rate", 1.2),
+])
+def test_forced_modes_respect_configured_minimum_power(inputs, mode_index, field, minimum):
+    device, state, scenarios, config, start = inputs
+    settings = replace(config.energy_plan, min_forced_charge_power_kw=.7, min_forced_discharge_power_kw=1.2, max_forced_charge_power_kw=.9, max_forced_discharge_power_kw=1.5)
+    config = replace(config, energy_plan=settings)
+    result = simulate(
+        (device, state, scenarios, config, start),
+        extra_constraints=lambda variables: [variables["next_mode"][mode_index] == 1],
+        return_result=True,
+    )
+    assert getattr(result.next_action, field) >= minimum - 1e-6
+    assert getattr(result.next_action, field) <= (.9 if mode_index == 1 else 1.5) + 1e-6
 
 
 @pytest.mark.parametrize("charge_rate,discharge_rate,expected_energy", [

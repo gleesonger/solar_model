@@ -51,6 +51,7 @@ Keep concise explanations in `overview/`, detailed code/data contracts in `imple
 | [Forecasting](overview/forecasting.md) | Operational correction, snapshot selection, research models |
 | [Energy planning](overview/energy-planning.md) | Economics, optimisation, as-of workbooks, tariff experiments |
 | [Plan model](overview/plan-model.md) | Current next-action/report model: forecasts, joint scenarios, scoring, physical constraints and remaining limitations |
+| [Dynamic programming walkthrough](implementation/dynamic-programming.md) | Plain-English v1 calculation: battery nodes, backward values, forward paths and shared first-command selection |
 | [Dashboard](overview/dashboard.md) | Tabs, caches, live readings, queries, exports, reconnects |
 | [Styling](overview/styling.md) | CSS, colours, chart conventions, responsive layouts |
 | [Development and testing](operations/development-and-testing.md) | Setup, checks, coverage, verification limits |
@@ -60,6 +61,7 @@ Keep concise explanations in `overview/`, detailed code/data contracts in `imple
 | [Review findings](reviews/findings.md) | Unresolved defects, policy decisions and verification gaps |
 | [Verification scope](reviews/verification.md) | Regression coverage and remaining integration/verification limits |
 | [Performance conclusions](reviews/performance.md) | Key download, summary, forecasting and planning measurements |
+| [DP v1 verification](reviews/dp-v1-recheck.md) | Restored nine-scenario planner: shared first-command audit, fresh configured-grid MILP comparisons and performance; links to the earlier experiment |
 | [Sigenergy register review](reviews/sigenergy-home-assistant-register-review.md) | Load boundaries, electrical residuals and diagnostic priorities |
 | [Schema reference](reference/schema.md) | Every declared database column, key, type, and index |
 | [Metric semantics](reference/metric-semantics.md) | Units, signs, missing values, time attribution and chart/download aggregation differences |

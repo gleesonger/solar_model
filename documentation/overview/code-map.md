@@ -8,7 +8,7 @@ The application lives in the installable `solar_model` package. The root `docker
 solar_model/
   config.py, tariffs.py, time_utils.py, logging_setup.py, paths.py, utils.py
   planning/
-    types.py, scenarios.py, optimisation.py, system.py
+    types.py, scenarios.py, plan_optimisation_milp.py, system.py, plan_optimisation_dynamic_programming.py
     forecasts/solar.py, house_load.py
   services/collection.py, forecasting.py, planning.py
   integrations/
@@ -33,9 +33,10 @@ Shared general-purpose helpers live in `solar_model/utils.py`. `table_to_object_
 
 | Area | Responsibility and entry points |
 | --- | --- |
-| [Planning simulation](../../solar_model/planning/optimisation.py) | `simulate_energy_plan`: in-memory device/state/scenarios to `SimulationResult`. The service creates scenarios directly; planning has no storage/network/UI imports |
+| [Planning simulation](../../solar_model/planning/plan_optimisation_milp.py) | `simulate_energy_plan`: in-memory device/state/scenarios to `SimulationResult`. The service creates scenarios directly; planning has no storage/network/UI imports |
 | [Forecast models](../../solar_model/planning/forecasts/solar.py) | Pure solar day-ahead/intraday calculations; [house_load.py](../../solar_model/planning/forecasts/house_load.py) predicts the fixed daily load profile |
-| [Optimisation](../../solar_model/planning/optimisation.py) | One joint-scenario CVXPY/HiGHS solve with shared mode masks, straightforward first-response calculations, system-port physics and energy checks. [system.py](../../solar_model/planning/system.py) derives limits and report routes; `score_simulation` supplies the unchanged probability-weighted objective |
+| [Optimisation](../../solar_model/planning/plan_optimisation_milp.py) | One joint-scenario CVXPY/HiGHS solve with shared mode masks, straightforward first-response calculations, system-port physics and energy checks. [system.py](../../solar_model/planning/system.py) derives limits and report routes; `score_simulation` supplies the unchanged probability-weighted objective |
+| [Dynamic programming](../../solar_model/planning/plan_optimisation_dynamic_programming.py) | Separate configurable coarse-to-fine solver with its own interval grid, physical/report calculations and exact protection scoring; no MILP/CVXPY or `planning.system` dependency. Shares configuration, domain types, tariffs and UTC utilities |
 | [Services](../../solar_model/services) | Collection transactions, forecast scheduling/calibration persistence, and as-of planning input assembly |
 | [Integrations](../../solar_model/integrations) | HTTP provider client; Modbus transport, map parsing/decoding and device specifications. Register-map JSON is packaged beside its loader |
 | [Storage](../../solar_model/storage) | Schema and scaled types; engine/session ownership; migrations; measurement/forecast transactions. `SolarDatabase` composes the two storage mixins |
@@ -62,3 +63,5 @@ Production forecasting and offline planning share the house-load prediction help
 Tests are grouped into `core/`, `forecasting/`, `storage/`, `dashboard/`, `browser/`, `planning/` and cross-layer `regressions/`. Run `python -m pytest -q` for all groups, including the legacy-named migration regression.
 
 For a metric change, follow [adding a metric](../implementation/adding-a-metric.md). For state/data contracts and call hierarchies, use the [implementation index](../implementation/index.md). Styling and freshness changes follow [styling](styling.md); unresolved policies belong in [review findings](../reviews/findings.md).
+
+The experimental `planning.plan_optimisation_dynamic_programming` planner is invoked by `tools.benchmark_planning --model dp`; it is not the dashboard/service default. See the [DP model contract](plan-model.md#25-experimental-dynamic-programming).

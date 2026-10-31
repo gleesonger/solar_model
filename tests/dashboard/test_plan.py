@@ -74,7 +74,7 @@ def test_aggregation_uses_metadata_instead_of_column_units(monkeypatch):
 
 
 def test_summary_and_chart_use_duration_weighting_and_consistent_units():
-    from solar_model.planning.optimisation import battery_protection_score
+    from solar_model.planning.plan_optimisation_milp import battery_protection_score
     frame = sample_result().results["med"]
     summary = scenario_summary(frame, 4.)
     assert summary["cost"] == .75

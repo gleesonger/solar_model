@@ -15,7 +15,6 @@ from solar_model.tariffs import tariff_rule, tariff_rule_rate, tariff_rules_for_
 from solar_model.planning.types import DeviceInfo, DeviceState, ScenarioData, NextAction, OperatingMode, SimulationResult
 from solar_model.planning.system import allocate_energy_routes, system_limits
 
-MIN_FORCE_RATE_KW = 0.1  # Minimum positive command: 100 watts.
 PROTECTION_APPROXIMATION_ERROR = 0.05  # Protection score points.
 LOGGER = logging.getLogger(__name__)
 
@@ -81,10 +80,10 @@ def _simulate_energy_plan(device_info: DeviceInfo, device_state: DeviceState, sc
 
     constraints = [
         cp.sum(mode) == 1,
-        next_action_force_battery_charge_rate >= MIN_FORCE_RATE_KW * charge_mode,
-        next_action_force_battery_discharge_rate >= MIN_FORCE_RATE_KW * discharge_mode,
-        next_action_force_battery_charge_rate <= limits.max_charge_kwh / theta_hrs * charge_mode,
-        next_action_force_battery_discharge_rate <= limits.max_discharge_kwh / theta_hrs * discharge_mode,
+        next_action_force_battery_charge_rate >= config.energy_plan.min_forced_charge_power_kw * charge_mode,
+        next_action_force_battery_discharge_rate >= config.energy_plan.min_forced_discharge_power_kw * discharge_mode,
+        next_action_force_battery_charge_rate <= min(config.energy_plan.max_forced_charge_power_kw, limits.max_charge_kwh / theta_hrs) * charge_mode,
+        next_action_force_battery_discharge_rate <= min(config.energy_plan.max_forced_discharge_power_kw, limits.max_discharge_kwh / theta_hrs) * discharge_mode,
         next_action_discharge_cut_off_soc_percent <= 100,
         next_action_charge_cut_off_soc_percent <= 100,
     ]
@@ -372,7 +371,7 @@ def _minimum(requested: cp.Expression, ceiling: float, upper: float, constraints
 def _projection_intervals(config: Config, starts_at: datetime) -> list[tuple[datetime, datetime]]:
     """Align configured steps from the preceding UTC hour; keep the first intact."""
     s = config.energy_plan
-    timesteps = s.projection_resolution_mins
+    timesteps = s.optimiser_specific.mix_integer_linear_prog.projection_resolution_mins
     if s.num_projection_hours <= 0 or not timesteps or any(minutes <= 0 for minutes in timesteps):
         raise ValueError("projection duration and resolution must be greater than zero")
     cursor = utc_instant(starts_at)

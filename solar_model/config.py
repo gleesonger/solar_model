@@ -159,7 +159,7 @@ class DPRefinementConfig:
 @dataclass(frozen=True)
 class DynamicProgrammingConfig:
     use_numba: bool = True
-    visible_timestep_minutes: int = 15
+    projection_resolution_mins: int = 15
     refinement_stages: tuple[DPRefinementConfig, ...] = (
         DPRefinementConfig(2., 5, None),
         DPRefinementConfig(1., 10, 5.),
@@ -352,8 +352,8 @@ def validate_config(config: Config) -> None:
     if type(dp.use_numba) is not bool:
         raise ValueError("dynamic_programing.use_numba must be a boolean")
     milp = energy_plan.optimiser_specific.mix_integer_linear_prog
-    if type(dp.visible_timestep_minutes) is not int or dp.visible_timestep_minutes <= 0:
-        raise ValueError("dynamic_programing.visible_timestep_minutes must be a positive integer")
+    if type(dp.projection_resolution_mins) is not int or dp.projection_resolution_mins <= 0:
+        raise ValueError("dynamic_programing.projection_resolution_mins must be a positive integer")
     if not dp.refinement_stages or dp.refinement_stages[0].band_percent is not None:
         raise ValueError("dynamic_programing.refinement_stages must start with a full-range stage using band_percent: null")
     for index, stage in enumerate(dp.refinement_stages):

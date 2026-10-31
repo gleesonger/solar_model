@@ -45,7 +45,7 @@ The sections below describe one solve pass, which the configured sequence repeat
 
 ## 1. Prepare the time periods and scenarios
 
-Build the visible-day periods using `energy_plan.optimiser_specific.dynamic_programing.visible_timestep_minutes`, defaulting to 15 minutes from the projection start. A 24-hour horizon has exactly 96 visible periods. UTC elapsed-time arithmetic preserves this across daylight-saving transitions; a non-divisible horizon has a final shorter period. Add another 24 hours of lookahead in six four-hour periods.
+Build the visible-day periods using `energy_plan.optimiser_specific.dynamic_programing.projection_resolution_mins`, defaulting to 15 minutes from the projection start. A 24-hour horizon has exactly 96 visible periods. UTC elapsed-time arithmetic preserves this across daylight-saving transitions; a non-divisible horizon has a final shorter period. Add another 24 hours of lookahead in six four-hour periods.
 
 For every period in each scenario, determine:
 

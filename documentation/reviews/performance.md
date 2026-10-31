@@ -1,5 +1,7 @@
 # Performance review conclusions
 
+The [2026-10-31 current-config comparison](current-models-performance.md) ran MILP and named-tuple Numba DP four times each in reusable workers, discarding each first call. Mean simulation times were 1.619 seconds and 1.627 seconds. DP's forward rollouts took 47% of runtime and backward tables 27%; its configured final /100 refinement took 47% of the total. DP's full-horizon score was 0.444% lower and net cost EUR 0.03557 higher on the synthetic baseline, using each model's configured grid.
+
 The [2026-10-31 DP Numba measurement](dp-numba-performance.md) compares the same numerical core in Python and compiled execution across the complete configured four-stage, nine-scenario solve. Median simulation time over three runs was 15.329 seconds versus 0.575 seconds (26.6 times faster), excluding backend initialisation/compilation. Reported scores, costs, battery endpoints and first commands matched. Warm-up was subsequently removed; current first-call timings include lazy startup. This is separate from the historical investigations below.
 
 Historical investigations, 2026-10-15-27; condensed 2026-10-29. Measurements used copied/synthetic inputs and are not deployment guarantees or benchmarks of the latest working tree. Detailed logs, intermediate variants and generated evidence were removed.

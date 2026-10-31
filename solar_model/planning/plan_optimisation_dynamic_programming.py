@@ -271,7 +271,7 @@ def result_score(result: SimulationResult, scenarios: list[ScenarioData]) -> flo
 
 def projection_intervals(config: Config, starts_at: datetime) -> list[tuple[datetime, datetime]]:
     """DP's uniform visible steps start at the projection instant, in UTC."""
-    minutes = config.energy_plan.optimiser_specific.dynamic_programing.visible_timestep_minutes
+    minutes = config.energy_plan.optimiser_specific.dynamic_programing.projection_resolution_mins
     if type(minutes) is not int or minutes <= 0 or config.energy_plan.num_projection_hours <= 0:
         raise ValueError("DP projection duration and timestep must be positive")
     cursor = utc_instant(starts_at)

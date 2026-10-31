@@ -319,7 +319,7 @@ def test_nine_scenario_result_replays_the_same_first_command_as_lp(inputs):
     base = scenarios[0].forecast_data
     forecast = ForecastData([replace(base.solar[0], kwh=4.), *base.solar[1:]], base.load)
     scenarios = create_scenarios(forecast, config.scenarios)
-    config = replace(config, energy_plan=replace(config.energy_plan, optimiser_specific=replace(config.energy_plan.optimiser_specific, dynamic_programing=replace(config.energy_plan.optimiser_specific.dynamic_programing, visible_timestep_minutes=30))))
+    config = replace(config, energy_plan=replace(config.energy_plan, optimiser_specific=replace(config.energy_plan.optimiser_specific, dynamic_programing=replace(config.energy_plan.optimiser_specific.dynamic_programing, projection_resolution_mins=30))))
     args = (device, state, scenarios, config, start)
     result = dp.solve_pass(*args)
     replay = simulate(args, result.next_action, return_result=True)
@@ -345,7 +345,7 @@ def test_forced_first_command_is_shared_and_selected_using_all_nine_scenarios(in
     rule = tariff.import_[0]
     tariff = replace(tariff, import_=(replace(rule, end_time="00:30", rate=.01), replace(rule, start_time="00:30", rate=.4)))
     config = replace(config, timezone="UTC", tariffs=replace(config.tariffs, periods=(tariff,)))
-    config = replace(config, energy_plan=replace(config.energy_plan, optimiser_specific=replace(config.energy_plan.optimiser_specific, dynamic_programing=replace(config.energy_plan.optimiser_specific.dynamic_programing, visible_timestep_minutes=30))))
+    config = replace(config, energy_plan=replace(config.energy_plan, optimiser_specific=replace(config.energy_plan.optimiser_specific, dynamic_programing=replace(config.energy_plan.optimiser_specific.dynamic_programing, projection_resolution_mins=30))))
     original = dp.forward_projection
     records = []
 

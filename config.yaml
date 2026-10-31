@@ -150,7 +150,7 @@ energy_plan:
 
     dynamic_programing:
       use_numba: true
-      visible_timestep_minutes: 15
+      projection_resolution_mins: 15
       refinement_stages:
         - {grid_step_percent: 2, power_divisions: 5,  band_percent: null}
         - {grid_step_percent: 1, power_divisions: 10, band_percent: 5}

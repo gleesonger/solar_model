@@ -37,11 +37,13 @@ def test_dp_defaults_and_custom_refinement_settings_load(tmp_path):
     path = tmp_path / "config.yaml"
     path.write_text(yaml.safe_dump(raw), encoding="utf-8")
     settings = load_config(path).energy_plan.optimiser_specific.dynamic_programing
+    assert settings.use_numba is True
     assert settings.visible_timestep_minutes == 15
     assert [(s.grid_step_percent, s.power_divisions, s.band_percent) for s in settings.refinement_stages] == [(2., 5, None), (1., 10, 5.), (1., 20, 3.), (1., 40, 1.)]
-    raw["energy_plan"]["optimiser_specific"]["dynamic_programing"] = {"visible_timestep_minutes": 30, "refinement_stages": [{"grid_step_percent": 4., "power_divisions": 3, "band_percent": None}, {"grid_step_percent": .5, "power_divisions": 20, "band_percent": 2.}]}
+    raw["energy_plan"]["optimiser_specific"]["dynamic_programing"] = {"use_numba": False, "visible_timestep_minutes": 30, "refinement_stages": [{"grid_step_percent": 4., "power_divisions": 3, "band_percent": None}, {"grid_step_percent": .5, "power_divisions": 20, "band_percent": 2.}]}
     path.write_text(yaml.safe_dump(raw), encoding="utf-8")
     settings = load_config(path).energy_plan.optimiser_specific.dynamic_programing
+    assert settings.use_numba is False
     assert settings.visible_timestep_minutes == 30
     assert settings.refinement_stages[0].grid_step_percent == 4.
     assert settings.refinement_stages[0].power_divisions == 3
@@ -50,6 +52,10 @@ def test_dp_defaults_and_custom_refinement_settings_load(tmp_path):
 
 
 @pytest.mark.parametrize("changes", [
+    {"backend": "numba"},
+    {"use_numba": "true"},
+    {"use_numba": 1},
+    {"use_numba": None},
     {"visible_timestep_minutes": 0},
     {"coarse_grid_step_percent": float("nan")},
     {"coarse_power_divisions": 0},

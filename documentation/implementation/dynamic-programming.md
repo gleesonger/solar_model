@@ -27,7 +27,19 @@ This describes the current [implementation](../../solar_model/planning/plan_opti
 
 The first `refinement_stages` entry is the full-range solve with `band_percent: null`; its grid and power settings replace the former separate coarse parameters. Later entries use numeric widths. Each corridor is centred on the best retained path so far, separately for every scenario and period end, including lookahead. The first command is still shared across scenarios. If a refinement is infeasible or has a lower/equal realised score, retain the earlier result. An infeasible coarse pass still raises. Timings cover each solve pass, each attempted refinement and the entire plan.
 
-The implementation owns its interval generation, exact protection curve, tariff-reference scaling, terminal credit, physical limits and report energy allocation. These calculations are local copies in `plan_optimisation_dynamic_programming.py`; DP does not import MILP, CVXPY or `planning.system`. Shared configuration, domain types, tariff lookup and UTC utilities remain common. MILP keeps its own configured timestep grid and calculations, and remains the dashboard/service default.
+The implementation owns its interval generation, exact protection curve, tariff-reference scaling, terminal credit, physical limits and report energy allocation. All DP code lives in `plan_optimisation_dynamic_programming.py`; DP does not import MILP, CVXPY or `planning.system`. Shared configuration, domain types, tariff lookup and UTC utilities remain common. MILP keeps its own configured timestep grid and calculations, and remains the dashboard/service default.
+
+### Python and Numba backends
+
+`use_numba: true` is the default under `energy_plan.optimiser_specific.dynamic_programing`. Set `use_numba: false` for Python execution. This configuration controls the same original backward and forward functions; there is no separate numerical-kernel implementation or public backend argument. Install Numba with `python -m pip install -e ".[numba]"`. Selecting Numba without installing it raises a clear error. The previous `backend` key is rejected; replace it with this boolean.
+
+The original backward pass, forward pass, single-period simulator and scoring formulas remain in one module. `compiled_functions()` imports Numba locally and creates cached `njit(cache=True)` versions of `backward_values()` and `forward_projection()`, registering their existing helpers for compilation. An explicit `if use_numba` / `else` selects the functions and inputs for each path. Python calls those same ordinary functions directly. The compiled dispatchers are reused across scenarios, stages and calls. Execution is single-threaded, without relaxed floating-point arithmetic or object-mode fallback. Python execution does not import Numba.
+
+`DeviceParameters`, `Period`, `Action`, `Step` and `SystemLimits` are named tuples with descriptive fields. Python and Numba use the same `Period` records directly, including their tariff names and `starts_at`/`ends_at` as UTC Unix epoch seconds. Epoch values are floats to preserve fractional seconds. Reports convert those two fields back to timezone-aware UTC datetimes using `datetime.fromtimestamp(..., timezone.utc)`. There is no `PeriodInputs` type or separate metadata collection. When Numba is enabled, the solve pass copies the device numerical fields to a named tuple and converts the existing lists to `numba.typed.List` once per stage; periods need no field-copy conversion. Ragged grids and value tables retain their original lists-of-rows structure. Completed paths contain the same `Step` named tuples used in Python. Forecast values and list lengths can change without new signatures when element types stay the same.
+
+There is no warm-up or synthetic compilation call. Numba imports, loads its disk cache or compiles lazily on the first real numerical call. Internal DP and benchmark timers therefore include that work on first use. Timed work includes typed-list preparation, every refinement stage, rollouts and report creation. The few compatibility edits to the original functions are list slicing to reverse the table, an indexed candidate loop, explicit score arithmetic in compiled loops and an equivalent binary search replacing `bisect_left`. Physics and scoring formulas are unchanged.
+
+For equivalent configured runs, compare `--model dp --grid production --cases baseline --dp-backend python` with `--dp-backend numba`; these flags override `use_numba` for that worker. Add `--cap-seconds 120` for a two-minute simulation limit. Each benchmark worker is a fresh process, so its timing includes lazy Numba startup. The earlier [Numba performance measurement](../reviews/dp-numba-performance.md) excluded warm-up and is historical.
 
 The sections below describe one solve pass, which the configured sequence repeats.
 
@@ -198,6 +210,8 @@ If no first command produces feasible paths across all scenarios, the current co
 ## Code flow
 
 The source is ordered top down: data types first, then `simulate_energy_plan()`, followed by helpers with callers above the functions they call.
+
+`interpolate(x_values, y_values, x)` estimates the future score (`y`) at an ending battery energy (`x`).
 
 DP function names have no leading underscores. Its interval/scoring helpers are `projection_intervals()`, `protection_value()`, `terminal_rate()` and `reference_import_rate()`; MILP retains its own function names.
 

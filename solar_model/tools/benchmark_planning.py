@@ -25,7 +25,7 @@ STEPS = [15, 10, 15, 15] + [15] * 20 + [60] * 18 + [5]
 CAP_SECONDS = 5.0
 
 
-def _worker(connection, case: str, config_path: str, grid: str = "historical", model: str = "lp", grid_step_percent: float | None = None, power_divisions: int | None = None, refine_band_percent: float | None = None, refinement_stages: list[tuple[float, int, float]] | None = None) -> None:
+def _worker(connection, case: str, config_path: str, grid: str = "historical", model: str = "lp", grid_step_percent: float | None = None, power_divisions: int | None = None, refine_band_percent: float | None = None, refinement_stages: list[tuple[float, int, float]] | None = None, dp_backend: str | None = None) -> None:
     if os.name != "nt":
         os.setsid()  # The deadline controller must also stop nested mode workers.
     # Heavy imports and synthetic inputs are prepared outside the timed budget.
@@ -51,6 +51,9 @@ def _worker(connection, case: str, config_path: str, grid: str = "historical", m
         )
 
         config = load_config(Path(config_path))
+        if model == "dp" and dp_backend is not None:
+            settings = replace(config.energy_plan.optimiser_specific.dynamic_programing, use_numba=dp_backend == "numba")
+            config = replace(config, energy_plan=replace(config.energy_plan, optimiser_specific=replace(config.energy_plan.optimiser_specific, dynamic_programing=settings)))
         start = datetime(2026, 10, 27, 10, 5, tzinfo=timezone.utc)
         timestamp = start.replace(minute=0)
         coverage_end = timestamp + timedelta(hours=49)
@@ -136,6 +139,13 @@ def _worker(connection, case: str, config_path: str, grid: str = "historical", m
             assert problem.status == cp.OPTIMAL, problem.status
             return value
 
+        if model == "dp":
+            use_numba = config.energy_plan.optimiser_specific.dynamic_programing.use_numba
+            metrics["numba_initialisation_in_timing"] = use_numba
+            metrics["numpy_version"] = np.__version__
+            if use_numba:
+                from importlib.metadata import version
+                metrics["numba_version"] = version("numba")
         connection.send({"event": "ready"})
         connection.recv()  # Parent arms the process deadline before starting work.
         begin, cpu_begin = perf_counter(), process_time()
@@ -261,9 +271,9 @@ def _worker(connection, case: str, config_path: str, grid: str = "historical", m
         connection.close()
 
 
-def _run_case(context, case: str, config_path: str, grid: str = "historical", model: str = "lp", cap_seconds: float = CAP_SECONDS, grid_step_percent: float | None = None, power_divisions: int | None = None, refine_band_percent: float | None = None, refinement_stages: list[tuple[float, int, float]] | None = None) -> dict:
+def _run_case(context, case: str, config_path: str, grid: str = "historical", model: str = "lp", cap_seconds: float = CAP_SECONDS, grid_step_percent: float | None = None, power_divisions: int | None = None, refine_band_percent: float | None = None, refinement_stages: list[tuple[float, int, float]] | None = None, dp_backend: str | None = None) -> dict:
     parent, child = context.Pipe()
-    process = context.Process(target=_worker, args=(child, case, config_path, grid, model, grid_step_percent, power_divisions, refine_band_percent, refinement_stages))
+    process = context.Process(target=_worker, args=(child, case, config_path, grid, model, grid_step_percent, power_divisions, refine_band_percent, refinement_stages, dp_backend))
     process.start()
     child.close()
     try:
@@ -311,7 +321,10 @@ def main() -> None:
     parser.add_argument("--power-divisions", type=int, default=None)
     parser.add_argument("--refine-band-percent", type=float, default=None)
     parser.add_argument("--refinement-stages", nargs="+", metavar="GRID:DIVISIONS:BAND")
+    parser.add_argument("--dp-backend", choices=("python", "numba"), default=None)
     args = parser.parse_args()
+    if args.dp_backend is not None and args.model != "dp":
+        parser.error("--dp-backend requires --model dp")
     args.grid = args.grid or ("production" if args.model == "dp" else "historical")
     refinement_stages = None
     if args.refinement_stages:
@@ -345,8 +358,9 @@ def main() -> None:
         "power_divisions": args.power_divisions if args.model == "dp" else None,
         "refine_band_percent": args.refine_band_percent,
         "refinement_stages": refinement_stages,
+        "dp_backend": args.dp_backend,
         "timesteps_minutes": STEPS if args.grid == "historical" else [15] * 96 if args.grid == "quarter-hour" else None,
-        "timing_scope": "build, compile, solve, extraction and validation; controller startup excluded",
+        "timing_scope": "prepare, solve, extraction and validation including lazy DP Numba import/cache loading/compilation; controller startup excluded" if args.model == "dp" else "build, compile, solve, extraction and validation; controller startup excluded",
         "config_sha256": hashlib.sha256(args.config.read_bytes()).hexdigest(),
         "model_sha256": hashlib.sha256(Path(__file__).parents[1].joinpath(f"planning/{'plan_optimisation_dynamic_programming' if args.model == 'dp' else 'plan_optimisation_milp'}.py").read_bytes()).hexdigest(),
         "scoring_sha256": hashlib.sha256(Path(__file__).parents[1].joinpath("planning/plan_optimisation_dynamic_programming.py" if args.model == "dp" else "planning/plan_optimisation_milp.py").read_bytes()).hexdigest(),
@@ -356,7 +370,7 @@ def main() -> None:
     context = mp.get_context("spawn")
     print(f"{'Case':<20} {'Status':<10} {'Total s':>9} {'Build s':>9} {'Compile s':>10} {'HiGHS s':>9}", flush=True)
     for case in args.cases:
-        record = {"case": case, **_run_case(context, case, str(args.config.resolve()), args.grid, args.model, cap_seconds, args.soc_grid_step_percent, args.power_divisions, args.refine_band_percent, refinement_stages)}
+        record = {"case": case, **_run_case(context, case, str(args.config.resolve()), args.grid, args.model, cap_seconds, args.soc_grid_step_percent, args.power_divisions, args.refine_band_percent, refinement_stages, args.dp_backend)}
         record.pop("event", None)
         report["cases"].append(record)
         args.output.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")

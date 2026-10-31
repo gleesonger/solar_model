@@ -158,6 +158,7 @@ class DPRefinementConfig:
 
 @dataclass(frozen=True)
 class DynamicProgrammingConfig:
+    use_numba: bool = True
     visible_timestep_minutes: int = 15
     refinement_stages: tuple[DPRefinementConfig, ...] = (
         DPRefinementConfig(2., 5, None),
@@ -289,6 +290,8 @@ def load_config(path: str | Path = "config.yaml") -> Config:
                 raise ValueError("move optimiser settings under energy_plan.optimiser_specific: mix_integer_linear_prog and dynamic_programing")
             optimiser_data = energy_plan_data.get("optimiser_specific", {})
             dp_data = optimiser_data.get("dynamic_programing", {}) if isinstance(optimiser_data, dict) else {}
+            if isinstance(dp_data, dict) and "backend" in dp_data:
+                raise ValueError("dynamic_programing: replace backend with use_numba: true/false")
             if isinstance(dp_data, dict) and ("coarse_grid_step_percent" in dp_data or "coarse_power_divisions" in dp_data):
                 raise ValueError("dynamic_programing: move coarse settings into the first refinement_stages entry with band_percent: null")
             milp_data = optimiser_data.get("mix_integer_linear_prog", {}) if isinstance(optimiser_data, dict) else {}
@@ -346,6 +349,8 @@ def validate_config(config: Config) -> None:
     config.forecast.models  # Validate model-specific requirements across both sections.
     energy_plan = config.energy_plan
     dp = energy_plan.optimiser_specific.dynamic_programing
+    if type(dp.use_numba) is not bool:
+        raise ValueError("dynamic_programing.use_numba must be a boolean")
     milp = energy_plan.optimiser_specific.mix_integer_linear_prog
     if type(dp.visible_timestep_minutes) is not int or dp.visible_timestep_minutes <= 0:
         raise ValueError("dynamic_programing.visible_timestep_minutes must be a positive integer")

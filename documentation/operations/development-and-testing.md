@@ -14,11 +14,14 @@ python -m venv .venv
 
 - [requirements.txt](../../requirements.txt) contains runtime ranges rather than a lockfile. Pytest, Playwright and extraction's openpyxl are provided by package extras rather than the runtime list.
 - Planning explicitly requests HiGHS; `highspy` is a declared runtime dependency. Verify with `python -c "import cvxpy; print(cvxpy.installed_solvers())"`.
+- DP defaults to Numba. Install its optional runtime extra with `python -m pip install -e ".[numba]"`; the `test` extra also installs Numba for parity checks. Set `energy_plan.optimiser_specific.dynamic_programing.use_numba: false` for Python execution without importing Numba. The numerical functions share named tuples and ordinary/Numba typed lists; DP has no direct NumPy import.
 - Browser tests require Playwright and Chromium: `python -m pip install playwright`, then `python -m playwright install chromium`. Tests skip if the dependency/browser is absent (they also try installed Chrome).
 - Existing databases, CSV, Excel, pickle outputs, caches, and virtual environments are ignored by Git. Avoid treating these local artifacts as source.
-- `pyproject.toml` defines the installable package, console scripts, package data and optional `test`, `browser`, `research` dependencies. No CI or formatter/type-checker configuration is configured.
+- `pyproject.toml` defines the installable package, console scripts, package data and optional `test`, `browser`, `research`, `numba` dependencies. No CI or formatter/type-checker configuration is configured.
 
 ## Package verification
+
+For an explicitly requested DP performance comparison, use `python -m solar_model.tools.benchmark_planning --model dp --grid production --cases baseline --dp-backend numba --cap-seconds 120 --output dp-numba.json`, then select `--dp-backend python` for the counterpart. There is no warm-up. Each fresh worker times the first real call, including lazy Numba import/cache loading/compilation, all configured stages and report creation. JSON marks `numba_initialisation_in_timing`. The earlier [performance comparison](../reviews/dp-numba-performance.md) excluded warm-up and is historical.
 
 Tests are grouped by subsystem. From the repository root, run only key targeted tests relevant to the change, using `python -m pytest -q <test-file>` with specific test names or `-k` where appropriate. Do not run the full suite. Model simulations and performance benchmarks run only when requested by the user; targeted planning regression tests can exercise the solver when needed to verify a planning change. Formatting-only changes need lightweight syntax/AST or diff checks. `python -m pip wheel . --no-deps` verifies package construction; the wheel must include dashboard CSS/JS/SVG and both register maps. Module CLIs support `--help` without opening a database. Tests use temporary databases and synthetic browser data.
 

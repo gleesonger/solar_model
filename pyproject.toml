@@ -10,9 +10,10 @@ requires-python = ">=3.12"
 dynamic = ["dependencies"]
 
 [project.optional-dependencies]
-test = ["pytest>=8,<10"]
+test = ["pytest>=8,<10", "numba>=0.61,<1"]
 browser = ["playwright>=1.45,<2"]
 research = ["openpyxl>=3.1,<4"]
+numba = ["numba>=0.61,<1"]
 
 [project.scripts]
 solar-model = "solar_model.runtime.supervisor:main"

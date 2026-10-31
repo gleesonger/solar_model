@@ -2,9 +2,12 @@
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from itertools import product
+import subprocess
+import sys
 
 import pytest
 import pandas as pd
+import numpy as np
 
 from solar_model.planning import plan_optimisation_dynamic_programming as dp
 from solar_model.planning.scenarios import create_scenarios
@@ -14,8 +17,116 @@ from tests.planning.test_next_action import inputs, simulate
 
 def period(**changes):
     start = datetime(2026, 10, 27, tzinfo=timezone.utc)
-    base = dp.Period(start, start + timedelta(minutes=30), 0., .5, .4, .1, "flat", 0., 10., 9999., .5, 0., 4.)
-    return replace(base, **changes)
+    base = dp.Period(start.timestamp(), (start + timedelta(minutes=30)).timestamp(), 0., .5, .4, .1, "flat", 0., 10., 9999., .5, 0., 4.)
+    return base._replace(**{name: value if name == "tariff_name" else float(value) for name, value in changes.items()})
+
+
+def test_epoch_periods_preserve_fractional_utc_report_timestamps(inputs):
+    start = inputs[-1].replace(microsecond=123456)
+    end = start + timedelta(minutes=30)
+    p = period(starts_at=start.timestamp(), ends_at=end.timestamp())
+    step = dp.simulate_system_single_time_period(inputs[0], 10., p, 2., dp.Action(OperatingMode.SELF_CONSUMPTION, 0.))
+    frame = dp.result_frame(inputs[0], [p], [step], 2., .2)
+    assert frame.starts_at.iloc[0] == start
+    assert frame.ends_at.iloc[0] == end
+    assert str(frame.starts_at.dt.tz) == "UTC"
+    assert frame.tariff_name.tolist() == ["flat"]
+
+
+def test_numba_import_and_compilation_are_lazy():
+    code = """
+import builtins
+import sys
+from solar_model.planning import plan_optimisation_dynamic_programming as dp
+
+original_import = builtins.__import__
+def block_numba(name, *args, **kwargs):
+    if name == "numba" or name.startswith("numba."):
+        raise AssertionError("Python execution imported Numba")
+    return original_import(name, *args, **kwargs)
+
+builtins.__import__ = block_numba
+device = dp.DeviceParameters(.95, .95, 5., 5., 5., 5.)
+periods = [dp.Period(0., 900., 0., .25, .4, .1, "flat", 0., 10., 9999., .25, .01, 3.)]
+grids = [[0., 5., 10.], [0., 5., 10.]]
+choices = [dp.Action(dp.OperatingMode.SELF_CONSUMPTION, 0.)]
+values = dp.backward_values(device, 10., periods, grids, choices, .2)
+expected = dp.forward_projection(device, 10., periods, grids, values, choices, 5., choices[0])
+assert expected is not None
+assert "numba" not in sys.modules
+builtins.__import__ = original_import
+backward, forward = dp.compiled_functions()
+assert not backward.signatures
+assert not forward.signatures
+from numba.typed import List
+periods = List(periods)
+grids = List([List(grid) for grid in grids])
+choices = List(choices)
+actual_values = backward(device, 10., periods, grids, choices, .2)
+assert actual_values == values
+actual_values = List([List(row) for row in actual_values])
+actual = forward(device, 10., periods, grids, actual_values, choices, 5., choices[0])
+assert actual == expected
+assert dp.compiled_functions() == (backward, forward)
+"""
+    result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=30)
+    assert result.returncode == 0, result.stderr
+
+
+def test_numba_and_python_match_value_tables_and_bounded_paths(inputs):
+    from numba.typed import List
+
+    device = replace(inputs[0], charge_efficiency=.95, discharge_efficiency=.9)
+    periods = [period(solar=.8, load=.2, protection_weight=.02), period(solar=.1, load=.8, export_limit=0., protection_weight=.02)]
+    grids = dp.bounded_grids([float(i) for i in range(11)], 10., [(.1, .4), (0., .5)])
+    choices = dp.actions(device, inputs[3].energy_plan)
+    python_values = dp.backward_values(device, 10., periods, grids, choices, .2)
+    numerical_device = dp.DeviceParameters(*(getattr(device, field) for field in dp.DeviceParameters._fields))
+    numerical_periods = List(periods)
+    numerical_grids, numerical_choices = List([List(grid) for grid in grids]), List(choices)
+    backward, forward = dp.get_numba_functions()
+    numba_values = backward(numerical_device, 10., numerical_periods, numerical_grids, numerical_choices, .2)
+    for expected, actual in zip(python_values, numba_values):
+        np.testing.assert_allclose(actual, expected, atol=1e-12, rtol=1e-12)
+    numba_values = List([List(row) for row in numba_values])
+    for action in choices:
+        expected = dp.forward_projection(device, 10., periods, grids, python_values, choices, 2., action)
+        actual = forward(numerical_device, 10., numerical_periods, numerical_grids, numba_values, numerical_choices, 2., action)
+        assert (actual is None) == (expected is None)
+        if actual is not None:
+            for expected_step, actual_step in zip(expected, actual):
+                assert actual_step == pytest.approx(expected_step, abs=1e-12)
+    signatures = (tuple(backward.signatures), tuple(forward.signatures))
+    changed_periods = List([numerical_periods[0]._replace(solar=.4), *numerical_periods])
+    changed_grids = List([numerical_grids[0], *numerical_grids])
+    changed_values = backward(numerical_device, 10., changed_periods, changed_grids, numerical_choices, .2)
+    forward(numerical_device, 10., changed_periods, changed_grids, List([List(row) for row in changed_values]), numerical_choices, 2., choices[0])
+    assert (tuple(backward.signatures), tuple(forward.signatures)) == signatures
+
+
+def test_numba_and_python_match_complete_configured_pipeline(inputs):
+    device, state, scenarios, config, start = inputs
+    tariff = config.tariffs.periods[0]
+    rule = tariff.import_[0]
+    tariff = replace(tariff, import_=(replace(rule, end_time="00:30", name="early"), replace(rule, start_time="00:30", name="later")))
+    config = replace(config, timezone="UTC", tariffs=replace(config.tariffs, periods=(tariff,)))
+    scenarios = create_scenarios(scenarios[0].forecast_data, config.scenarios)
+    results = []
+    for use_numba in (False, True):
+        settings = replace(config.energy_plan.optimiser_specific.dynamic_programing, use_numba=use_numba)
+        configured = replace(config, energy_plan=replace(config.energy_plan, optimiser_specific=replace(config.energy_plan.optimiser_specific, dynamic_programing=settings)))
+        results.append(dp.simulate_energy_plan(device, state, scenarios, configured, start))
+    expected, actual = results
+    assert len(actual.results) == 9
+    assert actual.next_action == expected.next_action
+    for name in expected.results:
+        assert actual.results[name].starts_at.iloc[0] == start
+        assert actual.results[name].ends_at.iloc[-1] == start + timedelta(hours=1)
+        assert actual.lookahead_results[name].starts_at.iloc[0] == start + timedelta(hours=1)
+        assert actual.lookahead_results[name].ends_at.iloc[-1] == start + timedelta(hours=25)
+        assert actual.results[name].tariff_name.tolist() == ["early", "early", "later", "later"]
+        pd.testing.assert_frame_equal(actual.results[name], expected.results[name], atol=1e-10, rtol=1e-12)
+        pd.testing.assert_frame_equal(actual.lookahead_results[name], expected.lookahead_results[name], atol=1e-10, rtol=1e-12)
 
 
 def test_default_refinement_retains_better_paths_and_centres_next_bounds_on_them(inputs, monkeypatch):
@@ -224,6 +335,8 @@ def test_nine_scenario_result_replays_the_same_first_command_as_lp(inputs):
 
 def test_forced_first_command_is_shared_and_selected_using_all_nine_scenarios(inputs, monkeypatch):
     device, state, scenarios, config, start = inputs
+    settings = replace(config.energy_plan.optimiser_specific.dynamic_programing, use_numba=False)
+    config = replace(config, energy_plan=replace(config.energy_plan, optimiser_specific=replace(config.energy_plan.optimiser_specific, dynamic_programing=settings)))
     device = replace(device, inverter_max_absorption_power_kw=1.)
     base = scenarios[0].forecast_data
     forecast = ForecastData([replace(base.solar[0], kwh=1.), *base.solar[1:]], base.load)
@@ -251,7 +364,7 @@ def test_forced_first_command_is_shared_and_selected_using_all_nine_scenarios(in
     assert len({(periods[0].solar, periods[0].load) for action, periods, path in selected}) == 9
     assert len({round(path[0].battery_end, 6) for action, periods, path in selected}) > 1
 
-    terminal_rate = dp.terminal_rate(config, selected[0][1][-1].ends_at) * device.discharge_efficiency
+    terminal_rate = dp.terminal_rate(config, next(iter(result.lookahead_results.values())).ends_at.iloc[-1]) * device.discharge_efficiency
     scores = {}
     for action in dp.actions(device, config.energy_plan):
         candidate = [record for record in records if record[0] == action]

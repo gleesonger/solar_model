@@ -62,6 +62,7 @@ Keep concise explanations in `overview/`, detailed code/data contracts in `imple
 | [Verification scope](reviews/verification.md) | Regression coverage and remaining integration/verification limits |
 | [Performance conclusions](reviews/performance.md) | Key download, summary, forecasting and planning measurements |
 | [DP v1 verification](reviews/dp-v1-recheck.md) | Restored nine-scenario planner: shared first-command audit, fresh configured-grid MILP comparisons and performance; links to the earlier experiment |
+| [DP Numba performance](reviews/dp-numba-performance.md) | Shared Python/Numba numerical core: equivalent configured outcomes and repeated runtime comparison excluding initialisation/compilation |
 | [Sigenergy register review](reviews/sigenergy-home-assistant-register-review.md) | Load boundaries, electrical residuals and diagnostic priorities |
 | [Schema reference](reference/schema.md) | Every declared database column, key, type, and index |
 | [Metric semantics](reference/metric-semantics.md) | Units, signs, missing values, time attribution and chart/download aggregation differences |

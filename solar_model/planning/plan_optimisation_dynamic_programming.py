@@ -1,10 +1,9 @@
 """Experimental discrete-action planner with an interpolated battery value grid."""
 from __future__ import annotations
 
-from bisect import bisect_left
 from collections.abc import Iterable
-from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
+from functools import lru_cache
 import math
 from time import perf_counter
 from typing import NamedTuple
@@ -18,8 +17,7 @@ from solar_model.tariffs import tariff_rule, tariff_rule_rate, tariff_rules_for_
 from solar_model.time_utils import utc_instant
 
 
-@dataclass(frozen=True)
-class SystemLimits:
+class SystemLimits(NamedTuple):
     capacity_kwh: float
     max_charge_kwh: float
     max_discharge_kwh: float
@@ -27,10 +25,10 @@ class SystemLimits:
     discharge_loss_factor: float
 
 
-@dataclass(frozen=True)
-class Period:
-    starts_at: datetime
-    ends_at: datetime
+class Period(NamedTuple):
+    """Period inputs; starts_at and ends_at are UTC Unix epoch seconds."""
+    starts_at: float
+    ends_at: float
     solar: float
     load: float
     import_rate: float
@@ -44,8 +42,16 @@ class Period:
     preferred_reserve_kwh: float
 
 
-@dataclass(frozen=True)
-class Step:
+class DeviceParameters(NamedTuple):
+    charge_efficiency: float
+    discharge_efficiency: float
+    inverter_max_active_power_kw: float
+    inverter_max_absorption_power_kw: float
+    inverter_battery_charge_power_kw: float
+    inverter_battery_discharge_power_kw: float
+
+
+class Step(NamedTuple):
     solar_used: float
     charge: float
     discharge: float
@@ -126,11 +132,12 @@ def solve_pass(device_info: DeviceInfo, device_state: DeviceState, scenarios: li
     if not math.isfinite(reserve) or reserve <= 0:
         raise ValueError("preferred_reserve_kwh must be finite and greater than zero")
     
-    initial = device_state.battery_kwh
+    initial = float(device_state.battery_kwh)
     capacity = system_limits(device_info, 1.).capacity_kwh
     
     if not math.isfinite(initial) or not 0 <= initial <= capacity:
         raise ValueError("initial battery energy must be within physical capacity")
+
     validated_at = perf_counter()
 
     start = utc_instant(projection_starts_at)
@@ -170,7 +177,7 @@ def solve_pass(device_info: DeviceInfo, device_state: DeviceState, scenarios: li
             if maximum < max(0., minimum):
                 raise ValueError("inconsistent battery energy bounds")
             
-            periods.append(Period(begin_utc, end_utc, forecast.solar_kwh, forecast.load_kwh, buy.rate, sell.rate, buy.name, minimum, maximum, export_limit, hours, protection_reward_value * hours / total_hours / 100, reserve))
+            periods.append(Period(begin_utc.timestamp(), end_utc.timestamp(), float(forecast.solar_kwh), float(forecast.load_kwh), float(buy.rate), float(sell.rate), buy.name, float(minimum), float(maximum), float(export_limit), hours, protection_reward_value * hours / total_hours / 100, float(reserve)))
 
         scenario_periods.append(periods)
     periods_at = perf_counter()
@@ -196,8 +203,27 @@ def solve_pass(device_info: DeviceInfo, device_state: DeviceState, scenarios: li
             raise ValueError("battery bounds need one pair per visible period or per full-horizon period")
         scenario_grids.append(bounded_grids(grid, capacity, bounds))
     choices = actions(device_info, config.energy_plan, power_divisions)
+    
+    use_numba = config.energy_plan.optimiser_specific.dynamic_programing.use_numba
+
+    if use_numba:
+        backward, forward = get_numba_functions()
+        from numba.typed import List
+        calculation_device = DeviceParameters(*(float(getattr(device_info, field)) for field in DeviceParameters._fields))
+        calculation_periods = [List(periods) for periods in scenario_periods]
+        calculation_grids = [List([List(grid) for grid in grids]) for grids in scenario_grids]
+        calculation_choices = List(choices)
+    else:
+        backward, forward = backward_values, forward_projection
+        calculation_device, calculation_periods, calculation_grids, calculation_choices = device_info, scenario_periods, scenario_grids, choices
+
     grid_at = perf_counter()
-    tables = [backward_values(device_info, capacity, periods, grids, choices, terminal_credit_rate) for periods, grids in zip(scenario_periods, scenario_grids)]
+
+    tables = [backward(calculation_device, capacity, periods, grids, calculation_choices, terminal_credit_rate) for periods, grids in zip(calculation_periods, calculation_grids)]
+
+    if use_numba:
+        tables = [List([List(row) for row in table]) for table in tables]
+
     backward_at = perf_counter()
 
     # Select using actual feasible rollouts, rather than interpolated scores alone.
@@ -206,8 +232,8 @@ def solve_pass(device_info: DeviceInfo, device_state: DeviceState, scenarios: li
     for action in choices:
         paths = []
         score = 0.
-        for scenario, periods, grids, values in zip(scenarios, scenario_periods, scenario_grids, tables):
-            path = forward_projection(device_info, capacity, periods, grids, values, choices, initial, action)
+        for scenario, periods, grids, values in zip(scenarios, calculation_periods, calculation_grids, tables):
+            path = forward(calculation_device, capacity, periods, grids, values, calculation_choices, initial, action)
             if path is None:
                 break
             paths.append(path)
@@ -306,6 +332,21 @@ def bounded_grids(grid: list[float], capacity: float, bounds: list[tuple[float, 
     return grids
 
 
+@lru_cache(maxsize=1)
+def get_numba_functions():
+    """Import Numba locally and cache lazy compiled versions of the same functions."""
+    try:
+        from numba import njit
+        from numba.extending import register_jitable
+    except ModuleNotFoundError as error:
+        if error.name != "numba":
+            raise
+        raise RuntimeError('Numba requires installation with: pip install -e ".[numba]"') from error
+    for helper in (simulate_system_single_time_period, interpolate, battery_protection_score):
+        register_jitable(helper)
+    return njit(cache=True)(backward_values), njit(cache=True)(forward_projection)
+
+
 def backward_values(device: DeviceInfo, capacity: float, periods: list[Period], grids: list[list[float]], choices: list[Action], terminal_rate: float) -> list[list[float]]:
     values = [[terminal_rate * battery for battery in grids[-1]]]
     for t in range(len(periods) - 1, -1, -1):
@@ -316,10 +357,10 @@ def backward_values(device: DeviceInfo, capacity: float, periods: list[Period], 
             for action in choices:
                 step = simulate_system_single_time_period(device, capacity, period, battery, action)
                 if step is not None:
-                    best = max(best, step.score + interpolate(grids[t + 1], values[-1], step.battery_end))
+                    best = max(best, (-step.net_cost + step.protection_score) + interpolate(grids[t + 1], values[-1], step.battery_end))
             current.append(best)
         values.append(current)
-    return list(reversed(values))
+    return values[::-1]
 
 
 def forward_projection(device: DeviceInfo, capacity: float, periods: list[Period], grids: list[list[float]], values: list[list[float]], choices: list[Action], initial: float, first_action: Action) -> list[Step] | None:
@@ -327,12 +368,12 @@ def forward_projection(device: DeviceInfo, capacity: float, periods: list[Period
     battery = initial
     path = []
     for t, period in enumerate(periods):
-        candidates = [first_action] if t == 0 else choices
         best_value, best_step = -math.inf, None
-        for action in candidates:
+        for i in range(1 if t == 0 else len(choices)):
+            action = first_action if t == 0 else choices[i]
             step = simulate_system_single_time_period(device, capacity, period, battery, action)
             if step is not None:
-                value = step.score + interpolate(grids[t + 1], values[t + 1], step.battery_end)
+                value = (-step.net_cost + step.protection_score) + interpolate(grids[t + 1], values[t + 1], step.battery_end)
                 if value > best_value:
                     best_value, best_step = value, step
         if best_step is None:
@@ -345,8 +386,8 @@ def forward_projection(device: DeviceInfo, capacity: float, periods: list[Period
 def result_frame(device: DeviceInfo, periods: list[Period], path: list[Step], initial: float, terminal_rate: float) -> pd.DataFrame:
     frame = pd.DataFrame([
         {
-            "starts_at": p.starts_at,
-            "ends_at": p.ends_at,
+            "starts_at": datetime.fromtimestamp(p.starts_at, timezone.utc),
+            "ends_at": datetime.fromtimestamp(p.ends_at, timezone.utc),
             "tariff_name": p.tariff_name,
             "import_rate": p.import_rate,
             "export_rate": p.export_rate,
@@ -433,17 +474,23 @@ def simulate_system_single_time_period(device: DeviceInfo, capacity: float, peri
     return Step(used, charge, discharge, battery_end, grid_import, grid_export, net_cost, period.protection_weight * min(100., max(0., protection)))
 
 
-def interpolate(grid: list[float], values: list[float], energy: float) -> float:
-    """Interpolate future value only; never round the physical battery state."""
-    right = bisect_left(grid, energy)
-    if right == len(grid):
-        return values[-1] if energy <= grid[-1] + 1e-9 else -math.inf
-    if abs(grid[right] - energy) < 1e-9:
-        return values[right]
-    if right == 0 or not math.isfinite(values[right - 1]) or not math.isfinite(values[right]):
+def interpolate(x_values: list[float], y_values: list[float], x: float) -> float:
+    left, right = 0, len(x_values)
+    while left < right:
+        middle = (left + right) // 2
+        if x_values[middle] < x:
+            left = middle + 1
+        else:
+            right = middle
+    right = left
+    if right == len(x_values):
+        return y_values[-1] if x <= x_values[-1] + 1e-9 else -math.inf
+    if abs(x_values[right] - x) < 1e-9:
+        return y_values[right]
+    if right == 0 or not math.isfinite(y_values[right - 1]) or not math.isfinite(y_values[right]):
         return -math.inf
-    fraction = (energy - grid[right - 1]) / (grid[right] - grid[right - 1])
-    return values[right - 1] * (1 - fraction) + values[right] * fraction
+    fraction = (x - x_values[right - 1]) / (x_values[right] - x_values[right - 1])
+    return y_values[right - 1] * (1 - fraction) + y_values[right] * fraction
 
 
 def battery_protection_score(energy: float, reserve: float) -> float:

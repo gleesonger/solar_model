@@ -87,6 +87,7 @@ energy_plan:
     mix_integer_linear_prog:
       projection_resolution_mins: [15*4, 60*23]
     dynamic_programing:
+      use_numba: true
       visible_timestep_minutes: 15
       refinement_stages:
         - {grid_step_percent: 2, power_divisions: 5, band_percent: null}
@@ -96,6 +97,8 @@ energy_plan:
 ```
 
 Shared horizon, protection, battery schedules and command power preferences remain directly under `energy_plan`. Move the former flat `projection_resolution_mins` and `dynamic_programming` blocks into the respective sections above; the loader rejects those legacy keys rather than silently ignoring them. These are also the defaults when omitted. Visible timestep and power divisions must be positive integers; grid steps and corridor half-widths must be finite percentages in `(0, 100]`. The non-empty stage list includes the initial full-range solve, whose `band_percent` must be YAML `null` (Python `None`); subsequent stages require numeric half-widths. A list containing only that initial entry requests one full-range solve. The former separate coarse-grid and power settings are rejected; put those values in the first entry instead. Each refinement uses scenario-specific period-end bounds around the best retained path, including the six hidden four-hour periods. Lower/equal scores and infeasible refinements retain the earlier policy. MILP continues to use `energy_plan.optimiser_specific.mix_integer_linear_prog.projection_resolution_mins`; these DP settings do not change its calculations. See the [DP walkthrough](../implementation/dynamic-programming.md).
+
+`use_numba` is a boolean, defaulting to `true`. Set it to `false` for Python execution of the same numerical functions without importing Numba. Install the compiled path with `python -m pip install -e ".[numba]"`; selecting it without Numba installed raises an installation error. Replace the former `backend` string with this boolean; the old key is rejected. There is no warm-up: the first real numerical call imports Numba and loads or compiles its functions inside the measured solve. This setting affects DP only.
 
 `energy_plan.preferred_reserve_kwh` is a positive, finite target of stored battery kWh measured from zero; it defaults to 4 kWh. Physical discharge cut-offs do not shift this scoring origin. `energy_plan.protection_preference` is X, any finite non-negative number, defaulting to 50 when omitted (also the shipped value). Values above 100 are supported. Replace the former `optimisation_weights` block with this scalar when updating separate YAML files; omitting the field now uses 50. The old battery share corresponds to X = 100 * maximise_battery / (maximise_profit + maximise_battery), but the revised objective changes its effect.
 

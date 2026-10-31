@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
+from contextlib import nullcontext
 from datetime import datetime, timedelta, timezone
 from functools import lru_cache
 import math
@@ -11,7 +12,7 @@ from zoneinfo import ZoneInfo
 
 import pandas as pd
 
-from solar_model.config import Config, EnergyPlanConfig
+from solar_model.config import Config, DPRefinementConfig, EnergyPlanConfig
 from solar_model.logging_setup import LOGGER
 from solar_model.planning.types import DeviceInfo, DeviceState, NextAction, OperatingMode, ScenarioData, SimulationResult
 from solar_model.tariffs import tariff_rule, tariff_rule_rate, tariff_rules_for_timestamp
@@ -74,48 +75,54 @@ class Action(NamedTuple):
 
 def simulate_energy_plan(device_info: DeviceInfo, device_state: DeviceState, scenarios: list[ScenarioData], config: Config, projection_starts_at: datetime, *, grid_step_percent: float | None = None, power_divisions: int | None = None, battery_bounds: list[tuple[float, float]] | dict[str, list[tuple[float, float]]] | None = None) -> SimulationResult:
     """Run configured coarse-to-fine DP; explicit resolution/bounds select one pass."""
-    settings = config.energy_plan.optimiser_specific.dynamic_programing
-    if not settings.refinement_stages or settings.refinement_stages[0].band_percent is not None:
-        raise ValueError("DP stages must begin with a full-range stage")
-    initial_stage = settings.refinement_stages[0]
     began_at = perf_counter()
-    if grid_step_percent is not None or power_divisions is not None or battery_bounds is not None:
-        result = solve_pass(
-            device_info,
-            device_state,
-            scenarios,
-            config,
-            projection_starts_at,
-            grid_step_percent=initial_stage.grid_step_percent if grid_step_percent is None else grid_step_percent,
-            power_divisions=initial_stage.power_divisions if power_divisions is None else power_divisions,
-            battery_bounds=battery_bounds,
-        )
-        LOGGER.info("dp_model end: status=success elapsed_seconds=%.6f", perf_counter() - began_at)
+    compilation_seconds = 0.
+    try:
+        settings = config.energy_plan.optimiser_specific.dynamic_programing
+        if not settings.refinement_stages or settings.refinement_stages[0].band_percent is not None:
+            raise ValueError("DP stages must begin with a full-range stage")
+        initial_stage = settings.refinement_stages[0]
+        single_pass = grid_step_percent is not None or power_divisions is not None or battery_bounds is not None
+        if single_pass:
+            stages = (DPRefinementConfig(initial_stage.grid_step_percent if grid_step_percent is None else grid_step_percent, initial_stage.power_divisions if power_divisions is None else power_divisions, None),)
+        else:
+            stages = settings.refinement_stages
+        LOGGER.info("DP Model Start - num_projection_hours=%d num_time_steps=%d refinement_stages=%d use_numba=%s", config.energy_plan.num_projection_hours, len(projection_intervals(config, projection_starts_at)), len(stages), settings.use_numba)
+        if settings.use_numba:
+            from numba.core.event import TimingListener, install_listener
+        capacity = system_limits(device_info, 1.).capacity_kwh
+        result, best_score = None, -math.inf
+        for index, stage in enumerate(stages):
+            stage_at = began_at if index == 0 else perf_counter()
+            bounds = battery_bounds if single_pass else None
+            if stage.band_percent is not None:
+                bounds = {}
+                for scenario in scenarios:
+                    energies = [*result.results[scenario.name].battery_end_kwh, *result.lookahead_results[scenario.name].battery_end_kwh]
+                    bounds[scenario.name] = [(max(0., energy / capacity - stage.band_percent / 100), min(1., energy / capacity + stage.band_percent / 100)) for energy in energies]
+            timer = TimingListener() if settings.use_numba else None
+            try:
+                with install_listener("numba:compile", timer) if settings.use_numba else nullcontext():
+                    refined = solve_pass(device_info, device_state, scenarios, config, projection_starts_at, grid_step_percent=stage.grid_step_percent, power_divisions=stage.power_divisions, battery_bounds=bounds)
+            except ValueError as error:
+                if result is None or str(error) != "unable to find a feasible energy plan on the dynamic-programming grid":
+                    raise
+                LOGGER.warning("DP Refinement Stage #%d infeasible - retaining previous result", index + 1)
+                refined = None
+            score = -math.inf if refined is None else result_score(refined, scenarios)
+            accepted = score > best_score
+            if accepted:
+                result, best_score = refined, score
+            compiled = timer.duration if timer is not None and timer.done else 0.
+            elapsed = perf_counter() - stage_at - compiled
+            compilation_seconds += compiled
+            LOGGER.info("DP Refinement Stage #%d complete - compilation_seconds=%.6f projection_seconds=%.6f score=%.9f accepted=%s", index + 1, compiled, elapsed, best_score, accepted)
+        elapsed = perf_counter() - began_at
+        LOGGER.info("DP Project end - elapsed_seconds=%.6f compile_seconds=%.6f projection_seconds=%.6f score=%.9f", elapsed, compilation_seconds, elapsed - compilation_seconds, best_score)
         return result
-
-    capacity = system_limits(device_info, 1.).capacity_kwh
-    result, best_score = None, -math.inf
-    for index, stage in enumerate(settings.refinement_stages):
-        bounds = None
-        if stage.band_percent is not None:
-            bounds = {}
-            for scenario in scenarios:
-                energies = [*result.results[scenario.name].battery_end_kwh, *result.lookahead_results[scenario.name].battery_end_kwh]
-                bounds[scenario.name] = [(max(0., energy / capacity - stage.band_percent / 100), min(1., energy / capacity + stage.band_percent / 100)) for energy in energies]
-        stage_at = perf_counter()
-        try:
-            refined = solve_pass(device_info, device_state, scenarios, config, projection_starts_at, grid_step_percent=stage.grid_step_percent, power_divisions=stage.power_divisions, battery_bounds=bounds)
-        except ValueError as error:
-            if result is None or str(error) != "unable to find a feasible energy plan on the dynamic-programming grid":
-                raise
-            refined = None
-        score = -math.inf if refined is None else result_score(refined, scenarios)
-        accepted = score > best_score
-        if accepted:
-            result, best_score = refined, score
-        LOGGER.info("dp_refinement stage=%d accepted=%s elapsed_seconds=%.6f retained_score=%.9f", index, accepted, perf_counter() - stage_at, best_score)
-    LOGGER.info("dp_model end: status=success elapsed_seconds=%.6f score=%.9f", perf_counter() - began_at, best_score)
-    return result
+    except Exception:
+        LOGGER.exception("DP Project failed - elapsed_seconds=%.6f", perf_counter() - began_at)
+        raise
 
 
 def solve_pass(device_info: DeviceInfo, device_state: DeviceState, scenarios: list[ScenarioData], config: Config, projection_starts_at: datetime, *, grid_step_percent: float = 2., power_divisions: int = 5, battery_bounds: list[tuple[float, float]] | dict[str, list[tuple[float, float]]] | None = None) -> SimulationResult:

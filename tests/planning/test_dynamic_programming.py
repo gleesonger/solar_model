@@ -145,11 +145,13 @@ def test_default_refinement_retains_better_paths_and_centres_next_bounds_on_them
 
     monkeypatch.setattr(dp, "solve_pass", fake_pass)
     assert dp.simulate_energy_plan(*inputs) is improved
-    summaries = [record for record in caplog.records if record.getMessage().startswith("dp_")]
-    assert len(summaries) == 5
+    summaries = [record for record in caplog.records if record.getMessage().startswith("DP ") and record.levelname == "INFO"]
+    assert len(summaries) == 6
     assert all(record.levelname == "INFO" for record in summaries)
-    assert "dp_refinement stage=3 accepted=False" in caplog.text
-    completed = [record for record in summaries if record.getMessage().startswith("dp_model end:")]
+    assert "DP Model Start - num_projection_hours=25 num_time_steps=10 refinement_stages=4 use_numba=True" in caplog.text
+    assert "DP Refinement Stage #4 infeasible - retaining previous result" in caplog.text
+    assert "accepted=False" in summaries[-2].getMessage()
+    completed = [record for record in summaries if record.getMessage().startswith("DP Project end")]
     assert len(completed) == 1 and completed[0] is summaries[-1]
     assert "elapsed_seconds=" in completed[0].getMessage()
     stages = inputs[3].energy_plan.optimiser_specific.dynamic_programing.refinement_stages
@@ -157,6 +159,52 @@ def test_default_refinement_retains_better_paths_and_centres_next_bounds_on_them
     for call, centre, width in zip(calls[1:], [.5, .6, .6], [.05, .03, .01]):
         for pair in call["battery_bounds"]["base"]:
             assert pair == pytest.approx((centre - width, centre + width))
+
+
+def test_stage_logging_separates_nested_compilation_from_projection(inputs, monkeypatch, caplog):
+    from numba.core import event
+
+    caplog.set_level("INFO", logger=dp.LOGGER.name)
+    clock = [0.]
+    monkeypatch.setattr(dp, "perf_counter", lambda: clock[0])
+    monkeypatch.setattr(event, "timer", lambda: clock[0])
+    action = dp.NextAction(OperatingMode.SELF_CONSUMPTION, 0., 0., 100., 0.)
+    result = SimulationResult(action, {"base": pd.DataFrame({"total_score": [2.]})}, {"base": pd.DataFrame({"total_score": [1.]})})
+
+    def fake_pass(*args, **kwargs):
+        clock[0] += 1.
+        with event.trigger_event("numba:compile"):
+            clock[0] += 2.
+            with event.trigger_event("numba:compile"):
+                clock[0] += 3.
+        clock[0] += 1.
+        return result
+
+    monkeypatch.setattr(dp, "solve_pass", fake_pass)
+    assert dp.simulate_energy_plan(*inputs, grid_step_percent=2.) is result
+    stage = next(record for record in caplog.records if record.getMessage().startswith("DP Refinement Stage"))
+    assert stage.args == (1, 5., 2., 3., True)
+    final = caplog.records[-1]
+    assert final.args == (7., 5., 2., 3.)
+    assert "refinement_stages=1" in caplog.text
+
+    caplog.clear()
+    monkeypatch.setattr(dp, "solve_pass", lambda *args, **kwargs: result)
+    dp.simulate_energy_plan(*inputs, grid_step_percent=2.)
+    assert "compilation_seconds=0.000000" in caplog.text
+
+
+def test_failed_project_logs_failure_without_success(inputs, monkeypatch, caplog):
+    caplog.set_level("INFO", logger=dp.LOGGER.name)
+
+    def fail(*args, **kwargs):
+        raise RuntimeError("unexpected failure")
+
+    monkeypatch.setattr(dp, "solve_pass", fail)
+    with pytest.raises(RuntimeError, match="unexpected failure"):
+        dp.simulate_energy_plan(*inputs)
+    assert "DP Project failed - elapsed_seconds=" in caplog.text
+    assert "DP Project end" not in caplog.text
 
 
 def test_default_dp_grid_is_quarter_hour_in_utc_through_dst(inputs):
@@ -416,7 +464,7 @@ def test_forced_first_command_is_shared_and_selected_using_all_nine_scenarios(in
 
     monkeypatch.setattr(dp, "forward_projection", record_forward_projection)
     result = dp.solve_pass(device, state, scenarios, config, start)
-    assert not any(record.getMessage().startswith("dp_model end:") for record in caplog.records)
+    assert not any(record.getMessage().startswith("DP Project end") for record in caplog.records)
     timings = [record for record in caplog.records if record.getMessage().startswith("dp_model timings:")]
     assert len(timings) == 1 and timings[0].levelname == "DEBUG"
     assert "backward_seconds=" in timings[0].getMessage()

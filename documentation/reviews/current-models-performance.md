@@ -1,5 +1,7 @@
 # Current-config MILP and DP comparison
 
+This measurement predates DP lookup caching and command pruning. See the [post-pruning comparison](post-pruning-models-performance.md) for the subsequent production-code benchmark.
+
 Measured 2026-10-31 on the local Windows 11 laptop using Python 3.12.10. This is a synthetic baseline comparison using the current configuration, not measured installation savings. No optimiser code or configuration was changed for the experiment.
 
 ## Inputs and procedure

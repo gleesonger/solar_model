@@ -62,7 +62,9 @@ Keep concise explanations in `overview/`, detailed code/data contracts in `imple
 | [Verification scope](reviews/verification.md) | Regression coverage and remaining integration/verification limits |
 | [Performance conclusions](reviews/performance.md) | Key download, summary, forecasting and planning measurements |
 | [Current-config MILP versus DP](reviews/current-models-performance.md) | Repeated configured solves, first-call exclusion, result comparison and DP phase/stage timings |
+| [MILP versus DP after pruning](reviews/post-pruning-models-performance.md) | Current production DP compared with MILP after lookup caching and command pruning, including repeated timings and economics |
 | [DP LLVM inspection](reviews/dp-numba-llvm-review.md) | Generated native-code review: helper inlining, typed-list bookkeeping, repeated row access and an isolated compilation experiment |
+| [DP loop optimisation experiment](reviews/dp-loop-optimisation-experiment.md) | Paired Python-source experiments: repeated lookup caching, reversed loops and command pruning |
 | [DP v1 verification](reviews/dp-v1-recheck.md) | Restored nine-scenario planner: shared first-command audit, fresh configured-grid MILP comparisons and performance; links to the earlier experiment |
 | [DP Numba performance](reviews/dp-numba-performance.md) | Shared Python/Numba numerical core: equivalent configured outcomes and repeated runtime comparison excluding initialisation/compilation |
 | [Sigenergy register review](reviews/sigenergy-home-assistant-register-review.md) | Load boundaries, electrical residuals and diagnostic priorities |

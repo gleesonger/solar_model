@@ -55,7 +55,7 @@ expected = dp.forward_projection(device, 10., periods, grids, values, choices, 5
 assert expected is not None
 assert "numba" not in sys.modules
 builtins.__import__ = original_import
-backward, forward = dp.compiled_functions()
+backward, forward = dp.get_numba_functions()
 assert not backward.signatures
 assert not forward.signatures
 from numba.typed import List
@@ -67,7 +67,7 @@ assert actual_values == values
 actual_values = List([List(row) for row in actual_values])
 actual = forward(device, 10., periods, grids, actual_values, choices, 5., choices[0])
 assert actual == expected
-assert dp.compiled_functions() == (backward, forward)
+assert dp.get_numba_functions() == (backward, forward)
 """
     result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=30)
     assert result.returncode == 0, result.stderr
@@ -144,7 +144,8 @@ def test_default_refinement_retains_better_paths_and_centres_next_bounds_on_them
 
     monkeypatch.setattr(dp, "solve_pass", fake_pass)
     assert dp.simulate_energy_plan(*inputs) is improved
-    assert [(call["grid_step_percent"], call["power_divisions"]) for call in calls] == [(2., 5), (1., 10), (1., 20), (1., 40)]
+    stages = inputs[3].energy_plan.optimiser_specific.dynamic_programing.refinement_stages
+    assert [(call["grid_step_percent"], call["power_divisions"]) for call in calls] == [(stage.grid_step_percent, stage.power_divisions) for stage in stages]
     for call, centre, width in zip(calls[1:], [.5, .6, .6], [.05, .03, .01]):
         for pair in call["battery_bounds"]["base"]:
             assert pair == pytest.approx((centre - width, centre + width))
@@ -296,6 +297,55 @@ def test_period_bounds_restrict_paths_without_changing_soc_stops(inputs):
     outside = dp.Action(OperatingMode.CHARGE_PV_FIRST, 4.)
     assert dp.simulate_system_single_time_period(inputs[0], 10., p, 2., outside).battery_end == pytest.approx(4.)
     assert dp.forward_projection(inputs[0], 10., [p], grids, values, choices, 2., outside) is None
+
+
+@pytest.mark.parametrize("bounded", [False, True])
+@pytest.mark.parametrize("reordered", [False, True])
+@pytest.mark.parametrize("changes", [{}, {"minimum": 4., "maximum": 6.}, {"solar": 2., "load": .3, "export_limit": 0.}])
+def test_pruning_preserves_exhaustive_values_and_paths_and_skips_simulations(bounded, reordered, changes, monkeypatch):
+    device = dp.DeviceParameters(.95, .9, 2., 2., 2., 2.)
+    periods = [period(**{"load": 0., **changes})] * 2
+    nodes = [float(i) for i in range(11)]
+    grids = [nodes, [4., 5., 6.], [4., 5., 6.]] if bounded else [nodes] * 3
+    first = dp.Action(OperatingMode.SELF_CONSUMPTION, 0.)
+    choices = [first] + [dp.Action(mode, float(rate)) for mode in (OperatingMode.CHARGE_PV_FIRST, OperatingMode.DISCHARGE_PV_FIRST) for rate in range(1, 11)]
+    if reordered:
+        choices = choices[::2] + choices[1::2][::-1]
+    simulate_period = dp.simulate_system_single_time_period
+
+    # Exhaustive reference: evaluate every command, including capped and out-of-corridor ones.
+    expected = [[.2 * battery for battery in grids[-1]]]
+    for t in (1, 0):
+        row = []
+        for battery in grids[t]:
+            steps = [simulate_period(device, 10., periods[t], battery, action) for action in choices]
+            row.append(max((step.score + dp.interpolate(grids[t + 1], expected[0], step.battery_end) for step in steps if step is not None), default=-float("inf")))
+        expected.insert(0, row)
+    expected_path = []
+    battery = 5.
+    for t, p in enumerate(periods):
+        candidates = [simulate_period(device, 10., p, battery, action) for action in ([first] if t == 0 else choices)]
+        feasible = [(step.score + dp.interpolate(grids[t + 1], expected[t + 1], step.battery_end), step) for step in candidates if step is not None]
+        best_score, best_step = max(feasible, key=lambda candidate: candidate[0], default=(-float("inf"), None))
+        if best_score == -float("inf"):
+            expected_path = None
+            break
+        expected_path.append(best_step)
+        battery = best_step.battery_end
+
+    calls = []
+
+    def counted_simulation(*args):
+        calls.append(args[-1])
+        return simulate_period(*args)
+
+    monkeypatch.setattr(dp, "simulate_system_single_time_period", counted_simulation)
+    values = dp.backward_values(device, 10., periods, grids, choices, .2)
+    assert values == expected
+    assert len(calls) < sum(len(grid) for grid in grids[:-1]) * len(choices)
+    calls.clear()
+    assert dp.forward_projection(device, 10., periods, grids, values, choices, 5., first) == expected_path
+    assert len(calls) < 1 + len(choices)
 
 
 @pytest.mark.parametrize("bounds", [[(-.1, 1.)], [(.8, .2)], [(0., float("nan"))], [(0., 1.1)]])

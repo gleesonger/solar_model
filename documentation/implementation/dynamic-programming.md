@@ -14,6 +14,14 @@ Build the tables once, then repeat stages 2 and 3 for each shared first command.
 
 This describes the current [implementation](../../solar_model/planning/plan_optimisation_dynamic_programming.py), whose default run starts at a two-percentage-point grid and then refines within scenario-specific corridors. It is an approximate planner, not a guarantee of the globally optimal path. The application still uses MILP by default; see the [plan-model reference](../overview/plan-model.md#25-experimental-dynamic-programming).
 
+## Avoiding repeated work
+
+Both backward valuation and forward projection fetch the next grid and value row once per period. Interpolation also keeps its neighbouring coordinates and scores in local variables.
+
+Both passes skip higher rates of the same operating mode once a feasible command has reached a physical cap: those rates cannot improve the capped flow. They also skip higher charge rates after ending above the next search grid, and higher discharge rates after ending below it, because those rates move farther outside the corridor. The threshold command is still scored normally. Separate charge/discharge thresholds reset for every starting battery level; lower rates remain eligible regardless of command order. Infeasible commands do not set a threshold. Candidate order, tie handling, scoring and the shared first command are preserved in Python and Numba.
+
+See the [paired experiment](../reviews/dp-loop-optimisation-experiment.md) for the measured benefit and verification limits.
+
 ## Default DP configuration
 
 `energy_plan.optimiser_specific.dynamic_programing` configures the default sequence:

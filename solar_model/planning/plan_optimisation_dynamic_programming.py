@@ -351,13 +351,23 @@ def backward_values(device: DeviceInfo, capacity: float, periods: list[Period], 
     values = [[terminal_rate * battery for battery in grids[-1]]]
     for t in range(len(periods) - 1, -1, -1):
         period = periods[t]
+        next_grid, next_values = grids[t + 1], values[-1]
         current = []
         for battery in grids[t]:
             best = -math.inf
+            charge_skip_from = discharge_skip_from = math.inf
             for action in choices:
+                mode, rate_kw = action
+                if (mode == OperatingMode.CHARGE_PV_FIRST and rate_kw >= charge_skip_from) or (mode == OperatingMode.DISCHARGE_PV_FIRST and rate_kw >= discharge_skip_from):
+                    continue
                 step = simulate_system_single_time_period(device, capacity, period, battery, action)
                 if step is not None:
-                    best = max(best, (-step.net_cost + step.protection_score) + interpolate(grids[t + 1], values[-1], step.battery_end))
+                    # Higher rates cannot improve a capped flow or return to the search corridor.
+                    if mode == OperatingMode.CHARGE_PV_FIRST and (step.charge < rate_kw * period.hours or step.battery_end > next_grid[-1] + 1e-9):
+                        charge_skip_from = min(charge_skip_from, rate_kw)
+                    elif mode == OperatingMode.DISCHARGE_PV_FIRST and (step.discharge < rate_kw * period.hours or step.battery_end < next_grid[0] - 1e-9):
+                        discharge_skip_from = min(discharge_skip_from, rate_kw)
+                    best = max(best, (-step.net_cost + step.protection_score) + interpolate(next_grid, next_values, step.battery_end))
             current.append(best)
         values.append(current)
     return values[::-1]
@@ -368,12 +378,22 @@ def forward_projection(device: DeviceInfo, capacity: float, periods: list[Period
     battery = initial
     path = []
     for t, period in enumerate(periods):
+        next_grid, next_values = grids[t + 1], values[t + 1]
         best_value, best_step = -math.inf, None
+        charge_skip_from = discharge_skip_from = math.inf
         for i in range(1 if t == 0 else len(choices)):
             action = first_action if t == 0 else choices[i]
+            mode, rate_kw = action
+            if (mode == OperatingMode.CHARGE_PV_FIRST and rate_kw >= charge_skip_from) or (mode == OperatingMode.DISCHARGE_PV_FIRST and rate_kw >= discharge_skip_from):
+                continue
             step = simulate_system_single_time_period(device, capacity, period, battery, action)
             if step is not None:
-                value = (-step.net_cost + step.protection_score) + interpolate(grids[t + 1], values[t + 1], step.battery_end)
+                # Keep the same pruning rule as the backward pass, at the actual battery level.
+                if mode == OperatingMode.CHARGE_PV_FIRST and (step.charge < rate_kw * period.hours or step.battery_end > next_grid[-1] + 1e-9):
+                    charge_skip_from = min(charge_skip_from, rate_kw)
+                elif mode == OperatingMode.DISCHARGE_PV_FIRST and (step.discharge < rate_kw * period.hours or step.battery_end < next_grid[0] - 1e-9):
+                    discharge_skip_from = min(discharge_skip_from, rate_kw)
+                value = (-step.net_cost + step.protection_score) + interpolate(next_grid, next_values, step.battery_end)
                 if value > best_value:
                     best_value, best_step = value, step
         if best_step is None:
@@ -485,12 +505,20 @@ def interpolate(x_values: list[float], y_values: list[float], x: float) -> float
     right = left
     if right == len(x_values):
         return y_values[-1] if x <= x_values[-1] + 1e-9 else -math.inf
-    if abs(x_values[right] - x) < 1e-9:
+    right_x = x_values[right]
+    if abs(right_x - x) < 1e-9:
         return y_values[right]
-    if right == 0 or not math.isfinite(y_values[right - 1]) or not math.isfinite(y_values[right]):
+    if right == 0:
         return -math.inf
-    fraction = (x - x_values[right - 1]) / (x_values[right] - x_values[right - 1])
-    return y_values[right - 1] * (1 - fraction) + y_values[right] * fraction
+    left_y = y_values[right - 1]
+    if not math.isfinite(left_y):
+        return -math.inf
+    right_y = y_values[right]
+    if not math.isfinite(right_y):
+        return -math.inf
+    left_x = x_values[right - 1]
+    fraction = (x - left_x) / (right_x - left_x)
+    return left_y * (1 - fraction) + right_y * fraction
 
 
 def battery_protection_score(energy: float, reserve: float) -> float:

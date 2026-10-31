@@ -28,7 +28,7 @@ def test_in_memory_plan_preserves_scenario_energy_and_cost(resolution, expected_
     tariffs = TariffsConfig((TariffPeriod("2000-01-01",
         (replace(minimum, rate=.4, name="flat"),), (replace(minimum, rate=.1),)),))
     config = replace(config, tariffs=tariffs, energy_plan=replace(
-        config.energy_plan, num_projection_hours=2, optimiser_specific=replace(config.energy_plan.optimiser_specific, mix_integer_linear_prog=replace(config.energy_plan.optimiser_specific.mix_integer_linear_prog, projection_resolution_mins=(resolution,) * (120 // resolution))),
+        config.energy_plan, num_projection_hours=26, num_visible_projection_hours=2, optimiser_specific=replace(config.energy_plan.optimiser_specific, mix_integer_linear_prog=replace(config.energy_plan.optimiser_specific.mix_integer_linear_prog, projection_resolution_mins=((resolution,) * (120 // resolution)) + (240,) * 6)),
         minimum_battery_kwh=(minimum,), maximum_battery_kwh=(maximum,),
         protection_preference=0.,
     ))
@@ -110,7 +110,7 @@ def test_hidden_four_hour_slots_preserve_energy_for_future_demand(monkeypatch, h
     config = load_config()
     rule = TariffRule(("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"), "00:00", "24:00", .4, "flat")
     config = replace(config, tariffs=TariffsConfig((TariffPeriod("2000-01-01", (rule,), (replace(rule, rate=.1),)),)),
-        energy_plan=replace(config.energy_plan, num_projection_hours=1, optimiser_specific=replace(config.energy_plan.optimiser_specific, mix_integer_linear_prog=replace(config.energy_plan.optimiser_specific.mix_integer_linear_prog, projection_resolution_mins=(60,))),
+        energy_plan=replace(config.energy_plan, num_projection_hours=25, num_visible_projection_hours=1, optimiser_specific=replace(config.energy_plan.optimiser_specific, mix_integer_linear_prog=replace(config.energy_plan.optimiser_specific.mix_integer_linear_prog, projection_resolution_mins=((60,)) + (240,) * 6)),
             protection_preference=0., minimum_battery_kwh=(replace(rule, rate=0.),),
             maximum_battery_kwh=(replace(rule, rate=10.),)))
     problems = []
@@ -148,9 +148,11 @@ def test_each_call_builds_a_fresh_model_with_current_inputs(monkeypatch, caplog,
     weekday_rule = replace(rule, days=("Tue",))
     other_days = replace(rule, days=("Mon", "Wed", "Thu", "Fri", "Sat", "Sun"), rate=.6)
     config = replace(config, tariffs=TariffsConfig((TariffPeriod("2000-01-01", (weekday_rule, other_days), (replace(rule, rate=0.),)),)),
-                     energy_plan=replace(config.energy_plan, num_projection_hours=1, protection_preference=0.,
+                     energy_plan=replace(config.energy_plan, num_projection_hours=25, num_visible_projection_hours=1, protection_preference=0.,
                                          minimum_battery_kwh=(replace(rule, rate=0.),),
                                          maximum_battery_kwh=(replace(rule, rate=10.),)))
+    settings = replace(config.energy_plan.optimiser_specific.mix_integer_linear_prog, projection_resolution_mins=(15,) * 4 + (240,) * 6)
+    config = replace(config, energy_plan=replace(config.energy_plan, optimiser_specific=replace(config.energy_plan.optimiser_specific, mix_integer_linear_prog=settings)))
     device = DeviceInfo(**{field.name: 1. for field in fields(DeviceInfo)})
     device = replace(device, system_battery_capacity_kwh=10., battery_state_of_health_percent=100.,
                      inverter_max_active_power_kw=5., inverter_max_absorption_power_kw=5.,
@@ -206,7 +208,7 @@ def test_discharge_power_limit_scales_with_each_mixed_interval():
     config = load_config()
     flat = TariffRule(("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"), "00:00", "24:00", .4, "flat")
     config = replace(config, tariffs=TariffsConfig((TariffPeriod("2000-01-01", (flat,), (replace(flat, rate=0.),)),)),
-        energy_plan=replace(config.energy_plan, num_projection_hours=2, optimiser_specific=replace(config.energy_plan.optimiser_specific, mix_integer_linear_prog=replace(config.energy_plan.optimiser_specific.mix_integer_linear_prog, projection_resolution_mins=(15,) * 24 + (60,) * 18)),
+        energy_plan=replace(config.energy_plan, num_projection_hours=26, num_visible_projection_hours=2, optimiser_specific=replace(config.energy_plan.optimiser_specific, mix_integer_linear_prog=replace(config.energy_plan.optimiser_specific.mix_integer_linear_prog, projection_resolution_mins=((15,) * 24 + (60,) * 18) + (240,) * 6)),
                             minimum_battery_kwh=(replace(flat, rate=0.),), maximum_battery_kwh=(replace(flat, rate=10.),),
                             limit_battery_export_rate_to_grid_kw=(replace(flat, rate=0.),), protection_preference=0.))
     frame = simulate_energy_plan(device, DeviceState(10.), [ScenarioData("base", forecast, 1.)], config, start).results["base"]
@@ -278,9 +280,9 @@ def test_clock_aligned_projection_preserves_elapsed_time_across_timezones(zone, 
     periods = _projection_intervals(config, start)
     utc_periods = [(a.astimezone(timezone.utc), b.astimezone(timezone.utc)) for a, b in periods]
     assert utc_periods[0] == (start, start + timedelta(minutes=15))
-    projection_end = start + timedelta(hours=24)
+    projection_end = start + timedelta(hours=config.energy_plan.num_projection_hours)
     assert utc_periods[-1][1] == projection_end
     assert sum((b - a).total_seconds() for a, b in utc_periods) == (projection_end - start).total_seconds()
     assert all(a < b for a, b in utc_periods)
     assert all(left[1] == right[0] for left, right in zip(utc_periods, utc_periods[1:]))
-    assert all(b.minute % 15 == b.second == b.microsecond == 0 for _, b in periods[1:-1])
+    assert all(b.minute % 15 == b.second == b.microsecond == 0 for _, b in periods[1:-1] if b < start + timedelta(hours=config.energy_plan.num_visible_projection_hours))

@@ -175,8 +175,8 @@ def detail_frame(frame: pd.DataFrame, capacity: float | None) -> pd.DataFrame:
     return frame
 
 
-def detail_rows(frame: pd.DataFrame, timezone_name: str, first_mode: OperatingMode | None = None) -> list[dict]:
-    """Keep numeric cells sortable and display local interval times as HH:MM."""
+def detail_rows(frame: pd.DataFrame, timezone_name: str, first_mode: OperatingMode | None = None, *, time_format: str = "%H:%M") -> list[dict]:
+    """Keep numeric cells and format local times for the table or Excel export."""
     display = frame.copy()
     if "plan_action" not in display:
         display["plan_action"] = [
@@ -194,7 +194,7 @@ def detail_rows(frame: pd.DataFrame, timezone_name: str, first_mode: OperatingMo
         definition = detail_column(column)
         if definition.format == "time":
             timestamps = pd.to_datetime(display[column], utc=True)
-            display[column] = timestamps.dt.tz_convert(timezone_name).dt.strftime("%H:%M")
+            display[column] = timestamps.dt.tz_convert(timezone_name).dt.strftime(time_format)
         elif definition.format == "number":
             display[column] = pd.to_numeric(display[column]).round(4)
     display = display.astype(object).where(pd.notna(display), None)
@@ -318,16 +318,19 @@ class PlanTab:
         self.timezone = ZoneInfo(config.timezone)
         self.result: SimulationResult | None = None
         self.actuals = pd.DataFrame()
+        self.chart = None
         self.running = False
         self.battery_capacity_kwh: float | None = None
         self.detail_view = "Compact"
         self.applied_adjustment: float | None = None
+        self.applied_model: str | None = None
 
     def render_plan_tab(self) -> None:
         with ui.row().classes("w-full items-end gap-4 flex-wrap"):
+            self.model = ui.select(["MILP", "DP"], label="Model", value="MILP", on_change=self._settings_changed).props("outlined dense").classes("w-32 max-w-full")
             self.adjustment = ui.number(
                 "Protection adjustment", value=self.config.energy_plan.protection_preference,
-                min=0, step=1, on_change=self._adjustment_changed,
+                min=0, step=1, on_change=self._settings_changed,
             ).props("outlined dense").classes("w-64 max-w-full")
             self.adjustment.tooltip(f"Higher values give battery protection more value relative to net cost. 0 considers cost only. Target reserve: {self.config.energy_plan.preferred_reserve_kwh:g} kWh.")
             self.refresh_button = ui.button("Refresh plan", icon="refresh", on_click=self.refresh)
@@ -338,9 +341,9 @@ class PlanTab:
         self.status = ui.label("Refresh to calculate a plan from the latest available data.").classes("text-sm text-gray-600")
         self.output = ui.column().classes("w-full min-w-0 gap-4")
 
-    def _adjustment_changed(self) -> None:
+    def _settings_changed(self) -> None:
         if not self.running:
-            self.refresh_button.set_enabled(self.applied_adjustment is None or self.adjustment.value != self.applied_adjustment)
+            self.refresh_button.set_enabled(self.applied_adjustment is None or self.adjustment.value != self.applied_adjustment or self.model.value != self.applied_model)
 
     async def refresh(self) -> None:
         if self.running:
@@ -350,6 +353,7 @@ class PlanTab:
             if value is None or not math.isfinite(float(value)) or float(value) < 0:
                 raise ValueError("Protection adjustment must be finite and non-negative")
             preference = float(value)
+            model = self.model.value
         except (ValueError, TypeError) as error:
             notify_error(str(error))
             return
@@ -357,17 +361,18 @@ class PlanTab:
         self.refresh_button.set_visibility(False)
         self.loading.set_visibility(True)
         self.adjustment.disable()
+        self.model.disable()
         self.status.set_visibility(False)
         as_of = datetime.now(timezone.utc).replace(microsecond=0)
         succeeded = False
         try:
             await ensure_planning_worker()
-            report = await run.cpu_bound(plan_with_preference, self.config, as_of, preference)
+            report = await run.cpu_bound(plan_with_preference, self.config, as_of, preference, model)
             if report is None:
                 raise RuntimeError("The plan calculation did not return a result")
             self.result, self.actuals = report.simulation, report.actuals
             self.battery_capacity_kwh = report.battery_capacity_kwh
-            self.output.clear()
+            self.applied_model = model
             with self.output:
                 self._render_result()
             self.applied_adjustment = preference
@@ -384,6 +389,7 @@ class PlanTab:
             self.refresh_button.set_visibility(True)
             self.refresh_button.set_enabled(not succeeded)
             self.adjustment.enable()
+            self.model.enable()
 
     def _render_result(self) -> None:
         result = self.result
@@ -396,11 +402,21 @@ class PlanTab:
             description = f"Force discharge up to {action.force_battery_discharge_rate:.2f} kW until {action.discharge_cut_off_soc_percent:.1f}% SOC"
         else:
             description = "Self-consumption"
-        ui.label(f"Action for next {minutes:g} mins - {description}").classes("text-base font-semibold")
+        action_text = f"Action for next {minutes:g} mins - {description}"
         costs = [float(frame.net_cost.sum()) for frame in result.results.values()]
+        average_cost = scenario_average_cost(result.results, self.config.scenarios)
+        cost_text = f"Scenario-average net cost: €{average_cost:.2f} · Range €{min(costs):.2f} to €{max(costs):.2f}"
+        if self.chart is not None:
+            self.model_label.set_text(f"Model: {self.applied_model}")
+            self.action_label.set_text(action_text)
+            self.cost_label.set_text(cost_text)
+            self.actuals_hint.set_visibility(self.actuals.empty)
+            self._render_scenario()
+            return
+        self.model_label = ui.label(f"Model: {self.applied_model}").classes("text-sm text-gray-600")
+        self.action_label = ui.label(action_text).classes("text-base font-semibold")
         with ui.row().classes("w-full items-center justify-between flex-wrap gap-2"):
-            average_cost = scenario_average_cost(result.results, self.config.scenarios)
-            ui.label(f"Scenario-average net cost: €{average_cost:.2f} · Range €{min(costs):.2f} to €{max(costs):.2f}").classes("text-base font-semibold")
+            self.cost_label = ui.label(cost_text).classes("text-base font-semibold")
             with ui.row().classes("items-center flex-wrap gap-6"):
                 for label, dimension in (("Solar", self.config.scenarios.solar), ("Load", self.config.scenarios.house_load)):
                     with ui.element("fieldset").classes("plan-scenario-group").props(f"data-testid=plan-{label.lower()}-scenario"):
@@ -415,8 +431,8 @@ class PlanTab:
                     else:
                         self.load_scenario = control
         self.summary_output = ui.column().classes("w-full min-w-0 gap-3")
-        if self.actuals.empty:
-            ui.label("No actual measurements available for today.").classes("text-sm text-gray-600")
+        self.actuals_hint = ui.label("No actual measurements available for today.").classes("text-sm text-gray-600")
+        self.actuals_hint.set_visibility(self.actuals.empty)
         self.chart = ui.echart(plan_chart_options(self._scenario_frame(), self.actuals, self.config.timezone)).classes("w-full h-96").props("data-testid=plan-chart")
         self.scenario_output = ui.column().classes("w-full min-w-0 gap-3")
         self._render_scenario()
@@ -490,13 +506,13 @@ class PlanTab:
     def _download_detail(self, frame: pd.DataFrame, columns: list[dict]) -> None:
         try:
             columns = [column for column in columns if detail_column(column["name"]).export]
-            rows = detail_rows(frame, self.config.timezone, self.result.next_action.mode)
+            rows = detail_rows(frame, self.config.timezone, self.result.next_action.mode, time_format="%Y-%m-%d %H:%M:%S")
             exported = pd.DataFrame([*rows, detail_totals(frame)])
             exported = exported.reindex(columns=[column["name"] for column in columns])
             exported = exported.rename(columns={column["name"]: column["label"] for column in columns})
             content = excel_bytes(exported, sheet_name="Plan detail")
             start = pd.Timestamp(frame.starts_at.iloc[0]).tz_convert(self.timezone)
-            ui.download(content, filename=f"plan-{self.scenario_name}-{start:%Y%m%d-%H%M}.xlsx",
+            ui.download(content, filename=f"plan-{self.applied_model}-protection-{self.applied_adjustment:g}-solar-{self.solar_scenario.value}-load-{self.load_scenario.value}-{start:%Y%m%d-%H%M}.xlsx",
                         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
         except Exception as error:
             LOGGER.exception("Plan detail download failed")

@@ -159,7 +159,7 @@ class DPRefinementConfig:
 @dataclass(frozen=True)
 class DynamicProgrammingConfig:
     use_numba: bool = True
-    projection_resolution_mins: int = 15
+    projection_resolution_mins: tuple[int, ...] = (15,) * 96 + (60,) * 24
     refinement_stages: tuple[DPRefinementConfig, ...] = (
         DPRefinementConfig(2., 5, None),
         DPRefinementConfig(1., 10, 5.),
@@ -170,7 +170,7 @@ class DynamicProgrammingConfig:
 
 @dataclass(frozen=True)
 class MixedIntegerLinearProgrammingConfig:
-    projection_resolution_mins: tuple[int, ...] = (15,) * 4 + (60,) * 23
+    projection_resolution_mins: tuple[int, ...] = (15,) * 4 + (60,) * 23 + (240,) * 6
 
 
 @dataclass(frozen=True)
@@ -182,6 +182,7 @@ class OptimiserSpecificConfig:
 @dataclass(frozen=True)
 class EnergyPlanConfig:
     num_projection_hours: int
+    num_visible_projection_hours: int = 24
     protection_preference: float = 50.
     minimum_battery_kwh: tuple[TariffRule, ...] = ()
     maximum_battery_kwh: tuple[TariffRule, ...] = ()
@@ -295,20 +296,25 @@ def load_config(path: str | Path = "config.yaml") -> Config:
             if isinstance(dp_data, dict) and ("coarse_grid_step_percent" in dp_data or "coarse_power_divisions" in dp_data):
                 raise ValueError("dynamic_programing: move coarse settings into the first refinement_stages entry with band_percent: null")
             milp_data = optimiser_data.get("mix_integer_linear_prog", {}) if isinstance(optimiser_data, dict) else {}
-            resolutions = milp_data.get("projection_resolution_mins") if isinstance(milp_data, dict) else None
-            if isinstance(resolutions, list):
-                expanded = []
-                for entry in resolutions:
-                    if isinstance(entry, str):
-                        minutes_text, separator, count_text = entry.partition("*")
-                        minutes = int(minutes_text)
-                        count = int(count_text) if separator else 1
-                        if minutes <= 0 or count <= 0:
-                            raise ValueError("projection_resolution_mins repetitions must be positive")
-                        expanded.extend([minutes] * count)
-                    else:
-                        expanded.append(entry)
-                milp_data["projection_resolution_mins"] = expanded
+            for name, settings in (("mix_integer_linear_prog", milp_data), ("dynamic_programing", dp_data)):
+                if not isinstance(settings, dict):
+                    continue
+                resolutions = settings.get("projection_resolution_mins")
+                if resolutions is not None and not isinstance(resolutions, list):
+                    raise ValueError(f"{name}.projection_resolution_mins must be an array")
+                if isinstance(resolutions, list):
+                    expanded = []
+                    for entry in resolutions:
+                        if isinstance(entry, str):
+                            minutes_text, separator, count_text = entry.partition("*")
+                            minutes = int(minutes_text)
+                            count = int(count_text) if separator else 1
+                            if minutes <= 0 or count <= 0:
+                                raise ValueError("projection_resolution_mins repetitions must be positive")
+                            expanded.extend([minutes] * count)
+                        else:
+                            expanded.append(entry)
+                    settings["projection_resolution_mins"] = expanded
             backup_data = energy_plan_data.get("minimum_battery_kwh")
             if isinstance(backup_data, dict):
                 # This is documentation for people editing config.yaml, not configuration.
@@ -352,8 +358,6 @@ def validate_config(config: Config) -> None:
     if type(dp.use_numba) is not bool:
         raise ValueError("dynamic_programing.use_numba must be a boolean")
     milp = energy_plan.optimiser_specific.mix_integer_linear_prog
-    if type(dp.projection_resolution_mins) is not int or dp.projection_resolution_mins <= 0:
-        raise ValueError("dynamic_programing.projection_resolution_mins must be a positive integer")
     if not dp.refinement_stages or dp.refinement_stages[0].band_percent is not None:
         raise ValueError("dynamic_programing.refinement_stages must start with a full-range stage using band_percent: null")
     for index, stage in enumerate(dp.refinement_stages):
@@ -371,11 +375,16 @@ def validate_config(config: Config) -> None:
             raise ValueError(f"energy_plan.{name} must be finite and greater than zero")
     if not math.isfinite(energy_plan.preferred_reserve_kwh) or energy_plan.preferred_reserve_kwh <= 0:
         raise ValueError("preferred_reserve_kwh must be finite and greater than zero")
-    if (energy_plan.num_projection_hours <= 0 or not milp.projection_resolution_mins
-            or any(minutes <= 0 for minutes in milp.projection_resolution_mins)):
-        raise ValueError("energy_plan projection duration and resolution entries must be greater than zero")
-    if sum(milp.projection_resolution_mins) < energy_plan.num_projection_hours * 60:
-        raise ValueError("projection_resolution_mins must cover num_projection_hours")
+    if type(energy_plan.num_projection_hours) is not int or energy_plan.num_projection_hours <= 0:
+        raise ValueError("num_projection_hours must be a positive integer")
+    if type(energy_plan.num_visible_projection_hours) is not int or not 0 < energy_plan.num_visible_projection_hours <= energy_plan.num_projection_hours:
+        raise ValueError("num_visible_projection_hours must be positive and no greater than num_projection_hours")
+    for name, settings in (("mix_integer_linear_prog", milp), ("dynamic_programing", dp)):
+        resolutions = settings.projection_resolution_mins
+        if not resolutions or any(type(minutes) is not int or minutes <= 0 for minutes in resolutions):
+            raise ValueError(f"{name}.projection_resolution_mins must contain positive integer minutes")
+        if sum(resolutions) < energy_plan.num_projection_hours * 60:
+            raise ValueError(f"{name}.projection_resolution_mins must cover num_projection_hours")
     if not math.isfinite(energy_plan.protection_preference) or energy_plan.protection_preference < 0:
         raise ValueError("energy_plan.protection_preference must be finite and non-negative")
     additional_device_info = config.additional_device_info

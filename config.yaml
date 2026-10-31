@@ -132,7 +132,8 @@ scenarios:
     high: {multiplier: 1.5, probability: 0.2}
 
 energy_plan:
-  num_projection_hours: 24
+  num_projection_hours: 48
+  num_visible_projection_hours: 24
 
   protection_preference: 50             # X >= 0; may exceed 100 to increase protection value
 
@@ -146,11 +147,11 @@ energy_plan:
   optimiser_specific:
 
     mix_integer_linear_prog:
-      projection_resolution_mins: [15*4, 60*23] # Keep the first action intact; later boundaries align to the UTC clock.
+      projection_resolution_mins: [15*4, 60*23, 240*6] # Visible steps align to UTC; lookahead starts after 24 elapsed hours.
 
     dynamic_programing:
       use_numba: true
-      projection_resolution_mins: 15
+      projection_resolution_mins: [15*96, 60*24]
       refinement_stages:
         - {grid_step_percent: 2, power_divisions: 5,  band_percent: null}
         - {grid_step_percent: 1, power_divisions: 10, band_percent: 5}

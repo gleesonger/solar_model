@@ -29,6 +29,33 @@ def sample_result():
     return SimulationResult(action, {"med": frame, "low_high": frame.assign(net_cost=2.)})
 
 
+@pytest.mark.parametrize("model,adjustment", [("MILP", 75.), ("DP", 75.5), ("DP", 0.)])
+@pytest.mark.parametrize("solar,load", [("med", "med"), ("high", "low")])
+def test_excel_filename_uses_applied_model_adjustment_scenario_and_plan_date(monkeypatch, model, adjustment, solar, load):
+    from solar_model.dashboard.tabs import plan
+
+    tab = plan.PlanTab(load_config())
+    tab.result = sample_result()
+    tab.applied_model, tab.applied_adjustment = model, adjustment
+    tab.solar_scenario, tab.load_scenario = SimpleNamespace(value=solar), SimpleNamespace(value=load)
+    tab.model, tab.adjustment = SimpleNamespace(value="DP"), SimpleNamespace(value=99.)
+    downloads = []
+    exported_frames = []
+
+    def capture_workbook(frame, **kwargs):
+        exported_frames.append(frame)
+        return b"workbook"
+
+    monkeypatch.setattr(plan, "excel_bytes", capture_workbook)
+    monkeypatch.setattr(plan.ui, "download", lambda content, **kwargs: downloads.append(kwargs))
+    frame = tab.result.results[tab.scenario_name]
+    tab._download_detail(frame, plan.detail_columns(frame, compact=True))
+    assert downloads[0]["filename"] == f"plan-{model}-protection-{adjustment:g}-solar-{solar}-load-{load}-20261027-1005.xlsx"
+    assert exported_frames[0].Start.iloc[0] == "2026-10-27 10:05:00"
+    assert exported_frames[0].End.iloc[0] == "2026-10-27 10:20:00"
+    assert plan.detail_rows(frame, tab.config.timezone)[0]["starts_at"] == "10:05"
+
+
 def test_column_metadata_controls_views_and_keeps_unknown_advanced_fields():
     from solar_model.dashboard.tabs.plan import detail_columns
 
@@ -227,7 +254,8 @@ def test_actuals_use_physical_units_preserve_gaps_and_exclude_future(tmp_path):
 
 @pytest.mark.parametrize("fails", [False, True])
 @pytest.mark.parametrize("preference", [75., 200.])
-def test_preference_is_request_local_and_database_is_closed(monkeypatch, fails, preference):
+@pytest.mark.parametrize("model", ["MILP", "DP"])
+def test_preference_is_request_local_and_database_is_closed(monkeypatch, fails, preference, model):
     from solar_model.services import planning
     closed = []
     fake_db = SimpleNamespace(close=lambda: closed.append(True))
@@ -239,8 +267,9 @@ def test_preference_is_request_local_and_database_is_closed(monkeypatch, fails, 
     original = config.energy_plan.protection_preference
     result = sample_result()
 
-    def plan(db, configured, when):
+    def plan(db, configured, when, selected_model):
         assert configured.energy_plan.protection_preference == preference
+        assert selected_model == model
         if fails:
             raise ValueError("missing forecast")
         return result
@@ -248,11 +277,54 @@ def test_preference_is_request_local_and_database_is_closed(monkeypatch, fails, 
     monkeypatch.setattr(planning, "plan_as_of", plan)
     if fails:
         with pytest.raises(ValueError, match="missing forecast"):
-            planning.plan_with_preference(config, datetime.now(timezone.utc), preference)
+            planning.plan_with_preference(config, datetime.now(timezone.utc), preference, model)
     else:
-        assert planning.plan_with_preference(config, datetime.now(timezone.utc), preference).simulation is result
+        assert planning.plan_with_preference(config, datetime.now(timezone.utc), preference, model).simulation is result
     assert config.energy_plan.protection_preference == original
     assert closed == [True]
+
+
+@pytest.mark.parametrize("model", [None, "MILP", "DP"])
+def test_planning_service_dispatches_the_selected_model_with_shared_inputs(monkeypatch, model):
+    from solar_model.services import planning
+    from solar_model.planning import plan_optimisation_dynamic_programming as dp
+
+    config, database = load_config(), object()
+    start = datetime(2026, 10, 27, tzinfo=timezone.utc)
+    device, state, forecast, scenarios = object(), object(), object(), [object()]
+    monkeypatch.setattr(planning, "load_device_info_as_of", lambda db, cfg, when: device)
+    monkeypatch.setattr(planning, "load_battery_state_as_of", lambda db, when, info: state)
+    monkeypatch.setattr(planning, "load_forecast_as_of", lambda db, when, cfg: forecast)
+    monkeypatch.setattr(planning, "create_scenarios", lambda data, settings: scenarios)
+    calls = []
+    result = sample_result()
+
+    def milp(*args):
+        calls.append(("MILP", args))
+        return result
+
+    def dynamic_programming(*args):
+        calls.append(("DP", args))
+        return result
+
+    monkeypatch.setattr(planning, "simulate_energy_plan", milp)
+    monkeypatch.setattr(dp, "simulate_energy_plan", dynamic_programming)
+    selection = [] if model is None else [model]
+    assert planning.plan_as_of(database, config, start, *selection) is result
+    assert calls == [(model or "MILP", (device, state, scenarios, config, start))]
+
+
+def test_invalid_planning_model_is_rejected_before_opening_database(monkeypatch):
+    from solar_model.services import planning
+
+    def unexpected_database(*args):
+        raise AssertionError("invalid model must not open the database")
+
+    monkeypatch.setattr(planning, "create_engine_for_database", unexpected_database)
+    with pytest.raises(ValueError, match="Model must be MILP or DP"):
+        planning.plan_with_preference(load_config(), datetime.now(timezone.utc), 50., "unknown")
+    with pytest.raises(ValueError, match="Model must be MILP or DP"):
+        planning.plan_as_of(None, load_config(), datetime.now(timezone.utc), "unknown")
 
 
 def test_real_report_from_off_hour_inputs_excludes_future_data(tmp_path):
@@ -264,7 +336,7 @@ def test_real_report_from_off_hour_inputs_excludes_future_data(tmp_path):
     config = load_config()
     config = replace(config, timezone="UTC", database=replace(config.database, path=str(tmp_path / "real-plan.db")),
                      forecast=replace(config.forecast, solar=replace(config.forecast.solar, arrays=(config.forecast.solar.arrays[0],))),
-                     energy_plan=replace(config.energy_plan, num_projection_hours=1))
+                     energy_plan=replace(config.energy_plan, num_projection_hours=25, num_visible_projection_hours=1))
     start = datetime(2026, 10, 27, 10, 5, tzinfo=timezone.utc)
     device = DeviceInfo(**{field.name: 1. for field in fields(DeviceInfo)})
     device = replace(device, system_battery_capacity_kwh=18., battery_state_of_health_percent=100.,

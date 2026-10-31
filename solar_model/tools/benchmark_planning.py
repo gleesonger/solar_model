@@ -56,7 +56,7 @@ def _worker(connection, case: str, config_path: str, grid: str = "historical", m
             config = replace(config, energy_plan=replace(config.energy_plan, optimiser_specific=replace(config.energy_plan.optimiser_specific, dynamic_programing=settings)))
         start = datetime(2026, 10, 27, 10, 5, tzinfo=timezone.utc)
         timestamp = start.replace(minute=0)
-        coverage_end = timestamp + timedelta(hours=49)
+        coverage_end = timestamp + timedelta(hours=config.energy_plan.num_projection_hours + 1)
         solar, load = [], []
         while timestamp < coverage_end:
             hour = timestamp.hour + timestamp.minute / 60
@@ -113,11 +113,14 @@ def _worker(connection, case: str, config_path: str, grid: str = "historical", m
                 when = end
             return intervals
 
-        if grid == "quarter-hour":
-            periods = [(start + timedelta(minutes=15 * i), start + timedelta(minutes=15 * (i + 1))) for i in range(96)]
+        visible_end = start + timedelta(hours=config.energy_plan.num_visible_projection_hours)
+        configured = calculator.projection_intervals(config, start) if model == "dp" else calculator._projection_intervals(config, start)
+        if grid == "production":
+            periods = configured
         else:
-            periods = historical_intervals(config, start) if grid == "historical" else (calculator.projection_intervals(config, start) if model == "dp" else calculator._projection_intervals(config, start))
-        steps = [(end - begin).total_seconds() / 60 for begin, end in periods]
+            periods = [(start + timedelta(minutes=15 * i), start + timedelta(minutes=15 * (i + 1))) for i in range(96)] if grid == "quarter-hour" else historical_intervals(config, start)
+            periods += [(begin, end) for begin, end in configured if begin >= visible_end]
+        steps = [(end - begin).total_seconds() / 60 for begin, end in periods if end <= visible_end]
 
         def projection_intervals(cfg, when):
             return list(periods)

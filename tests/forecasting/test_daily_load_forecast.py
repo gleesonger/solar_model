@@ -129,7 +129,7 @@ def test_planning_house_forecast_covers_whole_hours_for_scenarios(tmp_path):
                 session.add(SigenStorHourlySample(hour_start_utc=stamp.isoformat(), import_tariff_band="day",
                     sample_count=1, house_load_kwh_period=1., plant_load_total_kwh_period=2.))
         config = load_config()
-        config = replace(config, timezone="UTC", energy_plan=replace(config.energy_plan, num_projection_hours=2))
+        config = replace(config, timezone="UTC", energy_plan=replace(config.energy_plan, num_projection_hours=26, num_visible_projection_hours=2))
         as_of = datetime(2026, 10, 23, 10, 30, tzinfo=ZoneInfo("UTC"))
         model.refresh_daily_house_load_forecast(db, as_of, "UTC")
         assert [row[1] for row in read_profile(db)] == [1.] * 24

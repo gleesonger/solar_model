@@ -20,9 +20,9 @@ LOGGER = logging.getLogger(__name__)
 
 
 def _forecast_bounds(as_of: datetime, config: Config) -> tuple[datetime, datetime]:
-    """Whole UTC hours around the visible projection plus 24-hour lookahead."""
+    """Whole UTC hours around the configured total projection."""
     start = pd.Timestamp(utc_instant(as_of))
-    end = start + pd.Timedelta(hours=config.energy_plan.num_projection_hours + 24)
+    end = start + pd.Timedelta(hours=config.energy_plan.num_projection_hours)
     return start.floor("h").to_pydatetime(), end.ceil("h").to_pydatetime()
 
 
@@ -157,7 +157,7 @@ def _lookahead_solar(database: SolarDatabase, solar: list[ForecastInterval], as_
     if missing_hours:
         LOGGER.warning("plan_model lookahead solar: actuals missing for local hours %s; using forecast", missing_hours)
 
-    visible_end = cutoff + timedelta(hours=config.energy_plan.num_projection_hours)
+    visible_end = cutoff + timedelta(hours=config.energy_plan.num_visible_projection_hours)
     result = []
     for interval in solar:
         left, right = max(coverage_start, interval.starts_at), min(visible_end, interval.ends_at)

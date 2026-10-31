@@ -53,7 +53,7 @@ Joint probabilities multiply the two dimension probabilities, assuming independe
 - YAML is deserialised through dacite into frozen dataclasses; lists become tuples. Required dataclass fields must be present.
 - Unknown keys outside the validated scenario mappings are currently ignored: `dacite.Config` does **not** enable strict mode. This permits descriptive `comment`/period `name` keys but can hide misspellings.
 - Optional planning-rule tuples default empty; minimum battery also accepts `{comment: ..., rules: [...]}`. The optimiser currently still requires usable minimum/maximum rules.
-- Intervals/timeouts/history lengths must be positive. `energy_plan.optimiser_specific.mix_integer_linear_prog.projection_resolution_mins` is a YAML list of positive integer minutes, for example `[15, 15, 15, 15, 60, 60]`, covering at least `num_projection_hours`. Replace the former scalar value in deployed YAML files. The shipped MILP vector is four quarter-hour entries followed by 23 hourly entries. Its first entry is the intact next action; subsequent cumulative boundaries align from the preceding full UTC hour, dropping boundaries overtaken by the first action. A final partial interval preserves the full elapsed horizon. At 10:05 the shipped MILP vector produces 28 periods. Tariff, battery-limit and midnight boundaries do not add splits.
+- Intervals/timeouts/history lengths must be positive. `energy_plan.num_projection_hours` is the complete solved horizon (48 hours), including lookahead. `num_visible_projection_hours` controls the visible report portion (24 hours). Each optimiser has its own `projection_resolution_mins` array covering the full horizon: MILP `[15*4, 60*23, 240*6]`; DP `[15*96, 60*24]`. MILP preserves its intact first action and UTC-aligned visible boundaries, then starts configured lookahead durations at the exact visible endpoint. DP uses elapsed durations directly. Both split at the report cutoff and stop at the total horizon; neither appends an implicit extra day. Tariff, battery-limit and midnight boundaries do not add splits.
 - Protection preference must be finite and non-negative, with no upper bound; efficiencies must be in `(0, 1]`.
 - Validation checks timezone/log level, URL shape, ports/device ID, coordinates/orientation, supported PV strings, and mapped array names.
 - Array IDs are unique integers 1–4; names must also be unique and are referenced by `dashboard.actuals_to_forecast` (for example `pv1: East`). Mapping names must match exactly; replace numeric mapping values in deployed YAML files. Empty arrays/mapping and non-positive `peak_kw` are not explicitly rejected.
@@ -79,16 +79,20 @@ Joint probabilities multiply the two dimension probabilities, assuming independe
 
 ## Planning score
 
+`num_projection_hours` now means the complete horizon, including lookahead. To preserve the former 24-visible-plus-24-hidden arrangement, use `num_projection_hours: 48` and `num_visible_projection_hours: 24`, and include the later durations in each model's array. Replace DP's former scalar `15` with `[15*96, 60*24]` for the current quarter-hour/hourly configuration. MILP uses `[15*4, 60*23, 240*6]`. No implicit 24-hour extension is added.
+
 DP-specific settings live under `energy_plan.optimiser_specific.dynamic_programing`:
 
 ```yaml
 energy_plan:
+  num_projection_hours: 48
+  num_visible_projection_hours: 24
   optimiser_specific:
     mix_integer_linear_prog:
-      projection_resolution_mins: [15*4, 60*23]
+      projection_resolution_mins: [15*4, 60*23, 240*6]
     dynamic_programing:
       use_numba: true
-      projection_resolution_mins: 15
+      projection_resolution_mins: [15*96, 60*24]
       refinement_stages:
         - {grid_step_percent: 2, power_divisions: 5, band_percent: null}
         - {grid_step_percent: 1, power_divisions: 10, band_percent: 5}
@@ -96,9 +100,9 @@ energy_plan:
         - {grid_step_percent: 1, power_divisions: 40, band_percent: 1}
 ```
 
-Shared horizon, protection, battery schedules and command power preferences remain directly under `energy_plan`. Move the former flat `projection_resolution_mins` and `dynamic_programming` blocks into the respective sections above; the loader rejects those legacy keys rather than silently ignoring them. These are also the defaults when omitted. DP `projection_resolution_mins` is a single positive integer (default 15), while MILP uses its own list of durations. Power divisions must also be positive integers; grid steps and corridor half-widths must be finite percentages in `(0, 100]`. The non-empty stage list includes the initial full-range solve, whose `band_percent` must be YAML `null` (Python `None`); subsequent stages require numeric half-widths. A list containing only that initial entry requests one full-range solve. The former separate coarse-grid and power settings are rejected; put those values in the first entry instead. Each refinement uses scenario-specific period-end bounds around the best retained path, including the six hidden four-hour periods. Lower/equal scores and infeasible refinements retain the earlier policy. MILP continues to use `energy_plan.optimiser_specific.mix_integer_linear_prog.projection_resolution_mins`; these DP settings do not change its calculations. See the [DP walkthrough](../implementation/dynamic-programming.md).
+Shared horizon, protection, battery schedules and command power preferences remain directly under `energy_plan`. Move the former flat `projection_resolution_mins` and `dynamic_programming` blocks into the respective sections above; the loader rejects those legacy keys rather than silently ignoring them. These are also the defaults when omitted. Both optimisers use a non-empty array of positive integer minute durations, accepting the same repetition syntax. Scalars are rejected. Each array must cover the full `num_projection_hours`; excess entries are clipped at the horizon. `num_visible_projection_hours` (default 24) must be positive and no greater than the total horizon. Power divisions must also be positive integers; grid steps and corridor half-widths must be finite percentages in `(0, 100]`. The non-empty stage list includes the initial full-range solve, whose `band_percent` must be YAML `null` (Python `None`); subsequent stages require numeric half-widths. A list containing only that initial entry requests one full-range solve. The former separate coarse-grid and power settings are rejected; put those values in the first entry instead. Each refinement uses scenario-specific period-end bounds around the best retained path, including all configured lookahead periods. Lower/equal scores and infeasible refinements retain the earlier policy. MILP continues to use `energy_plan.optimiser_specific.mix_integer_linear_prog.projection_resolution_mins`; these DP settings do not change its calculations. See the [DP walkthrough](../implementation/dynamic-programming.md).
 
-`use_numba` is a boolean, defaulting to `true`. Set it to `false` for Python execution of the same numerical functions without importing Numba. Install the compiled path with `python -m pip install -e ".[numba]"`; selecting it without Numba installed raises an installation error. Replace the former `backend` string with this boolean; the old key is rejected. There is no warm-up: the first real numerical call imports Numba and loads or compiles its functions inside the measured solve. This setting affects DP only.
+`use_numba` is a boolean, defaulting to `true`. Set it to `false` for Python execution of the same numerical functions without importing Numba. Numba is included in the normal runtime requirements (the existing `python -m pip install -e ".[numba]"` command is also supported); selecting it without Numba installed raises an installation error. Replace the former `backend` string with this boolean; the old key is rejected. There is no warm-up: the first real numerical call imports Numba and loads or compiles its functions inside the measured solve. This setting affects DP only.
 
 `energy_plan.preferred_reserve_kwh` is a positive, finite target of stored battery kWh measured from zero; it defaults to 4 kWh. Physical discharge cut-offs do not shift this scoring origin. `energy_plan.protection_preference` is X, any finite non-negative number, defaulting to 50 when omitted (also the shipped value). Values above 100 are supported. Replace the former `optimisation_weights` block with this scalar when updating separate YAML files; omitting the field now uses 50. The old battery share corresponds to X = 100 * maximise_battery / (maximise_profit + maximise_battery), but the revised objective changes its effect.
 

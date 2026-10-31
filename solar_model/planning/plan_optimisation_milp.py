@@ -47,9 +47,8 @@ def _simulate_energy_plan(device_info: DeviceInfo, device_state: DeviceState, sc
 
     projection_starts_at = utc_instant(projection_starts_at)
     periods = _projection_intervals(config, projection_starts_at)
-    visible_periods = len(periods)
-    visible_end = periods[-1][1]
-    periods += [(visible_end + timedelta(hours=h), visible_end + timedelta(hours=h + 4)) for h in range(0, 24, 4)]
+    visible_end = projection_starts_at + timedelta(hours=config.energy_plan.num_visible_projection_hours)
+    visible_periods = sum(end <= visible_end for _, end in periods)
     durations = tuple((end - start).total_seconds() / 3600 for start, end in periods)
     # #### Build Model
     num_time_periods, scenario_count = len(durations), len(scenarios)
@@ -369,29 +368,43 @@ def _minimum(requested: cp.Expression, ceiling: float, upper: float, constraints
 
 
 def _projection_intervals(config: Config, starts_at: datetime) -> list[tuple[datetime, datetime]]:
-    """Align configured steps from the preceding UTC hour; keep the first intact."""
+    """Align visible steps to UTC, then apply configured lookahead durations."""
     s = config.energy_plan
     timesteps = s.optimiser_specific.mix_integer_linear_prog.projection_resolution_mins
-    if s.num_projection_hours <= 0 or not timesteps or any(minutes <= 0 for minutes in timesteps):
+    if s.num_projection_hours <= 0 or not timesteps or any(type(minutes) is not int or minutes <= 0 for minutes in timesteps):
         raise ValueError("projection duration and resolution must be greater than zero")
+    if sum(timesteps) < s.num_projection_hours * 60:
+        raise ValueError("projection_resolution_mins must cover num_projection_hours")
     cursor = utc_instant(starts_at)
     projection_end = cursor + timedelta(hours=s.num_projection_hours)
+    visible_end = min(projection_end, cursor + timedelta(hours=s.num_visible_projection_hours))
     boundary = cursor.replace(minute=0, second=0, microsecond=0)
-    first_end = min(cursor + timedelta(minutes=timesteps[0]), projection_end)
+    first_end = min(cursor + timedelta(minutes=timesteps[0]), visible_end)
     periods = [(cursor, first_end)]
     cursor = first_end
+    configured_minutes = 0
     for minutes in timesteps:
-        boundary += timedelta(minutes=minutes)
         if cursor == projection_end:
             break
-        if boundary <= cursor:
-            continue  # Drop boundaries overtaken by the intact first action.
-        next_end = min(boundary, projection_end)
-        periods.append((cursor, next_end))
-        cursor = next_end
+        visible_minutes = min(minutes, max(0, s.num_visible_projection_hours * 60 - configured_minutes))
+        configured_minutes += minutes
+        boundary += timedelta(minutes=visible_minutes)
+        if boundary > cursor and cursor < visible_end:
+            next_end = min(boundary, visible_end)
+            periods.append((cursor, next_end))
+            cursor = next_end
+        hidden_minutes = minutes - visible_minutes
+        if hidden_minutes:
+            if cursor < visible_end:
+                periods.append((cursor, visible_end))
+                cursor = visible_end
+            next_end = min(cursor + timedelta(minutes=hidden_minutes), projection_end)
+            periods.append((cursor, next_end))
+            cursor = next_end
     if cursor < projection_end:
         periods.append((cursor, projection_end))
     return periods
+
 
 
 def score_simulation(

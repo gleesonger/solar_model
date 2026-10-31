@@ -27,12 +27,18 @@ def warm_planning_worker() -> int:
     return os.getpid()
 
 
-def plan_as_of(database: SolarDatabase, config: Config, as_of: datetime) -> SimulationResult:
+def plan_as_of(database: SolarDatabase, config: Config, as_of: datetime, model: str = "MILP") -> SimulationResult:
     """Select only data known by the cutoff, then call the database-free model."""
+    if model == "MILP":
+        optimiser = simulate_energy_plan
+    elif model == "DP":
+        from solar_model.planning.plan_optimisation_dynamic_programming import simulate_energy_plan as optimiser
+    else:
+        raise ValueError("Model must be MILP or DP")
     device = load_device_info_as_of(database, config, as_of)
     state = load_battery_state_as_of(database, as_of, device)
     forecast = load_forecast_as_of(database, as_of, config)
-    return simulate_energy_plan(device, state, create_scenarios(forecast, config.scenarios), config, as_of)
+    return optimiser(device, state, create_scenarios(forecast, config.scenarios), config, as_of)
 
 
 @dataclass
@@ -42,15 +48,17 @@ class PlanReport:
     battery_capacity_kwh: float | None = None
 
 
-def plan_with_preference(config: Config, as_of: datetime, preference: float) -> PlanReport:
-    """Generate a report with a request-local preference, without migrating storage."""
+def plan_with_preference(config: Config, as_of: datetime, preference: float, model: str = "MILP") -> PlanReport:
+    """Generate a report with a request-local model/preference, without migrating storage."""
     if not math.isfinite(preference) or preference < 0:
         raise ValueError("Protection adjustment must be finite and non-negative")
+    if model not in ("MILP", "DP"):
+        raise ValueError("Model must be MILP or DP")
     configure_logging(config.logging.level)
     config = replace(config, energy_plan=replace(config.energy_plan, protection_preference=preference))
     database = SolarDatabase(create_engine_for_database(config.database.path))
     try:
-        result = plan_as_of(database, config, as_of)
+        result = plan_as_of(database, config, as_of, model)
         capacity = load_device_info_as_of(database, config, as_of).system_battery_capacity_kwh
         day_start = as_of.astimezone(ZoneInfo(config.timezone)).replace(hour=0, minute=0, second=0, microsecond=0)
         return PlanReport(result, load_plan_actuals(database, day_start, as_of, capacity), capacity)

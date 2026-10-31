@@ -80,8 +80,8 @@ def test_numba_and_python_match_value_tables_and_bounded_paths(inputs):
     periods = [period(solar=.8, load=.2, protection_weight=.02), period(solar=.1, load=.8, export_limit=0., protection_weight=.02)]
     grids = dp.bounded_grids([float(i) for i in range(11)], 10., [(.1, .4), (0., .5)])
     choices = dp.actions(device, inputs[3].energy_plan)
-    python_values = dp.backward_values(device, 10., periods, grids, choices, .2)
     numerical_device = dp.DeviceParameters(*(getattr(device, field) for field in dp.DeviceParameters._fields))
+    python_values = dp.backward_values(numerical_device, 10., periods, grids, choices, .2)
     numerical_periods = List(periods)
     numerical_grids, numerical_choices = List([List(grid) for grid in grids]), List(choices)
     backward, forward = dp.get_numba_functions()
@@ -90,7 +90,7 @@ def test_numba_and_python_match_value_tables_and_bounded_paths(inputs):
         np.testing.assert_allclose(actual, expected, atol=1e-12, rtol=1e-12)
     numba_values = List([List(row) for row in numba_values])
     for action in choices:
-        expected = dp.forward_projection(device, 10., periods, grids, python_values, choices, 2., action)
+        expected = dp.forward_projection(numerical_device, 10., periods, grids, python_values, choices, 2., action)
         actual = forward(numerical_device, 10., numerical_periods, numerical_grids, numba_values, numerical_choices, 2., action)
         assert (actual is None) == (expected is None)
         if actual is not None:
@@ -129,7 +129,8 @@ def test_numba_and_python_match_complete_configured_pipeline(inputs):
         pd.testing.assert_frame_equal(actual.lookahead_results[name], expected.lookahead_results[name], atol=1e-10, rtol=1e-12)
 
 
-def test_default_refinement_retains_better_paths_and_centres_next_bounds_on_them(inputs, monkeypatch):
+def test_default_refinement_retains_better_paths_and_centres_next_bounds_on_them(inputs, monkeypatch, caplog):
+    caplog.set_level("INFO", logger=dp.LOGGER.name)
     action = dp.NextAction(OperatingMode.SELF_CONSUMPTION, 0., 0., 100., 0.)
     coarse = SimulationResult(action, {"base": pd.DataFrame({"battery_end_kwh": [5.], "total_score": [1.]})}, {"base": pd.DataFrame({"battery_end_kwh": [5.], "total_score": [1.]})})
     improved = SimulationResult(action, {"base": pd.DataFrame({"battery_end_kwh": [6.], "total_score": [2.]})}, {"base": pd.DataFrame({"battery_end_kwh": [6.], "total_score": [2.]})})
@@ -144,6 +145,13 @@ def test_default_refinement_retains_better_paths_and_centres_next_bounds_on_them
 
     monkeypatch.setattr(dp, "solve_pass", fake_pass)
     assert dp.simulate_energy_plan(*inputs) is improved
+    summaries = [record for record in caplog.records if record.getMessage().startswith("dp_")]
+    assert len(summaries) == 5
+    assert all(record.levelname == "INFO" for record in summaries)
+    assert "dp_refinement stage=3 accepted=False" in caplog.text
+    completed = [record for record in summaries if record.getMessage().startswith("dp_model end:")]
+    assert len(completed) == 1 and completed[0] is summaries[-1]
+    assert "elapsed_seconds=" in completed[0].getMessage()
     stages = inputs[3].energy_plan.optimiser_specific.dynamic_programing.refinement_stages
     assert [(call["grid_step_percent"], call["power_divisions"]) for call in calls] == [(stage.grid_step_percent, stage.power_divisions) for stage in stages]
     for call, centre, width in zip(calls[1:], [.5, .6, .6], [.05, .03, .01]):
@@ -152,7 +160,7 @@ def test_default_refinement_retains_better_paths_and_centres_next_bounds_on_them
 
 
 def test_default_dp_grid_is_quarter_hour_in_utc_through_dst(inputs):
-    config = replace(inputs[3], energy_plan=replace(inputs[3].energy_plan, num_projection_hours=24))
+    config = replace(inputs[3], energy_plan=replace(inputs[3].energy_plan, num_projection_hours=24, num_visible_projection_hours=24, optimiser_specific=replace(inputs[3].energy_plan.optimiser_specific, dynamic_programing=replace(inputs[3].energy_plan.optimiser_specific.dynamic_programing, projection_resolution_mins=(15,) * 96))))
     start = datetime(2026, 10, 25, 0, 5, tzinfo=timezone.utc)
     intervals = dp.projection_intervals(config, start)
     assert len(intervals) == 96
@@ -369,7 +377,7 @@ def test_nine_scenario_result_replays_the_same_first_command_as_lp(inputs):
     base = scenarios[0].forecast_data
     forecast = ForecastData([replace(base.solar[0], kwh=4.), *base.solar[1:]], base.load)
     scenarios = create_scenarios(forecast, config.scenarios)
-    config = replace(config, energy_plan=replace(config.energy_plan, optimiser_specific=replace(config.energy_plan.optimiser_specific, dynamic_programing=replace(config.energy_plan.optimiser_specific.dynamic_programing, projection_resolution_mins=30))))
+    config = replace(config, energy_plan=replace(config.energy_plan, optimiser_specific=replace(config.energy_plan.optimiser_specific, dynamic_programing=replace(config.energy_plan.optimiser_specific.dynamic_programing, projection_resolution_mins=(30, 30) + (240,) * 6))))
     args = (device, state, scenarios, config, start)
     result = dp.solve_pass(*args)
     replay = simulate(args, result.next_action, return_result=True)
@@ -383,7 +391,8 @@ def test_nine_scenario_result_replays_the_same_first_command_as_lp(inputs):
         assert result.lookahead_results[name].battery_start_kwh.iloc[0] == pytest.approx(frame.battery_end_kwh.iloc[-1])
 
 
-def test_forced_first_command_is_shared_and_selected_using_all_nine_scenarios(inputs, monkeypatch):
+def test_forced_first_command_is_shared_and_selected_using_all_nine_scenarios(inputs, monkeypatch, caplog):
+    caplog.set_level("DEBUG", logger=dp.LOGGER.name)
     device, state, scenarios, config, start = inputs
     settings = replace(config.energy_plan.optimiser_specific.dynamic_programing, use_numba=False)
     config = replace(config, energy_plan=replace(config.energy_plan, optimiser_specific=replace(config.energy_plan.optimiser_specific, dynamic_programing=settings)))
@@ -395,17 +404,23 @@ def test_forced_first_command_is_shared_and_selected_using_all_nine_scenarios(in
     rule = tariff.import_[0]
     tariff = replace(tariff, import_=(replace(rule, end_time="00:30", rate=.01), replace(rule, start_time="00:30", rate=.4)))
     config = replace(config, timezone="UTC", tariffs=replace(config.tariffs, periods=(tariff,)))
-    config = replace(config, energy_plan=replace(config.energy_plan, optimiser_specific=replace(config.energy_plan.optimiser_specific, dynamic_programing=replace(config.energy_plan.optimiser_specific.dynamic_programing, projection_resolution_mins=30))))
+    config = replace(config, energy_plan=replace(config.energy_plan, optimiser_specific=replace(config.energy_plan.optimiser_specific, dynamic_programing=replace(config.energy_plan.optimiser_specific.dynamic_programing, projection_resolution_mins=(30, 30) + (240,) * 6))))
     original = dp.forward_projection
     records = []
 
     def record_forward_projection(*args):
+        assert isinstance(args[0], dp.DeviceParameters)
         path = original(*args)
         records.append((args[-1], args[2], path))
         return path
 
     monkeypatch.setattr(dp, "forward_projection", record_forward_projection)
     result = dp.solve_pass(device, state, scenarios, config, start)
+    assert not any(record.getMessage().startswith("dp_model end:") for record in caplog.records)
+    timings = [record for record in caplog.records if record.getMessage().startswith("dp_model timings:")]
+    assert len(timings) == 1 and timings[0].levelname == "DEBUG"
+    assert "backward_seconds=" in timings[0].getMessage()
+    assert "forward_seconds=" in timings[0].getMessage()
     assert result.next_action.mode == OperatingMode.CHARGE_PV_FIRST
     chosen = (result.next_action.mode, result.next_action.force_battery_charge_rate)
     selected = [record for record in records if record[0] == chosen]

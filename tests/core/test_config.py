@@ -12,13 +12,13 @@ from solar_model.config import load_config
 def test_optimiser_specific_sections_load_independently(tmp_path):
     raw = yaml.safe_load(Path("config.yaml").read_text(encoding="utf-8"))
     settings = raw["energy_plan"]["optimiser_specific"]
-    settings["mix_integer_linear_prog"]["projection_resolution_mins"] = ["60*24"]
-    settings["dynamic_programing"]["projection_resolution_mins"] = 10
+    settings["mix_integer_linear_prog"]["projection_resolution_mins"] = ["60*48"]
+    settings["dynamic_programing"]["projection_resolution_mins"] = ["10*288"]
     path = tmp_path / "config.yaml"
     path.write_text(yaml.safe_dump(raw), encoding="utf-8")
     loaded = load_config(path).energy_plan.optimiser_specific
-    assert loaded.mix_integer_linear_prog.projection_resolution_mins == (60,) * 24
-    assert loaded.dynamic_programing.projection_resolution_mins == 10
+    assert loaded.mix_integer_linear_prog.projection_resolution_mins == (60,) * 48
+    assert loaded.dynamic_programing.projection_resolution_mins == (10,) * 288
 
 
 @pytest.mark.parametrize("name,value", [("projection_resolution_mins", [15] * 96), ("dynamic_programming", {})])
@@ -38,13 +38,13 @@ def test_dp_defaults_and_custom_refinement_settings_load(tmp_path):
     path.write_text(yaml.safe_dump(raw), encoding="utf-8")
     settings = load_config(path).energy_plan.optimiser_specific.dynamic_programing
     assert settings.use_numba is True
-    assert settings.projection_resolution_mins == 15
+    assert settings.projection_resolution_mins == (15,) * 96 + (60,) * 24
     assert [(s.grid_step_percent, s.power_divisions, s.band_percent) for s in settings.refinement_stages] == [(2., 5, None), (1., 10, 5.), (1., 20, 3.), (1., 40, 1.)]
-    raw["energy_plan"]["optimiser_specific"]["dynamic_programing"] = {"use_numba": False, "projection_resolution_mins": 30, "refinement_stages": [{"grid_step_percent": 4., "power_divisions": 3, "band_percent": None}, {"grid_step_percent": .5, "power_divisions": 20, "band_percent": 2.}]}
+    raw["energy_plan"]["optimiser_specific"]["dynamic_programing"] = {"use_numba": False, "projection_resolution_mins": ["30*96"], "refinement_stages": [{"grid_step_percent": 4., "power_divisions": 3, "band_percent": None}, {"grid_step_percent": .5, "power_divisions": 20, "band_percent": 2.}]}
     path.write_text(yaml.safe_dump(raw), encoding="utf-8")
     settings = load_config(path).energy_plan.optimiser_specific.dynamic_programing
     assert settings.use_numba is False
-    assert settings.projection_resolution_mins == 30
+    assert settings.projection_resolution_mins == (30,) * 96
     assert settings.refinement_stages[0].grid_step_percent == 4.
     assert settings.refinement_stages[0].power_divisions == 3
     assert settings.refinement_stages[0].band_percent is None
@@ -278,14 +278,35 @@ def test_array_mapping_resolves_names_independently_of_order_and_rejects_ambigui
         validate_config(replace(config, forecast=replace(config.forecast, solar=replace(config.forecast.solar, arrays=(east, replace(west, name=east.name))))))
 
 
+@pytest.mark.parametrize("optimiser", ["mix_integer_linear_prog", "dynamic_programing"])
 @pytest.mark.parametrize("entries", [["15*24", "60*18"], [15, "15 * 23", "60*18"],
                                      ["15", "15*23", "60*18"]])
-def test_projection_repetitions_expand_during_config_loading(tmp_path, entries):
+def test_projection_repetitions_expand_during_config_loading(tmp_path, entries, optimiser):
     raw = yaml.safe_load(Path("config.yaml").read_text(encoding="utf-8"))
-    raw["energy_plan"]["optimiser_specific"]["mix_integer_linear_prog"]["projection_resolution_mins"] = entries
+    raw["energy_plan"]["optimiser_specific"][optimiser]["projection_resolution_mins"] = [*entries, "240*6"]
     path = tmp_path / "config.yaml"
     path.write_text(yaml.safe_dump(raw), encoding="utf-8")
-    assert load_config(path).energy_plan.optimiser_specific.mix_integer_linear_prog.projection_resolution_mins == (15,) * 24 + (60,) * 18
+    assert getattr(load_config(path).energy_plan.optimiser_specific, optimiser).projection_resolution_mins == (15,) * 24 + (60,) * 18 + (240,) * 6
+
+
+@pytest.mark.parametrize("optimiser", ["mix_integer_linear_prog", "dynamic_programing"])
+def test_each_optimiser_resolution_must_cover_total_horizon(tmp_path, optimiser):
+    raw = yaml.safe_load(Path("config.yaml").read_text(encoding="utf-8"))
+    raw["energy_plan"]["optimiser_specific"][optimiser]["projection_resolution_mins"] = ["60*47"]
+    path = tmp_path / "config.yaml"
+    path.write_text(yaml.safe_dump(raw), encoding="utf-8")
+    with pytest.raises(ValueError, match="must cover num_projection_hours"):
+        load_config(path)
+
+
+@pytest.mark.parametrize("visible", [0, -1, 49])
+def test_visible_horizon_must_fit_inside_total_horizon(tmp_path, visible):
+    raw = yaml.safe_load(Path("config.yaml").read_text(encoding="utf-8"))
+    raw["energy_plan"]["num_visible_projection_hours"] = visible
+    path = tmp_path / "config.yaml"
+    path.write_text(yaml.safe_dump(raw), encoding="utf-8")
+    with pytest.raises(ValueError, match="num_visible_projection_hours"):
+        load_config(path)
 
 
 @pytest.mark.parametrize("entry", ["15*", "15*  ", "15*0", "15*-2", "0*24", "15*2*3", "15+24"])

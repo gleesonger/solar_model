@@ -31,9 +31,11 @@ def inputs():
     config = load_config()
     config = replace(config, tariffs=TariffsConfig((TariffPeriod("2000-01-01",
         (replace(rule, rate=.4),), (replace(rule, rate=.1),)),)),
-        energy_plan=replace(config.energy_plan, num_projection_hours=1, optimiser_specific=replace(config.energy_plan.optimiser_specific, mix_integer_linear_prog=replace(config.energy_plan.optimiser_specific.mix_integer_linear_prog, projection_resolution_mins=(30, 30))),
+        energy_plan=replace(config.energy_plan, num_projection_hours=25, num_visible_projection_hours=1, optimiser_specific=replace(config.energy_plan.optimiser_specific, mix_integer_linear_prog=replace(config.energy_plan.optimiser_specific.mix_integer_linear_prog, projection_resolution_mins=(30, 30) + (240,) * 6)),
             minimum_battery_kwh=(rule,), maximum_battery_kwh=(replace(rule, rate=10.),),
             limit_battery_export_rate_to_grid_kw=(), protection_preference=0.))
+    dp_settings = replace(config.energy_plan.optimiser_specific.dynamic_programing, projection_resolution_mins=(15,) * 4 + (240,) * 6)
+    config = replace(config, energy_plan=replace(config.energy_plan, optimiser_specific=replace(config.energy_plan.optimiser_specific, dynamic_programing=dp_settings)))
     scenarios = [ScenarioData("base", ForecastData([ForecastInterval(start, end, 0.), ForecastInterval(end, end + timedelta(hours=24), 0.)], [ForecastInterval(start, end, 1.), ForecastInterval(end, end + timedelta(hours=24), 0.)]), 1.)]
     return device, DeviceState(2.), scenarios, config, start
 

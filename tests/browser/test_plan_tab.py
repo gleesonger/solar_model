@@ -36,8 +36,9 @@ async def calculate(callback, *args):
     if callback.__name__ == "warm_planning_worker":
         await asyncio.sleep(.3)
         return 123
-    config, as_of, preference = args
-    await asyncio.sleep(.7)
+    config, as_of, preference, model = args
+    assert model in ('MILP', 'DP')
+    await asyncio.sleep(2.)
     if preference == 99:
         raise ValueError('Synthetic forecast unavailable')
     result = sample_result()
@@ -53,6 +54,7 @@ async def calculate(callback, *args):
         frame['ends_at'] = frame['starts_at'] + pd.Timedelta(minutes=15)
         frame['net_cost'] += (preference - 75) / 100
         frame['terminal_score'] = 0.
+        frame['tariff_name'] = model
         load, solar = ('med', 'med') if name == 'med' else name.split('_')
         frame['solar_kwh'] *= getattr(config.scenarios.solar, solar).multiplier
         frame['load_kwh'] *= getattr(config.scenarios.house_load, load).multiplier
@@ -118,6 +120,8 @@ if __name__ == '__main__':
                 refresh = page.get_by_role("button", name="Refresh plan", exact=True)
                 refresh.wait_for()
                 adjustment = page.locator('input[type="number"]')
+                model = page.get_by_role("combobox", name="Model", exact=True)
+                assert model.input_value() == "MILP"
                 assert adjustment.input_value() == "50"
                 assert adjustment.get_attribute("max") is None
                 adjustment.fill("75")
@@ -125,9 +129,11 @@ if __name__ == '__main__':
                 page.get_by_text("Calculating plan…", exact=True).wait_for()
                 assert not refresh.is_visible()
                 assert adjustment.is_disabled()
+                assert page.locator(".q-select").evaluate("element => element.classList.contains('q-field--disabled')"), page.locator(".q-select").evaluate("element => element.outerHTML")
                 refresh.wait_for(state="visible")
                 page.get_by_text("Action for next 15 mins - Self-consumption", exact=True).wait_for()
                 assert refresh.is_disabled()
+                page.get_by_text("Model: MILP", exact=True).wait_for()
                 adjustment.fill("25")
                 page.wait_for_function("!Array.from(document.querySelectorAll('button')).find(e => e.textContent.includes('Refresh plan')).disabled")
                 adjustment.fill("75")
@@ -197,7 +203,7 @@ if __name__ == '__main__':
                 with page.expect_download() as download_info:
                     page.get_by_role("button", name="Download Excel", exact=True).click()
                 download = download_info.value
-                assert download.suggested_filename.startswith("plan-med-")
+                assert download.suggested_filename.startswith("plan-MILP-protection-75-solar-med-load-med-")
                 assert download.suggested_filename.endswith(".xlsx")
                 with ZipFile(download.path()) as workbook:
                     assert 'name="Plan detail"' in workbook.read("xl/workbook.xml").decode()
@@ -217,6 +223,18 @@ if __name__ == '__main__':
                     return positions[0].length === positions[1].length &&
                         positions[0].every((value, i) => Math.abs(value - positions[1][i]) < 1);
                 }""")
+                model.click()
+                page.get_by_role("option", name="DP", exact=True).click()
+                page.wait_for_function("!Array.from(document.querySelectorAll('button')).find(e => e.textContent.includes('Refresh plan')).disabled")
+                model.click()
+                page.get_by_role("option", name="MILP", exact=True).click()
+                page.wait_for_function("Array.from(document.querySelectorAll('button')).find(e => e.textContent.includes('Refresh plan')).disabled")
+                model.click()
+                page.get_by_role("option", name="DP", exact=True).click()
+                refresh.click()
+                page.get_by_text("Model: DP", exact=True).wait_for()
+                page.get_by_role("cell", name="DP", exact=True).first.wait_for()
+                assert refresh.is_disabled()
                 for width in (1440, 390):
                     page.set_viewport_size({"width": width, "height": 1100})
                     page.wait_for_timeout(200)
@@ -260,13 +278,24 @@ if __name__ == '__main__':
                 page.wait_for_function("echarts.getInstanceByDom(document.querySelector('[data-testid=plan-chart]')).getOption().series[1].data[0][1] === 2")
                 assert page.get_by_test_id("plan-chart").evaluate("element => {const o = echarts.getInstanceByDom(element).getOption(); return o.legend[0].selected.Solar === false && o.dataZoom[0].start === 20 && o.dataZoom[0].end === 80;}")
                 adjustment.fill("25")
+                chart_id = page.get_by_test_id("plan-chart").evaluate("element => echarts.getInstanceByDom(element).id")
+                load_buttons.get_by_role("button", name="Low (0.5x)", exact=True).click()
+                solar_buttons.get_by_role("button", name="High (1.5x)", exact=True).click()
                 refresh.click()
-                page.get_by_text("€-2.50", exact=True).wait_for()
+                page.get_by_text("€30.00", exact=True).wait_for()
+                page.get_by_text("37.50 / 6.25 kWh", exact=True).wait_for()
+                assert page.get_by_test_id("plan-chart").evaluate("element => echarts.getInstanceByDom(element).id") == chart_id
+                assert page.get_by_test_id("plan-chart").evaluate("element => {const o = echarts.getInstanceByDom(element).getOption(); return o.legend[0].selected.Solar === false && o.dataZoom[0].start === 20 && o.dataZoom[0].end === 80;}")
                 assert page.locator(".q-table tbody tr").count() == 7
                 adjustment.fill("99")
+                model.click()
+                page.get_by_role("option", name="MILP", exact=True).click()
                 refresh.click()
                 page.get_by_text("Plan refresh failed. The previous plan is still shown.", exact=True).wait_for()
                 assert refresh.is_visible() and not adjustment.is_disabled()
+                assert not page.locator(".q-select").evaluate("element => element.classList.contains('q-field--disabled')")
+                assert model.input_value() == "MILP"
+                page.get_by_text("Model: DP", exact=True).wait_for()
                 assert not refresh.is_disabled()
                 assert page.get_by_test_id("plan-chart").is_visible()
                 assert not errors

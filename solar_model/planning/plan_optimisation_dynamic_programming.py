@@ -12,6 +12,7 @@ from zoneinfo import ZoneInfo
 import pandas as pd
 
 from solar_model.config import Config, EnergyPlanConfig
+from solar_model.logging_setup import LOGGER
 from solar_model.planning.types import DeviceInfo, DeviceState, NextAction, OperatingMode, ScenarioData, SimulationResult
 from solar_model.tariffs import tariff_rule, tariff_rule_rate, tariff_rules_for_timestamp
 from solar_model.time_utils import utc_instant
@@ -77,8 +78,9 @@ def simulate_energy_plan(device_info: DeviceInfo, device_state: DeviceState, sce
     if not settings.refinement_stages or settings.refinement_stages[0].band_percent is not None:
         raise ValueError("DP stages must begin with a full-range stage")
     initial_stage = settings.refinement_stages[0]
+    began_at = perf_counter()
     if grid_step_percent is not None or power_divisions is not None or battery_bounds is not None:
-        return solve_pass(
+        result = solve_pass(
             device_info,
             device_state,
             scenarios,
@@ -88,8 +90,9 @@ def simulate_energy_plan(device_info: DeviceInfo, device_state: DeviceState, sce
             power_divisions=initial_stage.power_divisions if power_divisions is None else power_divisions,
             battery_bounds=battery_bounds,
         )
+        LOGGER.info("dp_model end: status=success elapsed_seconds=%.6f", perf_counter() - began_at)
+        return result
 
-    began_at = perf_counter()
     capacity = system_limits(device_info, 1.).capacity_kwh
     result, best_score = None, -math.inf
     for index, stage in enumerate(settings.refinement_stages):
@@ -110,8 +113,8 @@ def simulate_energy_plan(device_info: DeviceInfo, device_state: DeviceState, sce
         accepted = score > best_score
         if accepted:
             result, best_score = refined, score
-        print(f"dp_refinement stage={index} accepted={accepted} elapsed_seconds={perf_counter() - stage_at:.6f} retained_score={best_score:.9f}", flush=True)
-    print(f"dp_plan end: status=success elapsed_seconds={perf_counter() - began_at:.6f} score={best_score:.9f}", flush=True)
+        LOGGER.info("dp_refinement stage=%d accepted=%s elapsed_seconds=%.6f retained_score=%.9f", index, accepted, perf_counter() - stage_at, best_score)
+    LOGGER.info("dp_model end: status=success elapsed_seconds=%.6f score=%.9f", perf_counter() - began_at, best_score)
     return result
 
 
@@ -143,11 +146,9 @@ def solve_pass(device_info: DeviceInfo, device_state: DeviceState, scenarios: li
     start = utc_instant(projection_starts_at)
     intervals = projection_intervals(config, start)
 
-    num_visible_periods = len(intervals)
-    datetime_of_visible_end = intervals[-1][1]
-
-    invisible_periods = [(datetime_of_visible_end + timedelta(hours=h), datetime_of_visible_end + timedelta(hours=h + 4)) for h in range(0, 24, 4)]
-    intervals += invisible_periods
+    visible_end = start + timedelta(hours=config.energy_plan.num_visible_projection_hours)
+    num_visible_periods = sum(end <= visible_end for _, end in intervals)
+    num_hidden_periods = len(intervals) - num_visible_periods
 
     total_hours = sum((end - begin).total_seconds() / 3600 for begin, end in intervals)
     protection_reward_value = protection_value(config, start, total_hours)
@@ -198,24 +199,25 @@ def solve_pass(device_info: DeviceInfo, device_state: DeviceState, scenarios: li
         if bounds is None:
             bounds = [(0., 1.)] * len(intervals)
         elif len(bounds) == num_visible_periods:
-            bounds = [*bounds, *[(0., 1.) for _ in invisible_periods]]
+            bounds = [*bounds, *[(0., 1.) for _ in range(num_hidden_periods)]]
         if len(bounds) != len(intervals):
             raise ValueError("battery bounds need one pair per visible period or per full-horizon period")
         scenario_grids.append(bounded_grids(grid, capacity, bounds))
     choices = actions(device_info, config.energy_plan, power_divisions)
     
     use_numba = config.energy_plan.optimiser_specific.dynamic_programing.use_numba
+    calculation_device = DeviceParameters(*(float(getattr(device_info, field)) for field in DeviceParameters._fields))
 
     if use_numba:
         backward, forward = get_numba_functions()
+        # Convert lists to numba lists
         from numba.typed import List
-        calculation_device = DeviceParameters(*(float(getattr(device_info, field)) for field in DeviceParameters._fields))
         calculation_periods = [List(periods) for periods in scenario_periods]
         calculation_grids = [List([List(grid) for grid in grids]) for grids in scenario_grids]
         calculation_choices = List(choices)
     else:
         backward, forward = backward_values, forward_projection
-        calculation_device, calculation_periods, calculation_grids, calculation_choices = device_info, scenario_periods, scenario_grids, choices
+        calculation_periods, calculation_grids, calculation_choices = scenario_periods, scenario_grids, choices
 
     grid_at = perf_counter()
 
@@ -253,13 +255,19 @@ def solve_pass(device_info: DeviceInfo, device_state: DeviceState, scenarios: li
         lookahead_results={name: frame.iloc[num_visible_periods:].reset_index(drop=True) for name, frame in frames.items()},
     )
     finished_at = perf_counter()
-    print(
-        f"dp_model end: status=success validation_seconds={validated_at - began_at:.6f} "
-        f"setup_seconds={setup_at - validated_at:.6f} periods_seconds={periods_at - setup_at:.6f} "
-        f"grid_actions_seconds={grid_at - periods_at:.6f} backward_seconds={backward_at - grid_at:.6f} "
-        f"forward_seconds={forward_at - backward_at - scoring_seconds:.6f} scoring_seconds={scoring_seconds:.6f} "
-        f"reports_seconds={finished_at - forward_at:.6f} elapsed_seconds={finished_at - began_at:.6f}",
-        flush=True,
+    LOGGER.debug(
+        "dp_model timings: validation_seconds=%.6f setup_seconds=%.6f periods_seconds=%.6f "
+        "grid_actions_seconds=%.6f backward_seconds=%.6f forward_seconds=%.6f scoring_seconds=%.6f "
+        "reports_seconds=%.6f elapsed_seconds=%.6f",
+        validated_at - began_at,
+        setup_at - validated_at,
+        periods_at - setup_at,
+        grid_at - periods_at,
+        backward_at - grid_at,
+        forward_at - backward_at - scoring_seconds,
+        scoring_seconds,
+        finished_at - forward_at,
+        finished_at - began_at,
     )
     return result
 
@@ -270,18 +278,28 @@ def result_score(result: SimulationResult, scenarios: list[ScenarioData]) -> flo
 
 
 def projection_intervals(config: Config, starts_at: datetime) -> list[tuple[datetime, datetime]]:
-    """DP's uniform visible steps start at the projection instant, in UTC."""
-    minutes = config.energy_plan.optimiser_specific.dynamic_programing.projection_resolution_mins
-    if type(minutes) is not int or minutes <= 0 or config.energy_plan.num_projection_hours <= 0:
-        raise ValueError("DP projection duration and timestep must be positive")
+    """Apply configured elapsed durations, splitting at the visible report limit."""
+    settings = config.energy_plan
+    minutes = settings.optimiser_specific.dynamic_programing.projection_resolution_mins
+    if settings.num_projection_hours <= 0 or not minutes or any(type(step) is not int or step <= 0 for step in minutes):
+        raise ValueError("DP projection duration and timesteps must be positive")
     cursor = utc_instant(starts_at)
-    end = cursor + timedelta(hours=config.energy_plan.num_projection_hours)
+    end = cursor + timedelta(hours=settings.num_projection_hours)
+    visible_end = min(end, cursor + timedelta(hours=settings.num_visible_projection_hours))
     intervals = []
-    while cursor < end:
-        next_end = min(end, cursor + timedelta(minutes=minutes))
+    for step in minutes:
+        next_end = min(end, cursor + timedelta(minutes=step))
+        if cursor < visible_end < next_end:
+            intervals.append((cursor, visible_end))
+            cursor = visible_end
         intervals.append((cursor, next_end))
         cursor = next_end
+        if cursor == end:
+            break
+    if cursor < end:
+        raise ValueError("DP projection_resolution_mins must cover num_projection_hours")
     return intervals
+
 
 
 def protection_value(config: Config, starts_at: datetime, projection_hours: float) -> float:
@@ -347,7 +365,7 @@ def get_numba_functions():
     return njit(cache=True)(backward_values), njit(cache=True)(forward_projection)
 
 
-def backward_values(device: DeviceInfo, capacity: float, periods: list[Period], grids: list[list[float]], choices: list[Action], terminal_rate: float) -> list[list[float]]:
+def backward_values(device: DeviceParameters, capacity: float, periods: list[Period], grids: list[list[float]], choices: list[Action], terminal_rate: float) -> list[list[float]]:
     values = [[terminal_rate * battery for battery in grids[-1]]]
     for t in range(len(periods) - 1, -1, -1):
         period = periods[t]
@@ -373,7 +391,7 @@ def backward_values(device: DeviceInfo, capacity: float, periods: list[Period], 
     return values[::-1]
 
 
-def forward_projection(device: DeviceInfo, capacity: float, periods: list[Period], grids: list[list[float]], values: list[list[float]], choices: list[Action], initial: float, first_action: Action) -> list[Step] | None:
+def forward_projection(device: DeviceParameters, capacity: float, periods: list[Period], grids: list[list[float]], values: list[list[float]], choices: list[Action], initial: float, first_action: Action) -> list[Step] | None:
     """Re-evaluate the policy at exact states, including the shared first action."""
     battery = initial
     path = []
@@ -456,7 +474,7 @@ def command(action: Action, period: Period, capacity: float) -> NextAction:
     )
 
 
-def simulate_system_single_time_period(device: DeviceInfo, capacity: float, period: Period, battery: float, action: Action) -> Step | None:
+def simulate_system_single_time_period(device: DeviceParameters, capacity: float, period: Period, battery: float, action: Action) -> Step | None:
     """Simulate the actual command; user/export limits reject unsafe responses."""
     mode, rate = action
     pv, load, hours = period.solar, period.load, period.hours

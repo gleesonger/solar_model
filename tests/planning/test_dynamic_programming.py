@@ -191,7 +191,7 @@ def test_stage_logging_separates_nested_compilation_from_projection(inputs, monk
     caplog.clear()
     monkeypatch.setattr(dp, "solve_pass", lambda *args, **kwargs: result)
     dp.simulate_energy_plan(*inputs, grid_step_percent=2.)
-    assert "compilation_seconds=0.000000" in caplog.text
+    assert "compilation_seconds=0.000 projection_seconds=" in caplog.text
 
 
 def test_failed_project_logs_failure_without_success(inputs, monkeypatch, caplog):

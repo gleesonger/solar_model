@@ -31,12 +31,14 @@ def sample_result():
 
 @pytest.mark.parametrize("model,adjustment", [("MILP", 75.), ("DP", 75.5), ("DP", 0.)])
 @pytest.mark.parametrize("solar,load", [("med", "med"), ("high", "low")])
-def test_excel_filename_uses_applied_model_adjustment_scenario_and_plan_date(monkeypatch, model, adjustment, solar, load):
+@pytest.mark.parametrize("view,abbreviation", [("Compact", "com"), ("Advanced", "adv")])
+def test_excel_filename_uses_applied_model_adjustment_scenario_and_plan_date(monkeypatch, model, adjustment, solar, load, view, abbreviation):
     from solar_model.dashboard.tabs import plan
 
     tab = plan.PlanTab(load_config())
     tab.result = sample_result()
     tab.applied_model, tab.applied_adjustment = model, adjustment
+    tab.detail_view = view
     tab.solar_scenario, tab.load_scenario = SimpleNamespace(value=solar), SimpleNamespace(value=load)
     tab.model, tab.adjustment = SimpleNamespace(value="DP"), SimpleNamespace(value=99.)
     downloads = []
@@ -49,8 +51,8 @@ def test_excel_filename_uses_applied_model_adjustment_scenario_and_plan_date(mon
     monkeypatch.setattr(plan, "excel_bytes", capture_workbook)
     monkeypatch.setattr(plan.ui, "download", lambda content, **kwargs: downloads.append(kwargs))
     frame = tab.result.results[tab.scenario_name]
-    tab._download_detail(frame, plan.detail_columns(frame, compact=True))
-    assert downloads[0]["filename"] == f"plan-{model}-protection-{adjustment:g}-solar-{solar}-load-{load}-20261027-1005.xlsx"
+    tab._download_detail(frame, plan.detail_columns(frame, compact=view == "Compact"))
+    assert downloads[0]["filename"] == f"plan-{model}-{abbreviation}-protection-{adjustment:g}-solar-{solar}-load-{load}-20261027-1005.xlsx"
     assert exported_frames[0].Start.iloc[0] == "2026-10-27 10:05:00"
     assert exported_frames[0].End.iloc[0] == "2026-10-27 10:20:00"
     assert plan.detail_rows(frame, tab.config.timezone)[0]["starts_at"] == "10:05"

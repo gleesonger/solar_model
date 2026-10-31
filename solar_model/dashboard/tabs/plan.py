@@ -512,7 +512,8 @@ class PlanTab:
             exported = exported.rename(columns={column["name"]: column["label"] for column in columns})
             content = excel_bytes(exported, sheet_name="Plan detail")
             start = pd.Timestamp(frame.starts_at.iloc[0]).tz_convert(self.timezone)
-            ui.download(content, filename=f"plan-{self.applied_model}-protection-{self.applied_adjustment:g}-solar-{self.solar_scenario.value}-load-{self.load_scenario.value}-{start:%Y%m%d-%H%M}.xlsx",
+            view = "com" if self.detail_view == "Compact" else "adv"
+            ui.download(content, filename=f"plan-{self.applied_model}-{view}-protection-{self.applied_adjustment:g}-solar-{self.solar_scenario.value}-load-{self.load_scenario.value}-{start:%Y%m%d-%H%M}.xlsx",
                         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
         except Exception as error:
             LOGGER.exception("Plan detail download failed")

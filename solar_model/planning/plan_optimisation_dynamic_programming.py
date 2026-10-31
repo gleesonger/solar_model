@@ -116,12 +116,12 @@ def simulate_energy_plan(device_info: DeviceInfo, device_state: DeviceState, sce
             compiled = timer.duration if timer is not None and timer.done else 0.
             elapsed = perf_counter() - stage_at - compiled
             compilation_seconds += compiled
-            LOGGER.info("DP Refinement Stage #%d complete - compilation_seconds=%.6f projection_seconds=%.6f score=%.9f accepted=%s", index + 1, compiled, elapsed, best_score, accepted)
+            LOGGER.info("DP Refinement Stage #%d complete - compilation_seconds=%.3f projection_seconds=%.3f score=%.9f accepted=%s", index + 1, compiled, elapsed, best_score, accepted)
         elapsed = perf_counter() - began_at
-        LOGGER.info("DP Project end - elapsed_seconds=%.6f compile_seconds=%.6f projection_seconds=%.6f score=%.9f", elapsed, compilation_seconds, elapsed - compilation_seconds, best_score)
+        LOGGER.info("DP Project end - elapsed_seconds=%.3f compile_seconds=%.3f projection_seconds=%.3f score=%.9f", elapsed, compilation_seconds, elapsed - compilation_seconds, best_score)
         return result
     except Exception:
-        LOGGER.exception("DP Project failed - elapsed_seconds=%.6f", perf_counter() - began_at)
+        LOGGER.exception("DP Project failed - elapsed_seconds=%.3f", perf_counter() - began_at)
         raise
 
 
@@ -263,9 +263,9 @@ def solve_pass(device_info: DeviceInfo, device_state: DeviceState, scenarios: li
     )
     finished_at = perf_counter()
     LOGGER.debug(
-        "dp_model timings: validation_seconds=%.6f setup_seconds=%.6f periods_seconds=%.6f "
-        "grid_actions_seconds=%.6f backward_seconds=%.6f forward_seconds=%.6f scoring_seconds=%.6f "
-        "reports_seconds=%.6f elapsed_seconds=%.6f",
+        "dp_model timings: validation_seconds=%.3f setup_seconds=%.3f periods_seconds=%.3f "
+        "grid_actions_seconds=%.3f backward_seconds=%.3f forward_seconds=%.3f scoring_seconds=%.3f "
+        "reports_seconds=%.3f elapsed_seconds=%.3f",
         validated_at - began_at,
         setup_at - validated_at,
         periods_at - setup_at,
@@ -369,7 +369,7 @@ def get_numba_functions():
         raise RuntimeError('Numba requires installation with: pip install -e ".[numba]"') from error
     for helper in (simulate_system_single_time_period, interpolate, battery_protection_score):
         register_jitable(helper)
-    return njit(cache=True)(backward_values), njit(cache=True)(forward_projection)
+    return njit(cache=False)(backward_values), njit(cache=False)(forward_projection)
 
 
 def backward_values(device: DeviceParameters, capacity: float, periods: list[Period], grids: list[list[float]], choices: list[Action], terminal_rate: float) -> list[list[float]]:

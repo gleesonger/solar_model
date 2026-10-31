@@ -223,7 +223,7 @@ The source is ordered top down: data types first, then `simulate_energy_plan()`,
 
 DP function names have no leading underscores. Its interval/scoring helpers are `projection_intervals()`, `protection_value()`, `terminal_rate()` and `reference_import_rate()`; MILP retains its own function names.
 
-`simulate_energy_plan()` emits these INFO milestones through the shared `solar_model` logger:
+`simulate_energy_plan()` emits these INFO milestones through the shared `solar_model` logger. All DP timing fields (including DEBUG and failure logs) show seconds to three decimal places (1 ms); score precision is unchanged:
 
 - `DP Model Start`: total projection hours, actual number of time steps, number of stages and `use_numba`.
 - `DP Refinement Stage #1 complete` (and subsequent one-based stages): `compilation_seconds`, `projection_seconds`, retained `score` and `accepted` (true when the stage improves the retained plan). Projection time includes all stage work apart from compilation: preparation, backward value tables, forward rollouts, scoring and reports. Initial model setup is included in stage 1. Compilation is observed during real calls; there is no warm-up.

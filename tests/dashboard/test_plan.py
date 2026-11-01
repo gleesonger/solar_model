@@ -78,7 +78,7 @@ def test_scenario_average_cost_uses_joint_probabilities():
     from solar_model.dashboard.tabs.plan import scenario_average_cost
     from solar_model.planning.scenarios import scenario_probabilities
 
-    settings = load_config().scenarios
+    settings = load_config().energy_plan.scenarios
     results = {name: pd.DataFrame({"net_cost": [10. if name == "med" else 0.]})
                for name in scenario_probabilities(settings)}
     assert scenario_average_cost(results, settings) == pytest.approx(3.6)

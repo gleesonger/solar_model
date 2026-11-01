@@ -110,7 +110,7 @@ def test_numba_and_python_match_complete_configured_pipeline(inputs):
     rule = tariff.import_[0]
     tariff = replace(tariff, import_=(replace(rule, end_time="00:30", name="early"), replace(rule, start_time="00:30", name="later")))
     config = replace(config, timezone="UTC", tariffs=replace(config.tariffs, periods=(tariff,)))
-    scenarios = create_scenarios(scenarios[0].forecast_data, config.scenarios)
+    scenarios = create_scenarios(scenarios[0].forecast_data, config.energy_plan.scenarios)
     results = []
     for use_numba in (False, True):
         settings = replace(config.energy_plan.optimiser_specific.dynamic_programing, use_numba=use_numba)
@@ -424,7 +424,7 @@ def test_nine_scenario_result_replays_the_same_first_command_as_lp(inputs):
     device, state, scenarios, config, start = inputs
     base = scenarios[0].forecast_data
     forecast = ForecastData([replace(base.solar[0], kwh=4.), *base.solar[1:]], base.load)
-    scenarios = create_scenarios(forecast, config.scenarios)
+    scenarios = create_scenarios(forecast, config.energy_plan.scenarios)
     config = replace(config, energy_plan=replace(config.energy_plan, optimiser_specific=replace(config.energy_plan.optimiser_specific, dynamic_programing=replace(config.energy_plan.optimiser_specific.dynamic_programing, projection_resolution_mins=(30, 30) + (240,) * 6))))
     args = (device, state, scenarios, config, start)
     result = dp.solve_pass(*args)
@@ -447,7 +447,7 @@ def test_forced_first_command_is_shared_and_selected_using_all_nine_scenarios(in
     device = replace(device, inverter_max_absorption_power_kw=1.)
     base = scenarios[0].forecast_data
     forecast = ForecastData([replace(base.solar[0], kwh=1.), *base.solar[1:]], base.load)
-    scenarios = create_scenarios(forecast, config.scenarios)
+    scenarios = create_scenarios(forecast, config.energy_plan.scenarios)
     tariff = config.tariffs.periods[0]
     rule = tariff.import_[0]
     tariff = replace(tariff, import_=(replace(rule, end_time="00:30", rate=.01), replace(rule, start_time="00:30", rate=.4)))

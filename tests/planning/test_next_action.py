@@ -357,7 +357,7 @@ def test_one_charge_command_saturates_differently_across_nine_scenarios(inputs):
                      inverter_battery_charge_power_kw=8.8, charge_efficiency=.95)
     base = scenarios[0].forecast_data
     forecast = ForecastData([replace(base.solar[0], kwh=4.), *base.solar[1:]], base.load)
-    scenarios = create_scenarios(forecast, config.scenarios)
+    scenarios = create_scenarios(forecast, config.energy_plan.scenarios)
     action = make_action(8.8, 0., 100., 0.)
     result = simulate((device, state, scenarios, config, start), action, return_result=True)
     assert result.next_action.mode == action.mode

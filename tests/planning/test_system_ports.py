@@ -42,7 +42,7 @@ def test_one_solve_keeps_nine_scenarios_and_the_same_weighted_objective(inputs, 
     device, state, scenarios, config, start = inputs
     base = scenarios[0].forecast_data
     forecast = ForecastData([replace(base.solar[0], kwh=4.), *base.solar[1:]], base.load)
-    scenarios = create_scenarios(forecast, config.scenarios)
+    scenarios = create_scenarios(forecast, config.energy_plan.scenarios)
     config = replace(config, energy_plan=replace(config.energy_plan, protection_preference=50.))
     problems = []
     solve = cp.Problem.solve

@@ -404,7 +404,7 @@ class PlanTab:
             description = "Self-consumption"
         action_text = f"Action for next {minutes:g} mins - {description}"
         costs = [float(frame.net_cost.sum()) for frame in result.results.values()]
-        average_cost = scenario_average_cost(result.results, self.config.scenarios)
+        average_cost = scenario_average_cost(result.results, self.config.energy_plan.scenarios)
         cost_text = f"Scenario-average net cost: €{average_cost:.2f} · Range €{min(costs):.2f} to €{max(costs):.2f}"
         if self.chart is not None:
             self.model_label.set_text(f"Model: {self.applied_model}")
@@ -418,7 +418,7 @@ class PlanTab:
         with ui.row().classes("w-full items-center justify-between flex-wrap gap-2"):
             self.cost_label = ui.label(cost_text).classes("text-base font-semibold")
             with ui.row().classes("items-center flex-wrap gap-6"):
-                for label, dimension in (("Solar", self.config.scenarios.solar), ("Load", self.config.scenarios.house_load)):
+                for label, dimension in (("Solar", self.config.energy_plan.scenarios.solar), ("Load", self.config.energy_plan.scenarios.house_load)):
                     with ui.element("fieldset").classes("plan-scenario-group").props(f"data-testid=plan-{label.lower()}-scenario"):
                         ui.html(label, tag="legend").classes("text-sm font-semibold")
                         control = ui.toggle(

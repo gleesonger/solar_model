@@ -182,6 +182,7 @@ class OptimiserSpecificConfig:
 @dataclass(frozen=True)
 class EnergyPlanConfig:
     num_projection_hours: int
+    scenarios: ScenariosConfig
     num_visible_projection_hours: int = 24
     protection_preference: float = 50.
     minimum_battery_kwh: tuple[TariffRule, ...] = ()
@@ -262,7 +263,6 @@ class Config:
     dashboard: DashboardConfig
     tariffs: TariffsConfig
     actuals: ActualsConfig
-    scenarios: ScenariosConfig
 
     @property
     def actuals_to_forecast_panel_ids(self) -> dict[str, int]:
@@ -276,16 +276,18 @@ def load_config(path: str | Path = "config.yaml") -> Config:
         raw_config = yaml.safe_load(file)
 
     try:
-        scenario_data = raw_config.get("scenarios") if isinstance(raw_config, dict) else None
+        if isinstance(raw_config, dict) and "scenarios" in raw_config:
+            raise ValueError("move scenarios under energy_plan.scenarios")
+        energy_plan_data = raw_config.get("energy_plan") if isinstance(raw_config, dict) else None
+        scenario_data = energy_plan_data.get("scenarios") if isinstance(energy_plan_data, dict) else None
         if isinstance(scenario_data, dict):
             for name in ("solar", "house_load"):
                 levels = scenario_data.get(name)
                 if not isinstance(levels, dict) or set(levels) != {"low", "med", "high"}:
-                    raise ValueError(f"scenarios.{name} requires exactly low, med, high entries")
+                    raise ValueError(f"energy_plan.scenarios.{name} requires exactly low, med, high entries")
                 for level in levels.values():
                     if not isinstance(level, dict) or set(level) != {"multiplier", "probability"}:
-                        raise ValueError(f"scenarios.{name} entries require multiplier and probability")
-        energy_plan_data = raw_config.get("energy_plan") if isinstance(raw_config, dict) else None
+                        raise ValueError(f"energy_plan.scenarios.{name} entries require multiplier and probability")
         if isinstance(energy_plan_data, dict):
             if "projection_resolution_mins" in energy_plan_data or "dynamic_programming" in energy_plan_data:
                 raise ValueError("move optimiser settings under energy_plan.optimiser_specific: mix_integer_linear_prog and dynamic_programing")

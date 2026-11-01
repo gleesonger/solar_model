@@ -13,6 +13,20 @@ dashboard:
     pv1: East
     pv2: West
 
+actuals:
+  data_retrival_schedule:
+    live_update_interval_seconds: 1
+    full_updated_interval_seconds: 60
+  modbus:
+    host: 192.168.1.130
+    port: 502
+    timeout_seconds: 5
+    default_device_id: 247
+
+
+additional_device_info:
+  charge_efficiency: 0.95
+  discharge_efficiency: 0.95
 
 tariffs:
   periods:
@@ -82,8 +96,15 @@ tariffs:
           start_time: "00:00"
           end_time: "24:00"
           rate: 0.1716
-
+          
 forecast:
+
+  load:
+    model_calibration_parameters:
+      lookback: 42                          # days
+      halflife: 14                          # days
+      prior_effective_observations: 0.2     # influence after one day of weekend evidence (blending from all days to seperate weekend experiance)
+
   solar:
     interval_seconds: 3600
     timeout_seconds: 10
@@ -115,29 +136,26 @@ forecast:
         lookback: null                        # all earlier completed hours today; optional limit in hours
         halflife: 1                           # hours
         prior_effective_observations: 0.3333  # Controls how strongly today’s completed hours adjust the solar forecast - 1 hour weights 33%
-  load:
-    model_calibration_parameters:
-      lookback: 42                          # days
-      halflife: 14                          # days
-      prior_effective_observations: 0.2     # influence after one day of weekend evidence (blending from all days to seperate weekend experiance)
-
-scenarios:
-  solar:
-    low:  {multiplier: 0.5, probability: 0.2}
-    med:  {multiplier: 1.0, probability: 0.6}
-    high: {multiplier: 1.5, probability: 0.2}
-  house_load:
-    low:  {multiplier: 0.5, probability: 0.2}
-    med:  {multiplier: 1.0, probability: 0.6}
-    high: {multiplier: 1.5, probability: 0.2}
 
 energy_plan:
+
   num_projection_hours: 48
   num_visible_projection_hours: 24
-
-  protection_preference: 50             # X >= 0; may exceed 100 to increase protection value
-
   preferred_reserve_kwh: 3               # Target stored kWh measured from zero
+  protection_preference: 50              # X >= 0; may exceed 100 to increase protection value
+
+
+  scenarios:
+    solar:
+      low:  {multiplier: 0.5, probability: 0.2}
+      med:  {multiplier: 1.0, probability: 0.6}
+      high: {multiplier: 1.5, probability: 0.2}
+    house_load:
+      low:  {multiplier: 0.5, probability: 0.2}
+      med:  {multiplier: 1.0, probability: 0.6}
+      high: {multiplier: 1.5, probability: 0.2}
+
+
   
   min_forced_charge_power_kw: 0.1        # Minimum requested charge power; planning preference
   min_forced_discharge_power_kw: 0.1     # Minimum requested discharge power; planning preference
@@ -178,18 +196,5 @@ energy_plan:
       end_time: "24:00"
       rate: 999
 
-additional_device_info:
-  charge_efficiency: 0.95
-  discharge_efficiency: 0.95
 
 
-
-actuals:
-  data_retrival_schedule:
-    live_update_interval_seconds: 1
-    full_updated_interval_seconds: 60
-  modbus:
-    host: 192.168.1.130
-    port: 502
-    timeout_seconds: 5
-    default_device_id: 247

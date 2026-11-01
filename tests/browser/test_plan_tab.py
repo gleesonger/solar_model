@@ -56,8 +56,8 @@ async def calculate(callback, *args):
         frame['terminal_score'] = 0.
         frame['tariff_name'] = model
         load, solar = ('med', 'med') if name == 'med' else name.split('_')
-        frame['solar_kwh'] *= getattr(config.scenarios.solar, solar).multiplier
-        frame['load_kwh'] *= getattr(config.scenarios.house_load, load).multiplier
+        frame['solar_kwh'] *= getattr(config.energy_plan.scenarios.solar, solar).multiplier
+        frame['load_kwh'] *= getattr(config.energy_plan.scenarios.house_load, load).multiplier
         result.results[name] = frame
         extra = frame.iloc[[-1] * 6].copy().reset_index(drop=True)
         extra['starts_at'] = pd.date_range(frame.ends_at.iloc[-1], periods=6, freq='4h')
@@ -82,8 +82,8 @@ def page():
         with ui.tab_panels(tabs, value='Plan').classes('w-full'):
             with ui.tab_panel('Plan').classes('p-0 min-w-0'):
                 config = load_config()
-                config = replace(config, scenarios=replace(config.scenarios,
-                    solar=replace(config.scenarios.solar, low=replace(config.scenarios.solar.low, multiplier=.4))))
+                config = replace(config, energy_plan=replace(config.energy_plan, scenarios=replace(config.energy_plan.scenarios,
+                    solar=replace(config.energy_plan.scenarios.solar, low=replace(config.energy_plan.scenarios.solar.low, multiplier=.4)))))
                 PlanTab(config).render_plan_tab()
 
 if __name__ == '__main__':

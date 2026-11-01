@@ -33,7 +33,7 @@ def test_in_memory_plan_preserves_scenario_energy_and_cost(resolution, expected_
         protection_preference=0.,
     ))
 
-    scenarios = create_scenarios(baseline, config.scenarios)
+    scenarios = create_scenarios(baseline, config.energy_plan.scenarios)
     forecasts = {scenario.name: scenario.forecast_data for scenario in scenarios}
     plans = simulate_energy_plan(device, DeviceState(0.), scenarios, config, start).results
 
@@ -57,7 +57,7 @@ def test_generated_scenarios_separate_names_and_probabilities_from_forecasts():
     start = datetime(2026, 10, 24, tzinfo=timezone.utc)
     end = start + timedelta(hours=1)
     forecast = ForecastData([ForecastInterval(start, end, 1.)], [ForecastInterval(start, end, 2.)])
-    scenarios = create_scenarios(forecast, load_config().scenarios)
+    scenarios = create_scenarios(forecast, load_config().energy_plan.scenarios)
     assert isinstance(scenarios, list)
     assert len({scenario.name for scenario in scenarios}) == 9
     assert sum(scenario.probability for scenario in scenarios) == pytest.approx(1.)

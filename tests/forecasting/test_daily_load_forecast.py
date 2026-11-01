@@ -138,7 +138,7 @@ def test_planning_house_forecast_covers_whole_hours_for_scenarios(tmp_path):
         from solar_model.planning.types import ForecastData
         from solar_model.planning.scenarios import create_scenarios
         forecast = ForecastData(intervals, intervals)
-        scenarios = create_scenarios(forecast, config.scenarios)
+        scenarios = create_scenarios(forecast, config.energy_plan.scenarios)
         assert len(scenarios) == 9
         assert forecast.sum(as_of, as_of + timedelta(hours=2)).load_kwh == 2.
     finally:

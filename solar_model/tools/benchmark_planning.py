@@ -94,7 +94,7 @@ def _worker(connection, case: str, config_path: str, grid: str = "historical", m
             )
             config = replace(config, tariffs=replace(config.tariffs, periods=periods))
 
-        scenarios = create_scenarios(ForecastData(solar, load), config.scenarios)
+        scenarios = create_scenarios(ForecastData(solar, load), config.energy_plan.scenarios)
         assert len(scenarios) == 9
         device = DeviceInfo(**{field.name: 1. for field in fields(DeviceInfo)})
         device = replace(

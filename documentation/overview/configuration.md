@@ -34,19 +34,22 @@ The live collector passes these settings to solar correction and the fixed daily
 
 ## Validation and parsing
 
-`scenarios.solar` and `scenarios.house_load` each require exactly `low`, `med`, `high`, with explicit `multiplier` and `probability` fields. Multipliers must be finite, non-negative and nondecreasing; probabilities must be finite and in [0, 1], totalling 97%-103% per dimension (inclusive); accepted probabilities are normalised to sum to one during loading. Replace former triples/comma-separated settings with this mapping:
+`energy_plan.scenarios.solar` and `energy_plan.scenarios.house_load` each require exactly `low`, `med`, `high`, with explicit `multiplier` and `probability` fields. Multipliers must be finite, non-negative and nondecreasing; probabilities must be finite and in [0, 1], totalling 97%-103% per dimension (inclusive); accepted probabilities are normalised to sum to one during loading. Replace former triples/comma-separated settings with this mapping:
 
 ```yaml
-scenarios:
-  solar:
-    low:  {multiplier: 0.5, probability: 0.2}
-    med:  {multiplier: 1.0, probability: 0.6}
-    high: {multiplier: 1.5, probability: 0.2}
-  house_load:
-    low:  {multiplier: 0.5, probability: 0.2}
-    med:  {multiplier: 1.0, probability: 0.6}
-    high: {multiplier: 1.5, probability: 0.2}
+energy_plan:
+  scenarios:
+    solar:
+      low:  {multiplier: 0.5, probability: 0.2}
+      med:  {multiplier: 1.0, probability: 0.6}
+      high: {multiplier: 1.5, probability: 0.2}
+    house_load:
+      low:  {multiplier: 0.5, probability: 0.2}
+      med:  {multiplier: 1.0, probability: 0.6}
+      high: {multiplier: 1.5, probability: 0.2}
 ```
+
+Move any former top-level `scenarios` block under `energy_plan`; the old location is rejected. Runtime consumers use `config.energy_plan.scenarios`.
 
 Joint probabilities multiply the two dimension probabilities, assuming independence (Med/Med = 0.36). Zero-probability cases remain available for inspection. Dashboard labels use the configured multipliers and its scenario-average cost uses the joint probabilities.
 

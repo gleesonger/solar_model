@@ -237,7 +237,7 @@ Forecasts supply interval solar and house-load energy for the planning horizon, 
 | Med | 1.0 | 0.6 |
 | High | 1.5 | 0.2 |
 
-The required top-level `scenarios.solar` and `scenarios.house_load` mappings configure low/med/high entries with explicit multipliers and probabilities (shipped values above). `create_scenarios(forecast, config.scenarios)` combines every load/solar pair and assigns each of nine scenarios the product of its configured dimension probabilities, assuming independence. These are planning assumptions, not calibrated probabilities. The pure solver API also accepts custom `ScenarioData` probabilities, requiring finite non-negative weights with positive total and normalising the combined objective.
+The required `energy_plan.scenarios.solar` and `energy_plan.scenarios.house_load` mappings configure low/med/high entries with explicit multipliers and probabilities (shipped values above). `create_scenarios(forecast, config.energy_plan.scenarios)` combines every load/solar pair and assigns each of nine scenarios the product of its configured dimension probabilities, assuming independence. These are planning assumptions, not calibrated probabilities. The pure solver API also accepts custom `ScenarioData` probabilities, requiring finite non-negative weights with positive total and normalising the combined objective.
 
 The generator first samples contiguous whole-hour coverage into paired half-hours. Low/med preserve those half-hour proportions. High load scales each hour by its configured multiplier and redistributes 80% into its first half-hour and 20% into its second; high solar uses 25% then 75%. Thus the high cases change timing as well as totals. Names are `load_solar` (for example `low_high`), except both med is named `med`.
 

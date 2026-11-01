@@ -446,3 +446,55 @@ def test_advanced_plan_details_use_period_power_and_projected_battery_targets():
     missing_capacity = advanced_plan_frame(detail_frame(original, None), "Europe/Dublin")
     assert "to 4.20kWh" in missing_capacity.plan_action.iloc[0]
     assert "SoC" not in missing_capacity.plan_action.iloc[0]
+
+
+def test_advanced_charge_details_use_import_power_for_shared_and_inferred_actions():
+    from solar_model.dashboard.tabs.plan import advanced_plan_frame
+
+    original = sample_result().results["med"].assign(grid_export_kwh=0., grid_to_battery_kwh=[0., .6])
+    advanced = advanced_plan_frame(detail_frame(original, 20.), "Europe/Dublin", OperatingMode.CHARGE_PV_FIRST)
+    assert advanced.plan_action.tolist() == [
+        "Force charge: 1.20kW to 4.20kWh/21.0%",
+        "Force charge: 0.80kW to 3.00kWh/15.0%",
+    ]
+    assert detail_rows(advanced, "Europe/Dublin")[0]["plan_action"] == advanced.plan_action.iloc[0]
+    assert "plan_action" not in original
+
+
+@pytest.mark.parametrize("wrapped", [False, True])
+def test_infeasible_refresh_reports_message_without_traceback(monkeypatch, caplog, wrapped):
+    import asyncio
+    from nicegui.run import safe_callback
+    from solar_model.dashboard.tabs import plan
+
+    tab = plan.PlanTab(load_config())
+    previous = sample_result()
+    tab.result = previous
+    status, notices, enabled = [], [], []
+    control = SimpleNamespace(
+        set_visibility=lambda value: None,
+        disable=lambda: None,
+        enable=lambda: None,
+        set_enabled=enabled.append,
+    )
+    tab.refresh_button = tab.loading = tab.settings_button = control
+    tab.status = SimpleNamespace(set_visibility=lambda value: None, set_text=status.append)
+
+    def fail():
+        raise plan.NoFeasiblePlanError("unable to find a feasible energy plan on the dynamic-programming grid")
+
+    async def calculate(*args):
+        return safe_callback(fail) if wrapped else fail()
+
+    async def warm():
+        pass
+
+    monkeypatch.setattr(plan.run, "cpu_bound", calculate)
+    monkeypatch.setattr(plan, "ensure_planning_worker", warm)
+    monkeypatch.setattr(plan, "notify_error", notices.append)
+    asyncio.run(tab.refresh())
+    assert notices == ["Unable to calculate plan: unable to find a feasible energy plan on the dynamic-programming grid"]
+    assert status == ["Plan refresh failed. The previous plan is still shown."]
+    assert tab.result is previous and not tab.running
+    assert enabled == [True]
+    assert all(record.exc_info is None for record in caplog.records)

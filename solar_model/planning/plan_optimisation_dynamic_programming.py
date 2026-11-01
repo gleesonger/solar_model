@@ -14,7 +14,7 @@ import pandas as pd
 
 from solar_model.config import Config, DPRefinementConfig, EnergyPlanConfig
 from solar_model.logging_setup import LOGGER
-from solar_model.planning.types import DeviceInfo, DeviceState, NextAction, OperatingMode, ScenarioData, SimulationResult
+from solar_model.planning.types import DeviceInfo, DeviceState, NextAction, NoFeasiblePlanError, OperatingMode, ScenarioData, SimulationResult
 from solar_model.tariffs import tariff_rule, tariff_rule_rate, tariff_rules_for_timestamp
 from solar_model.time_utils import utc_instant
 
@@ -104,8 +104,8 @@ def simulate_energy_plan(device_info: DeviceInfo, device_state: DeviceState, sce
             try:
                 with install_listener("numba:compile", timer) if settings.use_numba else nullcontext():
                     refined = solve_pass(device_info, device_state, scenarios, config, projection_starts_at, grid_step_percent=stage.grid_step_percent, power_divisions=stage.power_divisions, battery_bounds=bounds)
-            except ValueError as error:
-                if result is None or str(error) != "unable to find a feasible energy plan on the dynamic-programming grid":
+            except NoFeasiblePlanError:
+                if result is None:
                     raise
                 LOGGER.warning("DP Refinement Stage #%d infeasible - retaining previous result", index + 1)
                 refined = None
@@ -120,6 +120,9 @@ def simulate_energy_plan(device_info: DeviceInfo, device_state: DeviceState, sce
         elapsed = perf_counter() - began_at
         LOGGER.info("DP Project end - elapsed_seconds=%.3f compile_seconds=%.3f projection_seconds=%.3f score=%.9f", elapsed, compilation_seconds, elapsed - compilation_seconds, best_score)
         return result
+    except NoFeasiblePlanError as error:
+        LOGGER.warning("DP unable to calculate a plan - %s - elapsed_seconds=%.3f", error, perf_counter() - began_at)
+        raise
     except Exception:
         LOGGER.exception("DP Project failed - elapsed_seconds=%.3f", perf_counter() - began_at)
         raise
@@ -252,7 +255,7 @@ def solve_pass(device_info: DeviceInfo, device_state: DeviceState, scenarios: li
         if len(paths) == len(scenarios) and score > best_score:
             best_score, best_action, best_paths = score, action, paths
     if best_paths is None:
-        raise ValueError("unable to find a feasible energy plan on the dynamic-programming grid")
+        raise NoFeasiblePlanError("unable to find a feasible energy plan on the dynamic-programming grid")
     forward_at = perf_counter()
 
     frames = {s.name: result_frame(device_info, periods, path, initial, terminal_credit_rate) for s, periods, path in zip(scenarios, scenario_periods, best_paths)}

@@ -140,7 +140,7 @@ def test_default_refinement_retains_better_paths_and_centres_next_bounds_on_them
     def fake_pass(*args, **kwargs):
         calls.append(kwargs)
         if len(calls) == 4:
-            raise ValueError("unable to find a feasible energy plan on the dynamic-programming grid")
+            raise dp.NoFeasiblePlanError("unable to find a feasible energy plan on the dynamic-programming grid")
         return [coarse, improved, worse][len(calls) - 1]
 
     monkeypatch.setattr(dp, "solve_pass", fake_pass)
@@ -205,6 +205,18 @@ def test_failed_project_logs_failure_without_success(inputs, monkeypatch, caplog
         dp.simulate_energy_plan(*inputs)
     assert "DP Project failed - elapsed_seconds=" in caplog.text
     assert "DP Project end" not in caplog.text
+
+
+def test_infeasible_project_logs_message_without_traceback(inputs, monkeypatch, caplog):
+    def fail(*args, **kwargs):
+        raise dp.NoFeasiblePlanError("unable to find a feasible energy plan on the dynamic-programming grid")
+
+    monkeypatch.setattr(dp, "solve_pass", fail)
+    with pytest.raises(dp.NoFeasiblePlanError):
+        dp.simulate_energy_plan(*inputs)
+    assert "DP unable to calculate a plan" in caplog.text
+    assert "DP Project end" not in caplog.text
+    assert all(record.exc_info is None for record in caplog.records)
 
 
 def test_dp_aligns_first_hour_and_preserves_elapsed_horizon_through_dst(inputs):

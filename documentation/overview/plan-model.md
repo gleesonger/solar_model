@@ -63,7 +63,7 @@ The pure API returns `SimulationResult(next_action, results, lookahead_results)`
 
 ### 2.4 Replanning and Execution
 
-The dashboard calculates on demand using Refresh or Apply in the YAML settings dialog, in a worker process. Model selection is energy_plan.optimiser.model. A successful run disables Refresh until settings are reset or another Apply starts a new run; it is initially enabled, and failures allow retry. Solar/Load scenario buttons only change the displayed outcome. There is no timer applying commands or recalculating the plan.
+The dashboard calculates on demand using Refresh or Apply in the YAML settings dialog, in a worker process. Model selection is energy_plan.optimiser.model. A successful run disables Refresh until another Apply starts a new run; it is initially enabled, and failures allow retry. Solar/Load scenario buttons only change the displayed outcome. There is no timer applying commands or recalculating the plan.
 
 Each call builds and compiles a fresh problem; compiled-model caching and solver warm starts are disabled. The public wrapper owns overall timing/failure logging; the private function builds, solves and extracts results. Logs include start, compact timestep vector and complexity. Compilation, native solve and overall successful duration print to stdout with flushing.
 
@@ -366,3 +366,5 @@ The model assumes independent scenario probabilities and full scenario-specific 
 - Numerical/approximation tolerances and any deliberate tie-breaking policy; no exact-score secondary solve currently exists.
 
 Before execution, a separate controller needs command ownership, write/read-back verification, stale-plan/failure policy and handover to normal operation. No such controller is part of the current report model.
+
+When DP cannot find a feasible plan on its search grid, it reports a concise warning without a stack trace. The dashboard shows the reason, retains any previous plan and allows retry. Infeasible later refinement stages still retain the earlier feasible result. Unexpected programming/runtime errors retain traceback diagnostics.

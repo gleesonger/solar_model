@@ -329,7 +329,7 @@ if __name__ == '__main__':
                 assert not refresh.is_disabled()
                 assert page.get_by_test_id("plan-chart").is_visible()
                 page.get_by_role("button", name="Dismiss", exact=True).click()
-                # The dialog validates drafts, saves only the temporary config, and resets locally.
+                # The dialog validates drafts, saves only the temporary config, and loads global settings into the draft.
                 settings.click()
                 editor = page.get_by_role("textbox", name="YAML", exact=True)
                 valid_text = editor.input_value()
@@ -362,10 +362,12 @@ if __name__ == '__main__':
                     assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth + 1")
                     box = page.get_by_role("dialog").bounding_box()
                     assert box["x"] >= 0 and box["x"] + box["width"] <= width + 1
-                page.get_by_role("button", name="Reset to global", exact=True).click()
-                page.get_by_role("dialog").wait_for(state="hidden")
+                page.get_by_role("button", name="Load Global", exact=True).click()
+                assert page.get_by_role("dialog").is_visible()
+                playwright.expect(editor).to_have_value(re.compile(r"protection_preference: 50"))
+                page.get_by_role("button", name="Cancel", exact=True).click()
                 settings.click()
-                assert "protection_preference: 50" in page.get_by_role("textbox", name="YAML", exact=True).input_value()
+                assert "protection_preference: 99" in page.get_by_role("textbox", name="YAML", exact=True).input_value()
                 page.get_by_role("button", name="Cancel", exact=True).click()
                 # A second browser page has no overlay; saving never mutated the running global config.
                 other = browser.new_page()

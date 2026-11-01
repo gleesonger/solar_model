@@ -10,6 +10,7 @@ from zoneinfo import ZoneInfo
 from typing import Literal
 
 from nicegui import run, ui
+from nicegui.run import SubprocessException
 import pandas as pd
 
 from solar_model.config import Config, EnergyPlanConfig, ScenariosConfig, energy_plan_yaml, parse_energy_plan_yaml, save_energy_plan_yaml
@@ -20,7 +21,7 @@ from solar_model.dashboard.components.download_dialog import excel_bytes
 from solar_model.logging_setup import LOGGER
 from solar_model.planning.plan_optimisation_milp import battery_protection_score
 from solar_model.planning.scenarios import scenario_probabilities
-from solar_model.planning.types import OperatingMode, SimulationResult
+from solar_model.planning.types import NoFeasiblePlanError, OperatingMode, SimulationResult
 from solar_model.services.planning import generate_plan_report
 from solar_model.utils import table_to_object_list
 
@@ -209,15 +210,15 @@ def detail_rows(frame: pd.DataFrame, timezone_name: str, first_mode: OperatingMo
 
 
 def advanced_plan_frame(frame: pd.DataFrame, timezone_name: str, first_mode: OperatingMode | None = None) -> pd.DataFrame:
-    """Describe projected period-average exports and ending battery targets."""
+    """Describe projected grid power in the action's direction and battery targets."""
     display = frame.copy()
     actions = []
     for row, formatted in zip(frame.to_dict("records"), detail_rows(frame, timezone_name, first_mode)):
         parts = []
         hours = (row["ends_at"] - row["starts_at"]).total_seconds() / 3600
-        export = row.get("grid_export_kwh")
-        if hours > 0 and pd.notna(export):
-            parts.append(f"{export / hours:.2f}kW")
+        energy = row.get("grid_import_kwh" if formatted["plan_action"] == "Force charge" else "grid_export_kwh")
+        if hours > 0 and pd.notna(energy):
+            parts.append(f"{energy / hours:.2f}kW")
         target = row.get("battery_end_kwh")
         if pd.notna(target):
             text = f"{target:.2f}kWh"
@@ -409,15 +410,14 @@ class PlanTab:
                 error_label.set_text("")
                 notify_success("Energy plan settings saved to disk.")
 
-            def reset() -> None:
-                self.energy_plan_override = None
-                self._settings_changed()
-                dialog.close()
+            def load_global() -> None:
+                editor.set_value(energy_plan_yaml(self.config.energy_plan))
+                error_label.set_text("")
 
             with ui.row().classes("w-full items-center flex-wrap gap-2"):
                 ui.button("Save To Disk", on_click=save).props("outline color=primary")
                 ui.space()
-                ui.button("Reset to global", on_click=reset).props("flat")
+                ui.button("Load Global", on_click=load_global).props("flat")
                 ui.button("Cancel", on_click=dialog.close).props("flat")
                 ui.button("Apply", on_click=apply)
         dialog.on("hide", dialog.delete)
@@ -462,7 +462,12 @@ class PlanTab:
             self.applied_adjustment = report.protection_preference if report.protection_preference is not None else preference
             succeeded = True
         except Exception as error:
-            LOGGER.exception("Dashboard plan refresh failed")
+            if isinstance(error, SubprocessException) and error.original_type == NoFeasiblePlanError.__name__:
+                error = NoFeasiblePlanError(error.original_message)
+            if isinstance(error, NoFeasiblePlanError):
+                LOGGER.warning("Unable to calculate plan: %s", error)
+            else:
+                LOGGER.exception("Dashboard plan refresh failed")
             previous = " The previous plan is still shown." if self.result is not None else ""
             self.status.set_text("Plan refresh failed." + previous)
             self.status.set_visibility(True)

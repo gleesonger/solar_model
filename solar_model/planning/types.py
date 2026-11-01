@@ -13,6 +13,10 @@ class SimulationResult:
     results: dict[str,pd.DataFrame]
     lookahead_results: dict[str, pd.DataFrame] = field(default_factory=dict)
 
+class NoFeasiblePlanError(ValueError):
+    """The planner could not find a feasible plan on its search grid."""
+
+
 class OperatingMode(IntEnum):
     SELF_CONSUMPTION = 2
     CHARGE_PV_FIRST = 4

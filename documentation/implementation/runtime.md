@@ -33,8 +33,9 @@ If either child launch fails, `start_processes()` terminates and reaps any child
 ```text
 load_config(path='config.yaml')
   yaml.safe_load(file) -> Python mapping/lists/scalars
+  config_from_mapping(...) shares normalisation/validation with the UI editor
   validate scenarios dimensions contain exactly low/med/high multiplier/probability entries
-  expand optimiser_specific.mix_integer_linear_prog.projection_resolution_mins repetitions (e.g. 15*24)
+  expand optimiser.mix_integer_linear_prog.projection_resolution_mins repetitions (e.g. 15*24)
   normalise minimum_battery_kwh wrapper if supplied
   rename each tariff period's import key to import_
   dacite.from_dict(Config, cast=[tuple])
@@ -70,7 +71,7 @@ config.actuals_to_forecast_panel_ids   # resolves names to IDs for queries/chart
 | `actuals` | `ModbusConfig`, `DataRetrivalScheduleConfig`; full/live collection |
 | `forecast` | `ForecastConfig`, tuple of `SolarArrayConfig`; API requests, panel labels, model/UI selection |
 | `tariffs` | `TariffsConfig` → `TariffPeriod` → `TariffRule`; collection, planning, recalculation |
-| `energy_plan` | `EnergyPlanConfig`, scalar protection preference, limit-rule tuples and nested `OptimiserSpecificConfig` with `MixedIntegerLinearProgrammingConfig` and `DynamicProgrammingConfig` / `DPRefinementConfig` stages; offline planners |
+| `energy_plan` | `EnergyPlanConfig`, scalar protection preference, limit-rule tuples and nested `OptimiserConfig` with `MixedIntegerLinearProgrammingConfig` and `DynamicProgrammingConfig` / `DPRefinementConfig` stages; offline planners |
 | `additional_device_info` | Charge/discharge efficiencies; overrides planner metadata inputs |
 | `dashboard` | Host/port and PV-string mapping; NiceGUI and array allocation |
 
@@ -151,3 +152,5 @@ columns = table_to_object_list(Column,
 - `try_get()` catches only the explicitly supplied exception type. It is an error-handling helper, not a global fallback policy.
 
 Next: [collection and ingestion](collection.md). The [dashboard state guide](dashboard-ui.md) explains the worker/thread/browser boundaries in more detail.
+
+The UI editor uses parse_energy_plan_yaml(config, text) to construct a strict replacement EnergyPlanConfig, then validate it within a copied Config. energy_plan_yaml explicitly maps the EnergyPlanConfig schema to the file layout through EnergyPlanYamlDumper: compact scalar lists, inline scenario/refinement mappings, quoted times and separated sections. collapse_projection_resolutions encodes consecutive equal timestep runs; collapse_scheduled_rules groups identical time/rate/name combinations into weekday lists without altering time windows. Rule comment metadata is discarded during shared normalisation. Round-trip checks cover file YAML to settings to formatted YAML to equivalent settings, plus stable regenerated text. save_energy_plan_yaml validates against both the running config and latest disk contents, writes a temporary sibling file and atomically replaces the target. Only the energy_plan source section is replaced. Startup config_path is passed through DashboardLayout to PlanTab; ordinary startup defaults to config.yaml.

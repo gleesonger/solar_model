@@ -232,7 +232,7 @@ def test_dst_overlap_scenarios_and_solver_use_real_elapsed_hours(day, end_hour):
     assert next(scenario.forecast_data for scenario in scenarios if scenario.name == "med").sum(start, end).solar_kwh == 4.
     cfg = load_config()
     cfg = replace(cfg, tariffs=tariffs(), energy_plan=replace(cfg.energy_plan, num_projection_hours=28, num_visible_projection_hours=4,
-                  optimiser_specific=replace(cfg.energy_plan.optimiser_specific, mix_integer_linear_prog=replace(cfg.energy_plan.optimiser_specific.mix_integer_linear_prog, projection_resolution_mins=(60,) * 4 + (240,) * 6)), minimum_battery_kwh=(rule(0.),), maximum_battery_kwh=(rule(10.),)))
+                  optimiser=replace(cfg.energy_plan.optimiser, mix_integer_linear_prog=replace(cfg.energy_plan.optimiser.mix_integer_linear_prog, projection_resolution_mins=(60,) * 4 + (240,) * 6)), minimum_battery_kwh=(rule(0.),), maximum_battery_kwh=(rule(10.),)))
     device = DeviceInfo(**{f.name: 1. for f in fields(DeviceInfo)})
     device = replace(device, system_battery_capacity_kwh=10., battery_state_of_health_percent=100.,
                      inverter_max_active_power_kw=5., inverter_max_absorption_power_kw=5.,

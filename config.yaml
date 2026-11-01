@@ -138,58 +138,55 @@ forecast:
         prior_effective_observations: 0.3333  # Controls how strongly today’s completed hours adjust the solar forecast - 1 hour weights 33%
 
 energy_plan:
-
   num_projection_hours: 48
   num_visible_projection_hours: 24
-  preferred_reserve_kwh: 3               # Target stored kWh measured from zero
-  protection_preference: 50              # X >= 0; may exceed 100 to increase protection value
-
-
+  preferred_reserve_kwh: 3
+  protection_preference: 50
+  
   scenarios:
     solar:
-      low:  {multiplier: 0.5, probability: 0.2}
-      med:  {multiplier: 1.0, probability: 0.6}
+      low: {multiplier: 0.5, probability: 0.2}
+      med: {multiplier: 1.0, probability: 0.6}
       high: {multiplier: 1.5, probability: 0.2}
     house_load:
-      low:  {multiplier: 0.5, probability: 0.2}
-      med:  {multiplier: 1.0, probability: 0.6}
-      high: {multiplier: 1.5, probability: 0.2}
-
-
+      low: {multiplier: 0.7, probability: 0.2}
+      med: {multiplier: 1.0, probability: 0.6}
+      high: {multiplier: 1.3, probability: 0.2}
   
-  min_forced_charge_power_kw: 0.1        # Minimum requested charge power; planning preference
-  min_forced_discharge_power_kw: 0.1     # Minimum requested discharge power; planning preference
-  max_forced_charge_power_kw: 999        # Requested charge ceiling; capped by hardware capability
-  max_forced_discharge_power_kw: 999     # Requested discharge ceiling; capped by hardware capability
-
-  optimiser_specific:
-
+  min_forced_charge_power_kw: 0.1
+  min_forced_discharge_power_kw: 0.1
+  max_forced_charge_power_kw: 999
+  max_forced_discharge_power_kw: 999
+  
+  optimiser:
+    # model - mix_integer_linear_prog, dynamic_programming
+    model: dynamic_programming
+  
     mix_integer_linear_prog:
-      projection_resolution_mins: [15*4, 60*23, 240*6] # Visible steps align to UTC; lookahead starts after 24 elapsed hours.
-
-    dynamic_programing:
+      projection_resolution_mins: [15*4, 60*23, 240*6]
+  
+    dynamic_programming:
       use_numba: true
       projection_resolution_mins: [15*96, 60*24]
       refinement_stages:
-        - {grid_step_percent: 2, power_divisions: 5,  band_percent: null}
+        - {grid_step_percent: 2, power_divisions: 5, band_percent: null}
         - {grid_step_percent: 1, power_divisions: 10, band_percent: 5}
         - {grid_step_percent: 1, power_divisions: 20, band_percent: 3}
         - {grid_step_percent: 1, power_divisions: 100, band_percent: 1}
-
+  
   minimum_battery_kwh:
     - days: [Mon, Tue, Wed, Thu, Fri, Sat, Sun]
       name: Night
       start_time: "00:00"
       end_time: "24:00"
       rate: 0
-      comment: Zero rate allows full export
-
+  
   maximum_battery_kwh:
     - days: [Mon, Tue, Wed, Thu, Fri, Sat, Sun]
       start_time: "00:00"
       end_time: "24:00"
       rate: 999
-
+  
   limit_battery_export_rate_to_grid_kw:
     - days: [Mon, Tue, Wed, Thu, Fri, Sat, Sun]
       start_time: "00:00"

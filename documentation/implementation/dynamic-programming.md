@@ -24,7 +24,7 @@ See the [paired experiment](../reviews/dp-loop-optimisation-experiment.md) for t
 
 ## Default DP configuration
 
-`energy_plan.optimiser_specific.dynamic_programing` configures the default sequence:
+`energy_plan.optimiser.dynamic_programming` configures the default sequence:
 
 ```text
 (2% /5, full range)
@@ -39,7 +39,7 @@ The implementation owns its interval generation, exact protection curve, tariff-
 
 ### Python and Numba backends
 
-`use_numba: true` is the default under `energy_plan.optimiser_specific.dynamic_programing`. Set `use_numba: false` for Python execution. This configuration controls the same original backward and forward functions; there is no separate numerical-kernel implementation or public backend argument. Numba is included in the normal runtime requirements; the existing `python -m pip install -e ".[numba]"` command remains supported. Selecting Numba without installing it raises a clear error. The previous `backend` key is rejected; replace it with this boolean.
+`use_numba: true` is the default under `energy_plan.optimiser.dynamic_programming`. Set `use_numba: false` for Python execution. This configuration controls the same original backward and forward functions; there is no separate numerical-kernel implementation or public backend argument. Numba is included in the normal runtime requirements; the existing `python -m pip install -e ".[numba]"` command remains supported. Selecting Numba without installing it raises a clear error. The previous `backend` key is rejected; replace it with this boolean.
 
 The original backward pass, forward pass, single-period simulator and scoring formulas remain in one module. `compiled_functions()` imports Numba locally and creates cached `njit(cache=True)` versions of `backward_values()` and `forward_projection()`, registering their existing helpers for compilation. An explicit `if use_numba` / `else` selects the functions and inputs for each path. Python calls those same ordinary functions directly. The compiled dispatchers are reused across scenarios, stages and calls. Execution is single-threaded, without relaxed floating-point arithmetic or object-mode fallback. Python execution does not import Numba.
 
@@ -53,7 +53,7 @@ The sections below describe one solve pass, which the configured sequence repeat
 
 ## 1. Prepare the time periods and scenarios
 
-Build the complete horizon from `energy_plan.num_projection_hours` (48) and DP's `projection_resolution_mins` array (currently `[15*96, 60*24]`). The first 24 hours, selected by `num_visible_projection_hours`, contain 96 quarter-hour periods; the final 24 hours contain 24 one-hour lookahead periods. No extra periods are appended in code. Each period uses its own elapsed duration for power limits, battery flows and protection weighting. Different durations can be mixed anywhere in the array. Intervals split at the visible cutoff and clip at the total horizon. UTC arithmetic preserves elapsed hours across daylight-saving changes.
+Build the complete horizon from `energy_plan.num_projection_hours` (48) and DP's `projection_resolution_mins` array (currently `[15*96, 60*24]`). Shorten only the first configured period whose end passes the next full UTC hour, ending it on that hour, and defer the removed duration to a final period at the projection end. If a period already ends exactly on that first hour, leave the sequence unchanged; later hour crossings are not adjusted. The first command interval can be shortened if it crosses the hour. At 10:05 the first steps are `[15, 15, 15, 10, ...]` minutes and the final step is 5 minutes. At an hour-aligned start, the configured grid still gives 96 quarter-hour visible periods and 24 hourly lookahead periods. Intervals also split at the exact elapsed visible cutoff and clip at the total horizon: at 10:05 this yields 97 visible and 25 hidden periods, with lookahead durations `[55] + [60]*23 + [5]` minutes. The total remains exactly 48 elapsed hours. The array must already cover the complete horizon before alignment; the deferred tail cannot fill an underspecified array. Each actual duration drives power limits, battery flows and protection weights. UTC arithmetic preserves elapsed hours across daylight-saving changes.
 
 For every period in each scenario, determine:
 
@@ -82,7 +82,7 @@ A single `solve_pass()` accepts `grid_step_percent` and `power_divisions`, defau
 
 `battery_bounds` accepts one `(lower, upper)` pair per period, in SOC fractions from 0 to 1. Each pair constrains the battery energy at that period's end. The initial energy still comes from the measured device state. These are search bounds; they do not change physical battery schedules or executable SOC stops.
 
-Pass a list to share bounds across scenarios, or a dictionary mapping every scenario name to its own list. For example, `[(0., 1.)] * 96` searches the full battery range at all 96 visible period ends. If only visible bounds are supplied, the configured hidden period ends retain full-range bounds (24 in the current DP configuration). Alternatively, supply all 120 pairs to constrain both visible and hidden periods. Values must be finite, with `0 <= lower <= upper <= 1`.
+Pass a list to share bounds across scenarios, or a dictionary mapping every scenario name to its own list. Bounds need one pair per actual period returned by projection_intervals, including any alignment tail and visible-cutoff split. For an hour-aligned start, `[(0., 1.)] * 96` covers the visible period ends and 120 pairs cover the whole configured horizon; at 10:05 these counts become 97 and 122. If only visible bounds are supplied, hidden period ends retain full-range bounds. Values must be finite, with `0 <= lower <= upper <= 1`.
 
 At each period end, retain grid nodes inside the bound and add its exact endpoints. The backward pass interpolates against the next period end's own grid. The forward pass rejects commands ending outside that grid, including at the terminal time point. Thus a physically valid command can still be rejected by the search corridor.
 

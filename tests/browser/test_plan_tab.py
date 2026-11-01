@@ -18,6 +18,8 @@ def test_plan_refresh_scenarios_loading_and_failure(tmp_path):
     with socket.socket() as sock:
         sock.bind(("127.0.0.1", 0))
         port = sock.getsockname()[1]
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text((repo / "config.yaml").read_text(encoding="utf-8"), encoding="utf-8")
     script = tmp_path / "plan_app.py"
     script.write_text(f'''
 import sys
@@ -36,7 +38,10 @@ async def calculate(callback, *args):
     if callback.__name__ == "warm_planning_worker":
         await asyncio.sleep(.3)
         return 123
-    config, as_of, preference, model = args
+    config, as_of, override = args
+    config = replace(config, energy_plan=override) if override is not None else config
+    preference = config.energy_plan.protection_preference
+    model = "MILP" if config.energy_plan.optimiser.model == "mix_integer_linear_prog" else "DP"
     assert model in ('MILP', 'DP')
     await asyncio.sleep(2.)
     if preference == 99:
@@ -67,7 +72,7 @@ async def calculate(callback, *args):
         result.lookahead_results[name] = extra
     stamp = result.results['med'].starts_at.iloc[0]
     actuals = pd.DataFrame(dict(timestamp=[stamp - pd.Timedelta(hours=1), stamp], solar=[2.,2.], house_load=[1.,1.], battery=[4.,4.], grid_import=[.3,.4], grid_export=[.1,0.]))
-    return PlanReport(result, actuals, 20.)
+    return PlanReport(result, actuals, 20., config.energy_plan.scenarios, config.energy_plan.preferred_reserve_kwh, preference)
 run.cpu_bound = calculate
 
 @ui.page('/')
@@ -83,8 +88,12 @@ def page():
             with ui.tab_panel('Plan').classes('p-0 min-w-0'):
                 config = load_config()
                 config = replace(config, energy_plan=replace(config.energy_plan, scenarios=replace(config.energy_plan.scenarios,
+                    house_load=replace(config.energy_plan.scenarios.house_load,
+                        low=replace(config.energy_plan.scenarios.house_load.low, multiplier=.5),
+                        high=replace(config.energy_plan.scenarios.house_load.high, multiplier=1.5)))))
+                config = replace(config, energy_plan=replace(config.energy_plan, optimiser=replace(config.energy_plan.optimiser, model="mix_integer_linear_prog"), scenarios=replace(config.energy_plan.scenarios,
                     solar=replace(config.energy_plan.scenarios.solar, low=replace(config.energy_plan.scenarios.solar.low, multiplier=.4)))))
-                PlanTab(config).render_plan_tab()
+                PlanTab(config, {str(config_path)!r}).render_plan_tab()
 
 if __name__ == '__main__':
     ui.run(host='127.0.0.1', port={port}, reload=False, show=False)
@@ -119,25 +128,35 @@ if __name__ == '__main__':
                 page.goto(url)
                 refresh = page.get_by_role("button", name="Refresh plan", exact=True)
                 refresh.wait_for()
-                adjustment = page.locator('input[type="number"]')
-                model = page.get_by_role("combobox", name="Model", exact=True)
-                assert model.input_value() == "MILP"
-                assert adjustment.input_value() == "50"
-                assert adjustment.get_attribute("max") is None
-                adjustment.fill("75")
-                refresh.click()
+                settings = page.get_by_role("button", name="Plan settings", exact=True)
+
+                def change_preference(value, model_key=None, wait=True):
+                    settings.click()
+                    editor = page.get_by_role("textbox", name="YAML", exact=True)
+                    text = re.sub(r"(?m)^protection_preference:.*$", f"protection_preference: {value}", editor.input_value())
+                    if model_key is not None:
+                        text = re.sub(r"(?m)^  model:.*$", f"  model: {model_key}", text)
+                    editor.fill(text)
+                    page.get_by_role("button", name="Apply", exact=True).click()
+                    page.get_by_role("dialog").wait_for(state="hidden")
+                    if wait:
+                        refresh.wait_for(state="visible")
+                        page.wait_for_function("!Array.from(document.querySelectorAll('button')).find(e => e.textContent.includes('Plan settings')).disabled")
+                assert page.get_by_role("combobox", name="Model", exact=True).count() == 0
+                assert page.get_by_role("spinbutton").count() == 0
+                change_preference(75, wait=False)
                 page.get_by_text("Calculating plan…", exact=True).wait_for()
                 assert not refresh.is_visible()
-                assert adjustment.is_disabled()
-                assert page.locator(".q-select").evaluate("element => element.classList.contains('q-field--disabled')"), page.locator(".q-select").evaluate("element => element.outerHTML")
+                assert settings.is_disabled()
                 refresh.wait_for(state="visible")
-                page.get_by_text("Action for next 15 mins - Self-consumption", exact=True).wait_for()
+                page.get_by_test_id("plan-action").get_by_text("Next 15 mins", exact=True).wait_for()
+                page.get_by_test_id("plan-action").get_by_text("Self-consumption", exact=True).wait_for()
+                assert page.get_by_test_id("plan-action").evaluate("element => getComputedStyle(element).backgroundColor") != "rgba(0, 0, 0, 0)"
                 assert refresh.is_disabled()
-                page.get_by_text("Model: MILP", exact=True).wait_for()
-                adjustment.fill("25")
-                page.wait_for_function("!Array.from(document.querySelectorAll('button')).find(e => e.textContent.includes('Refresh plan')).disabled")
-                adjustment.fill("75")
-                page.wait_for_function("Array.from(document.querySelectorAll('button')).find(e => e.textContent.includes('Refresh plan')).disabled")
+                assert page.get_by_text(re.compile("^Model:")).count() == 0
+                assert page.get_by_text("UI overrides active", exact=True).count() == 0
+                assert page.get_by_text("No actual measurements available for today.", exact=True).count() == 0
+                page.get_by_text("\u20ac7.500 (\u20ac7.50 to \u20ac40.00)", exact=True).wait_for()
                 assert page.get_by_text(re.compile("^Adjustment changed")).count() == 0
                 assert page.get_by_text("Plan refreshed.", exact=True).count() == 0
                 assert page.get_by_text(re.compile("^Plan from ")).count() == 0
@@ -180,6 +199,9 @@ if __name__ == '__main__':
                 for label in ("Cost Score", "Protection Score", "Terminal Score", "Total Score"):
                     page.get_by_role("columnheader", name=label, exact=True).wait_for()
                 advanced_headers = page.get_by_role("columnheader").all_text_contents()
+                action_text = page.locator(".q-table tbody tr").first.locator("td").nth(3).inner_text()
+                assert "Self-consumption: 0.00kW" in action_text
+                assert "to 4.20kWh/21.0%" in action_text
                 loss_index = advanced_headers.index("Losses kWh")
                 assert page.locator(".q-table tbody tr").last.locator("td").nth(loss_index).inner_text() == "2.04"
                 assert advanced_headers[:5] == ["Start", "End", "t", "Plan action", "Tariff Name"]
@@ -197,13 +219,35 @@ if __name__ == '__main__':
                 assert page.locator(".q-table tbody tr").last.locator("td").nth(2).inner_text() == "29.00"
                 assert page.get_by_test_id("plan-chart").evaluate("element => echarts.getInstanceByDom(element).getOption().series[1].data.at(-1)[0]") == compact_end + 24 * 3600 * 1000
                 assert page.get_by_role("columnheader").count() > compact_count
+                # Both views share column sizing, typography and spacing on desktop/mobile.
+                def table_style():
+                    return page.locator(".plan-detail-table").evaluate("""element => {
+                        const properties = ['fontSize', 'lineHeight', 'paddingTop', 'paddingRight',
+                            'paddingBottom', 'paddingLeft', 'marginTop', 'marginRight', 'marginBottom',
+                            'marginLeft', 'minWidth', 'maxWidth', 'whiteSpace', 'borderSpacing'];
+                        return ['th', 'td'].map(selector => {
+                            const style = getComputedStyle(element.querySelector(selector));
+                            return Object.fromEntries(properties.map(key => [key, style[key]]));
+                        });
+                    }""")
+
+                for width in (1440, 390):
+                    page.set_viewport_size({"width": width, "height": 1100})
+                    advanced_style = table_style()
+                    page.get_by_role("button", name="Compact", exact=True).click()
+                    page.wait_for_function("!Array.from(document.querySelectorAll('th')).some(e => e.textContent.includes('Battery start'))")
+                    assert table_style() == advanced_style
+                    page.get_by_role("button", name="Advanced", exact=True).click()
+                    page.get_by_role("columnheader", name="Battery start (kWh)", exact=True).wait_for()
+                    assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth + 1")
+                page.set_viewport_size({"width": 1440, "height": 1100})
                 page.get_by_role("button", name="Compact", exact=True).click()
                 page.wait_for_function("!Array.from(document.querySelectorAll('th')).some(e => e.textContent.includes('Battery start'))")
                 assert page.get_by_test_id("plan-chart").evaluate("element => echarts.getInstanceByDom(element).getOption().series[1].data.at(-1)[0]") == compact_end
                 with page.expect_download() as download_info:
                     page.get_by_role("button", name="Download Excel", exact=True).click()
                 download = download_info.value
-                assert download.suggested_filename.startswith("plan-MILP-protection-75-solar-med-load-med-")
+                assert download.suggested_filename.startswith("plan-MILP-com-protection-75-solar-med-load-med-")
                 assert download.suggested_filename.endswith(".xlsx")
                 with ZipFile(download.path()) as workbook:
                     assert 'name="Plan detail"' in workbook.read("xl/workbook.xml").decode()
@@ -223,16 +267,8 @@ if __name__ == '__main__':
                     return positions[0].length === positions[1].length &&
                         positions[0].every((value, i) => Math.abs(value - positions[1][i]) < 1);
                 }""")
-                model.click()
-                page.get_by_role("option", name="DP", exact=True).click()
-                page.wait_for_function("!Array.from(document.querySelectorAll('button')).find(e => e.textContent.includes('Refresh plan')).disabled")
-                model.click()
-                page.get_by_role("option", name="MILP", exact=True).click()
-                page.wait_for_function("Array.from(document.querySelectorAll('button')).find(e => e.textContent.includes('Refresh plan')).disabled")
-                model.click()
-                page.get_by_role("option", name="DP", exact=True).click()
-                refresh.click()
-                page.get_by_text("Model: DP", exact=True).wait_for()
+                change_preference(75, model_key="dynamic_programming")
+                assert page.get_by_text(re.compile("^Model:")).count() == 0
                 page.get_by_role("cell", name="DP", exact=True).first.wait_for()
                 assert refresh.is_disabled()
                 for width in (1440, 390):
@@ -277,27 +313,66 @@ if __name__ == '__main__':
                 solar_buttons.get_by_role("button", name="Med (1x)", exact=True).click()
                 page.wait_for_function("echarts.getInstanceByDom(document.querySelector('[data-testid=plan-chart]')).getOption().series[1].data[0][1] === 2")
                 assert page.get_by_test_id("plan-chart").evaluate("element => {const o = echarts.getInstanceByDom(element).getOption(); return o.legend[0].selected.Solar === false && o.dataZoom[0].start === 20 && o.dataZoom[0].end === 80;}")
-                adjustment.fill("25")
                 chart_id = page.get_by_test_id("plan-chart").evaluate("element => echarts.getInstanceByDom(element).id")
                 load_buttons.get_by_role("button", name="Low (0.5x)", exact=True).click()
                 solar_buttons.get_by_role("button", name="High (1.5x)", exact=True).click()
-                refresh.click()
-                page.get_by_text("€30.00", exact=True).wait_for()
+                change_preference(25)
+                page.get_by_text("\u20ac30.000 (-\u20ac2.50 to \u20ac30.00)", exact=True).wait_for()
                 page.get_by_text("37.50 / 6.25 kWh", exact=True).wait_for()
                 assert page.get_by_test_id("plan-chart").evaluate("element => echarts.getInstanceByDom(element).id") == chart_id
                 assert page.get_by_test_id("plan-chart").evaluate("element => {const o = echarts.getInstanceByDom(element).getOption(); return o.legend[0].selected.Solar === false && o.dataZoom[0].start === 20 && o.dataZoom[0].end === 80;}")
                 assert page.locator(".q-table tbody tr").count() == 7
-                adjustment.fill("99")
-                model.click()
-                page.get_by_role("option", name="MILP", exact=True).click()
-                refresh.click()
+                change_preference(99, model_key="mix_integer_linear_prog")
                 page.get_by_text("Plan refresh failed. The previous plan is still shown.", exact=True).wait_for()
-                assert refresh.is_visible() and not adjustment.is_disabled()
-                assert not page.locator(".q-select").evaluate("element => element.classList.contains('q-field--disabled')")
-                assert model.input_value() == "MILP"
-                page.get_by_text("Model: DP", exact=True).wait_for()
+                assert refresh.is_visible() and not settings.is_disabled()
+                assert page.get_by_text(re.compile("^Model:")).count() == 0
                 assert not refresh.is_disabled()
                 assert page.get_by_test_id("plan-chart").is_visible()
+                page.get_by_role("button", name="Dismiss", exact=True).click()
+                # The dialog validates drafts, saves only the temporary config, and resets locally.
+                settings.click()
+                editor = page.get_by_role("textbox", name="YAML", exact=True)
+                valid_text = editor.input_value()
+                editor.fill("unknown_setting: 12")
+                page.get_by_role("button", name="Apply", exact=True).click()
+                page.get_by_text(re.compile("invalid configuration in energy_plan editor")).wait_for()
+                assert page.get_by_role("dialog").is_visible()
+                editor.fill(valid_text.replace("protection_preference: 99", "protection_preference: 123"))
+                page.set_viewport_size({"width": 1440, "height": 1100})
+                save = page.get_by_role("button", name="Save To Disk", exact=True)
+                apply_button = page.get_by_role("button", name="Apply", exact=True)
+                assert save.evaluate("element => element.classList.contains('q-btn--outline')")
+                assert save.bounding_box()["x"] < apply_button.bounding_box()["x"]
+                assert abs(save.bounding_box()["y"] - apply_button.bounding_box()["y"]) < 2
+                save.click()
+                page.get_by_text("Save energy plan settings to disk?", exact=True).wait_for()
+                page.get_by_role("dialog").last.get_by_role("button", name="Cancel", exact=True).click()
+                import yaml
+                assert yaml.safe_load(config_path.read_text(encoding="utf-8"))["energy_plan"]["protection_preference"] == 50
+                assert editor.is_visible()
+                save.click()
+                page.get_by_role("button", name="Confirm save", exact=True).click()
+                page.get_by_text("Energy plan settings saved to disk.", exact=True).wait_for()
+                assert yaml.safe_load(config_path.read_text(encoding="utf-8"))["energy_plan"]["protection_preference"] == 123
+                assert editor.is_visible()
+                page.get_by_role("button", name="Dismiss", exact=True).click()
+                for width in (1440, 390):
+                    page.set_viewport_size({"width": width, "height": 1100})
+                    page.wait_for_timeout(150)
+                    assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth + 1")
+                    box = page.get_by_role("dialog").bounding_box()
+                    assert box["x"] >= 0 and box["x"] + box["width"] <= width + 1
+                page.get_by_role("button", name="Reset to global", exact=True).click()
+                page.get_by_role("dialog").wait_for(state="hidden")
+                settings.click()
+                assert "protection_preference: 50" in page.get_by_role("textbox", name="YAML", exact=True).input_value()
+                page.get_by_role("button", name="Cancel", exact=True).click()
+                # A second browser page has no overlay; saving never mutated the running global config.
+                other = browser.new_page()
+                other.goto(url)
+                other.get_by_role("button", name="Plan settings", exact=True).click()
+                assert "protection_preference: 50" in other.get_by_role("textbox", name="YAML", exact=True).input_value()
+                other.close()
                 assert not errors
                 browser.close()
         finally:

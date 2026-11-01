@@ -370,7 +370,7 @@ def _minimum(requested: cp.Expression, ceiling: float, upper: float, constraints
 def _projection_intervals(config: Config, starts_at: datetime) -> list[tuple[datetime, datetime]]:
     """Align visible steps to UTC, then apply configured lookahead durations."""
     s = config.energy_plan
-    timesteps = s.optimiser_specific.mix_integer_linear_prog.projection_resolution_mins
+    timesteps = s.optimiser.mix_integer_linear_prog.projection_resolution_mins
     if s.num_projection_hours <= 0 or not timesteps or any(type(minutes) is not int or minutes <= 0 for minutes in timesteps):
         raise ValueError("projection duration and resolution must be greater than zero")
     if sum(timesteps) < s.num_projection_hours * 60:

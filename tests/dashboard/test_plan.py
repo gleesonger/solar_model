@@ -40,7 +40,7 @@ def test_excel_filename_uses_applied_model_adjustment_scenario_and_plan_date(mon
     tab.applied_model, tab.applied_adjustment = model, adjustment
     tab.detail_view = view
     tab.solar_scenario, tab.load_scenario = SimpleNamespace(value=solar), SimpleNamespace(value=load)
-    tab.model, tab.adjustment = SimpleNamespace(value="DP"), SimpleNamespace(value=99.)
+    tab.model = SimpleNamespace(value="DP")
     downloads = []
     exported_frames = []
 
@@ -269,9 +269,9 @@ def test_preference_is_request_local_and_database_is_closed(monkeypatch, fails, 
     original = config.energy_plan.protection_preference
     result = sample_result()
 
-    def plan(db, configured, when, selected_model):
+    def plan(db, configured, when):
         assert configured.energy_plan.protection_preference == preference
-        assert selected_model == model
+        assert configured.energy_plan.optimiser.model == ("mix_integer_linear_prog" if model == "MILP" else "dynamic_programming")
         if fails:
             raise ValueError("missing forecast")
         return result
@@ -279,9 +279,9 @@ def test_preference_is_request_local_and_database_is_closed(monkeypatch, fails, 
     monkeypatch.setattr(planning, "plan_as_of", plan)
     if fails:
         with pytest.raises(ValueError, match="missing forecast"):
-            planning.plan_with_preference(config, datetime.now(timezone.utc), preference, model)
+            planning.generate_plan_report(config, datetime.now(timezone.utc), replace(config.energy_plan, protection_preference=preference, optimiser=replace(config.energy_plan.optimiser, model="mix_integer_linear_prog" if model == "MILP" else "dynamic_programming")))
     else:
-        assert planning.plan_with_preference(config, datetime.now(timezone.utc), preference, model).simulation is result
+        assert planning.generate_plan_report(config, datetime.now(timezone.utc), replace(config.energy_plan, protection_preference=preference, optimiser=replace(config.energy_plan.optimiser, model="mix_integer_linear_prog" if model == "MILP" else "dynamic_programming"))).simulation is result
     assert config.energy_plan.protection_preference == original
     assert closed == [True]
 
@@ -311,9 +311,11 @@ def test_planning_service_dispatches_the_selected_model_with_shared_inputs(monke
 
     monkeypatch.setattr(planning, "simulate_energy_plan", milp)
     monkeypatch.setattr(dp, "simulate_energy_plan", dynamic_programming)
-    selection = [] if model is None else [model]
-    assert planning.plan_as_of(database, config, start, *selection) is result
-    assert calls == [(model or "MILP", (device, state, scenarios, config, start))]
+    if model is not None:
+        config = replace(config, energy_plan=replace(config.energy_plan, optimiser=replace(config.energy_plan.optimiser, model="mix_integer_linear_prog" if model == "MILP" else "dynamic_programming")))
+    assert planning.plan_as_of(database, config, start) is result
+    selected = "MILP" if config.energy_plan.optimiser.model == "mix_integer_linear_prog" else "DP"
+    assert calls == [(selected, (device, state, scenarios, config, start))]
 
 
 def test_invalid_planning_model_is_rejected_before_opening_database(monkeypatch):
@@ -323,21 +325,24 @@ def test_invalid_planning_model_is_rejected_before_opening_database(monkeypatch)
         raise AssertionError("invalid model must not open the database")
 
     monkeypatch.setattr(planning, "create_engine_for_database", unexpected_database)
-    with pytest.raises(ValueError, match="Model must be MILP or DP"):
-        planning.plan_with_preference(load_config(), datetime.now(timezone.utc), 50., "unknown")
-    with pytest.raises(ValueError, match="Model must be MILP or DP"):
-        planning.plan_as_of(None, load_config(), datetime.now(timezone.utc), "unknown")
+    config = load_config()
+    config = replace(config, energy_plan=replace(config.energy_plan, optimiser=replace(config.energy_plan.optimiser, model="unknown")))
+    with pytest.raises(ValueError, match="optimiser.model"):
+        planning.generate_plan_report(config, datetime.now(timezone.utc))
+    with pytest.raises(ValueError, match="optimiser.model"):
+        planning.plan_as_of(None, config, datetime.now(timezone.utc))
 
 
 def test_real_report_from_off_hour_inputs_excludes_future_data(tmp_path):
     from dataclasses import fields
     from solar_model.planning.types import DeviceInfo
-    from solar_model.services.planning import plan_with_preference
+    from solar_model.services.planning import generate_plan_report
     from solar_model.storage.migrations import open_database
     from solar_model.storage.schema import ForecastSolarSample, SigenStorDevice, SigenStorHourlySample, SigenStorModbusSample
     config = load_config()
     config = replace(config, timezone="UTC", database=replace(config.database, path=str(tmp_path / "real-plan.db")),
                      forecast=replace(config.forecast, solar=replace(config.forecast.solar, arrays=(config.forecast.solar.arrays[0],))),
+                     dashboard=replace(config.dashboard, actuals_to_forecast={"pv1": config.forecast.solar.arrays[0].name}),
                      energy_plan=replace(config.energy_plan, num_projection_hours=25, num_visible_projection_hours=1))
     start = datetime(2026, 10, 27, 10, 5, tzinfo=timezone.utc)
     device = DeviceInfo(**{field.name: 1. for field in fields(DeviceInfo)})
@@ -363,7 +368,7 @@ def test_real_report_from_off_hour_inputs_excludes_future_data(tmp_path):
                                              plant_pv_power_kw=1., plant_load_power_kw=.35))
     finally:
         db.close()
-    report = plan_with_preference(config, start, 0.)
+    report = generate_plan_report(config, start, replace(config.energy_plan, protection_preference=0.))
     assert len(report.simulation.results) == 9
     base = report.simulation.results["med"]
     assert base.starts_at.iloc[0] == start
@@ -371,3 +376,73 @@ def test_real_report_from_off_hour_inputs_excludes_future_data(tmp_path):
     assert base.solar_kwh.sum() == pytest.approx(1.)
     assert base.load_kwh.sum() == pytest.approx(.35)
     assert report.actuals.battery.iloc[-1] == 9.
+
+
+def test_ui_overlay_is_local_and_failed_save_keeps_previous_settings(monkeypatch, tmp_path):
+    from solar_model.dashboard.tabs import plan
+    from solar_model.config import energy_plan_yaml
+
+    config = load_config()
+    first, other = plan.PlanTab(config, str(tmp_path / "missing.yaml")), plan.PlanTab(config)
+    first.refresh_button = SimpleNamespace(enable=lambda: None)
+    initial = replace(config.energy_plan, protection_preference=75.)
+    first.apply_plan_settings(energy_plan_yaml(initial))
+    assert first.energy_plan_override == initial
+    assert other.energy_plan_override is None
+    assert config.energy_plan.protection_preference == 50
+    with pytest.raises(OSError):
+        first.save_plan_settings(energy_plan_yaml(replace(initial, protection_preference=123.)))
+    assert first.energy_plan_override == initial
+
+
+def test_ui_report_without_override_uses_global_settings(monkeypatch):
+    from solar_model.services import planning
+
+    config = load_config()
+    monkeypatch.setattr(planning, "create_engine_for_database", lambda path: None)
+    monkeypatch.setattr(planning, "SolarDatabase", lambda engine: SimpleNamespace(close=lambda: None))
+    monkeypatch.setattr(planning, "load_device_info_as_of", lambda *args: SimpleNamespace(system_battery_capacity_kwh=18.))
+    monkeypatch.setattr(planning, "load_plan_actuals", lambda *args: pd.DataFrame())
+
+    def calculate(database, configured, as_of):
+        assert configured is config
+        return sample_result()
+
+    monkeypatch.setattr(planning, "plan_as_of", calculate)
+    report = planning.generate_plan_report(config, datetime.now(timezone.utc))
+    assert report.scenarios is config.energy_plan.scenarios
+    assert report.preferred_reserve_kwh == config.energy_plan.preferred_reserve_kwh
+    assert report.protection_preference == config.energy_plan.protection_preference
+
+
+def test_net_cost_summary_changes_selected_cost_but_preserves_range():
+    from solar_model.dashboard.tabs.plan import scenario_cost_summary
+    from solar_model.planning.scenarios import scenario_probabilities
+
+    settings = load_config().energy_plan.scenarios
+    results = {name: pd.DataFrame({"net_cost": [.25]}) for name in scenario_probabilities(settings)}
+    results["low_low"] = pd.DataFrame({"net_cost": [-2.44]})
+    results["high_high"] = pd.DataFrame({"net_cost": [2.40]})
+    assert scenario_cost_summary(results, "med") == "\u20ac0.250 (-\u20ac2.44 to \u20ac2.40)"
+    assert scenario_cost_summary(results, "low_low") == "-\u20ac2.440 (-\u20ac2.44 to \u20ac2.40)"
+    assert scenario_cost_summary(results, "high_high") == "\u20ac2.400 (-\u20ac2.44 to \u20ac2.40)"
+    negative = {name: frame.assign(net_cost=-1.) for name, frame in results.items()}
+    assert scenario_cost_summary(negative, "med") == "-\u20ac1.000 (-\u20ac1.00 to -\u20ac1.00)"
+
+
+def test_advanced_plan_details_use_period_power_and_projected_battery_targets():
+    from solar_model.dashboard.tabs.plan import advanced_plan_frame
+
+    original = sample_result().results["med"].assign(grid_export_kwh=[.5, .1], battery_to_grid_kwh=[0., .1])
+    frame = detail_frame(original, 20.)
+    advanced = advanced_plan_frame(frame, "Europe/Dublin", OperatingMode.DISCHARGE_PV_FIRST)
+    assert advanced.plan_action.tolist() == [
+        "Force discharge: 2.00kW to 4.20kWh/21.0%",
+        "Force discharge: 0.10kW to 3.00kWh/15.0%",
+    ]
+    assert detail_rows(advanced, "Europe/Dublin")[0]["plan_action"] == advanced.plan_action.iloc[0]
+    assert detail_totals(advanced)["plan_action"] is None
+    assert "plan_action" not in frame and "plan_action" not in original
+    missing_capacity = advanced_plan_frame(detail_frame(original, None), "Europe/Dublin")
+    assert "to 4.20kWh" in missing_capacity.plan_action.iloc[0]
+    assert "SoC" not in missing_capacity.plan_action.iloc[0]

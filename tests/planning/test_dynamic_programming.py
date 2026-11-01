@@ -113,8 +113,8 @@ def test_numba_and_python_match_complete_configured_pipeline(inputs):
     scenarios = create_scenarios(scenarios[0].forecast_data, config.energy_plan.scenarios)
     results = []
     for use_numba in (False, True):
-        settings = replace(config.energy_plan.optimiser_specific.dynamic_programing, use_numba=use_numba)
-        configured = replace(config, energy_plan=replace(config.energy_plan, optimiser_specific=replace(config.energy_plan.optimiser_specific, dynamic_programing=settings)))
+        settings = replace(config.energy_plan.optimiser.dynamic_programming, use_numba=use_numba)
+        configured = replace(config, energy_plan=replace(config.energy_plan, optimiser=replace(config.energy_plan.optimiser, dynamic_programming=settings)))
         results.append(dp.simulate_energy_plan(device, state, scenarios, configured, start))
     expected, actual = results
     assert len(actual.results) == 9
@@ -154,7 +154,7 @@ def test_default_refinement_retains_better_paths_and_centres_next_bounds_on_them
     completed = [record for record in summaries if record.getMessage().startswith("DP Project end")]
     assert len(completed) == 1 and completed[0] is summaries[-1]
     assert "elapsed_seconds=" in completed[0].getMessage()
-    stages = inputs[3].energy_plan.optimiser_specific.dynamic_programing.refinement_stages
+    stages = inputs[3].energy_plan.optimiser.dynamic_programming.refinement_stages
     assert [(call["grid_step_percent"], call["power_divisions"]) for call in calls] == [(stage.grid_step_percent, stage.power_divisions) for stage in stages]
     for call, centre, width in zip(calls[1:], [.5, .6, .6], [.05, .03, .01]):
         for pair in call["battery_bounds"]["base"]:
@@ -207,14 +207,14 @@ def test_failed_project_logs_failure_without_success(inputs, monkeypatch, caplog
     assert "DP Project end" not in caplog.text
 
 
-def test_default_dp_grid_is_quarter_hour_in_utc_through_dst(inputs):
-    config = replace(inputs[3], energy_plan=replace(inputs[3].energy_plan, num_projection_hours=24, num_visible_projection_hours=24, optimiser_specific=replace(inputs[3].energy_plan.optimiser_specific, dynamic_programing=replace(inputs[3].energy_plan.optimiser_specific.dynamic_programing, projection_resolution_mins=(15,) * 96))))
+def test_dp_aligns_first_hour_and_preserves_elapsed_horizon_through_dst(inputs):
+    config = replace(inputs[3], energy_plan=replace(inputs[3].energy_plan, num_projection_hours=24, num_visible_projection_hours=24, optimiser=replace(inputs[3].energy_plan.optimiser, dynamic_programming=replace(inputs[3].energy_plan.optimiser.dynamic_programming, projection_resolution_mins=(15,) * 96))))
     start = datetime(2026, 10, 25, 0, 5, tzinfo=timezone.utc)
     intervals = dp.projection_intervals(config, start)
-    assert len(intervals) == 96
+    assert len(intervals) == 97
     assert intervals[0][0] == start
     assert intervals[-1][1] == start + timedelta(hours=24)
-    assert all(end - begin == timedelta(minutes=15) for begin, end in intervals)
+    assert [(end - begin).total_seconds() / 60 for begin, end in intervals] == [15] * 3 + [10] + [15] * 92 + [5]
 
 
 def test_real_default_pipeline_returns_best_completed_stage(inputs, monkeypatch):
@@ -425,7 +425,7 @@ def test_nine_scenario_result_replays_the_same_first_command_as_lp(inputs):
     base = scenarios[0].forecast_data
     forecast = ForecastData([replace(base.solar[0], kwh=4.), *base.solar[1:]], base.load)
     scenarios = create_scenarios(forecast, config.energy_plan.scenarios)
-    config = replace(config, energy_plan=replace(config.energy_plan, optimiser_specific=replace(config.energy_plan.optimiser_specific, dynamic_programing=replace(config.energy_plan.optimiser_specific.dynamic_programing, projection_resolution_mins=(30, 30) + (240,) * 6))))
+    config = replace(config, energy_plan=replace(config.energy_plan, optimiser=replace(config.energy_plan.optimiser, dynamic_programming=replace(config.energy_plan.optimiser.dynamic_programming, projection_resolution_mins=(30, 30) + (240,) * 6))))
     args = (device, state, scenarios, config, start)
     result = dp.solve_pass(*args)
     replay = simulate(args, result.next_action, return_result=True)
@@ -442,8 +442,8 @@ def test_nine_scenario_result_replays_the_same_first_command_as_lp(inputs):
 def test_forced_first_command_is_shared_and_selected_using_all_nine_scenarios(inputs, monkeypatch, caplog):
     caplog.set_level("DEBUG", logger=dp.LOGGER.name)
     device, state, scenarios, config, start = inputs
-    settings = replace(config.energy_plan.optimiser_specific.dynamic_programing, use_numba=False)
-    config = replace(config, energy_plan=replace(config.energy_plan, optimiser_specific=replace(config.energy_plan.optimiser_specific, dynamic_programing=settings)))
+    settings = replace(config.energy_plan.optimiser.dynamic_programming, use_numba=False)
+    config = replace(config, energy_plan=replace(config.energy_plan, optimiser=replace(config.energy_plan.optimiser, dynamic_programming=settings)))
     device = replace(device, inverter_max_absorption_power_kw=1.)
     base = scenarios[0].forecast_data
     forecast = ForecastData([replace(base.solar[0], kwh=1.), *base.solar[1:]], base.load)
@@ -452,7 +452,7 @@ def test_forced_first_command_is_shared_and_selected_using_all_nine_scenarios(in
     rule = tariff.import_[0]
     tariff = replace(tariff, import_=(replace(rule, end_time="00:30", rate=.01), replace(rule, start_time="00:30", rate=.4)))
     config = replace(config, timezone="UTC", tariffs=replace(config.tariffs, periods=(tariff,)))
-    config = replace(config, energy_plan=replace(config.energy_plan, optimiser_specific=replace(config.energy_plan.optimiser_specific, dynamic_programing=replace(config.energy_plan.optimiser_specific.dynamic_programing, projection_resolution_mins=(30, 30) + (240,) * 6))))
+    config = replace(config, energy_plan=replace(config.energy_plan, optimiser=replace(config.energy_plan.optimiser, dynamic_programming=replace(config.energy_plan.optimiser.dynamic_programming, projection_resolution_mins=(30, 30) + (240,) * 6))))
     original = dp.forward_projection
     records = []
 

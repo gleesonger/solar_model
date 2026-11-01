@@ -26,6 +26,7 @@ class DashboardLayout:
         self,
         config: Config,
         live_collector: LivePowerCollector,
+        config_path: str = "config.yaml",
     ) -> None:
         self.config = config
         self.elements = DashboardElements()
@@ -40,7 +41,7 @@ class DashboardLayout:
         self.historical_tab = AnalysisTab(config, self.state, self.elements)
         self.system_info_tab = SystemInfoTab(config, self.elements)
         self.control_tab = ControlTab(config)
-        self.plan_tab = PlanTab(config)
+        self.plan_tab = PlanTab(config, config_path)
 
     def render_dashboard_layout(self, container: Column, snapshot: DashboardSnapshot) -> None:
         LOGGER.info("Dashboard page UI loading")
@@ -229,17 +230,6 @@ def render_dashboard_styles() -> None:
         .plan-detail-table .q-table td {
             white-space: nowrap;
             font-variant-numeric: tabular-nums;
-        }
-        .plan-detail-advanced .q-table th,
-        .plan-detail-advanced .q-table td {
-            font-size: 0.8125rem;
-        }
-        .plan-detail-advanced .q-table th {
-            min-width: 110px;
-            max-width: 220px;
-        }
-        .plan-detail-advanced .q-table th:nth-child(-n+2) {
-            min-width: 70px;
         }
         .summary-total-table tbody tr:last-child td {
             background-color: #f1f3f5 !important;

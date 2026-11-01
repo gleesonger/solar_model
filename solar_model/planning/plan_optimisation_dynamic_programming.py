@@ -78,7 +78,7 @@ def simulate_energy_plan(device_info: DeviceInfo, device_state: DeviceState, sce
     began_at = perf_counter()
     compilation_seconds = 0.
     try:
-        settings = config.energy_plan.optimiser_specific.dynamic_programing
+        settings = config.energy_plan.optimiser.dynamic_programming
         if not settings.refinement_stages or settings.refinement_stages[0].band_percent is not None:
             raise ValueError("DP stages must begin with a full-range stage")
         initial_stage = settings.refinement_stages[0]
@@ -212,7 +212,7 @@ def solve_pass(device_info: DeviceInfo, device_state: DeviceState, scenarios: li
         scenario_grids.append(bounded_grids(grid, capacity, bounds))
     choices = actions(device_info, config.energy_plan, power_divisions)
     
-    use_numba = config.energy_plan.optimiser_specific.dynamic_programing.use_numba
+    use_numba = config.energy_plan.optimiser.dynamic_programming.use_numba
     calculation_device = DeviceParameters(*(float(getattr(device_info, field)) for field in DeviceParameters._fields))
 
     if use_numba:
@@ -285,26 +285,38 @@ def result_score(result: SimulationResult, scenarios: list[ScenarioData]) -> flo
 
 
 def projection_intervals(config: Config, starts_at: datetime) -> list[tuple[datetime, datetime]]:
-    """Apply configured elapsed durations, splitting at the visible report limit."""
+    """Align the first crossed UTC hour and defer the removed duration to the end."""
     settings = config.energy_plan
-    minutes = settings.optimiser_specific.dynamic_programing.projection_resolution_mins
+    minutes = settings.optimiser.dynamic_programming.projection_resolution_mins
     if settings.num_projection_hours <= 0 or not minutes or any(type(step) is not int or step <= 0 for step in minutes):
         raise ValueError("DP projection duration and timesteps must be positive")
+    if sum(minutes) < settings.num_projection_hours * 60:
+        raise ValueError("DP projection_resolution_mins must cover num_projection_hours")
     cursor = utc_instant(starts_at)
     end = cursor + timedelta(hours=settings.num_projection_hours)
     visible_end = min(end, cursor + timedelta(hours=settings.num_visible_projection_hours))
+    first_hour = cursor.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
+    crossed_hour = False
+    deferred = timedelta(0)
     intervals = []
     for step in minutes:
-        next_end = min(end, cursor + timedelta(minutes=step))
+        next_end = min(end - deferred, cursor + timedelta(minutes=step))
+        if not crossed_hour and next_end >= first_hour:
+            crossed_hour = True
+            deferred = next_end - first_hour
+            next_end = first_hour
         if cursor < visible_end < next_end:
             intervals.append((cursor, visible_end))
             cursor = visible_end
         intervals.append((cursor, next_end))
         cursor = next_end
-        if cursor == end:
+        if cursor == end - deferred:
             break
+    if cursor < visible_end < end:
+        intervals.append((cursor, visible_end))
+        cursor = visible_end
     if cursor < end:
-        raise ValueError("DP projection_resolution_mins must cover num_projection_hours")
+        intervals.append((cursor, end))
     return intervals
 
 

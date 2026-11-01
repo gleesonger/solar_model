@@ -12,8 +12,8 @@ from solar_model.logging_setup import LOGGER, configure_logging
 from solar_model.paths import package_path
 from solar_model.dashboard.planning_worker import ensure_planning_worker
 
-def main() -> None:
-    config = load_config()
+def main(config_path: str = "config.yaml") -> None:
+    config = load_config(config_path)
     configure_logging(config.logging.level)
     database = open_database(config.database.path)
     database.close()
@@ -56,6 +56,7 @@ def main() -> None:
         layout = DashboardLayout(
             config,
             live_collector,
+            config_path=config_path,
         )
         snapshot = snapshots.current()
         layout.historical_tab.render_mobile_historical_controls()

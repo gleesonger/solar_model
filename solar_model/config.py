@@ -3,7 +3,9 @@ from __future__ import annotations
 import logging
 import math
 import re
-from dataclasses import dataclass, field, replace
+import os
+import tempfile
+from dataclasses import asdict, dataclass, field, replace
 from datetime import date
 from pathlib import Path
 from urllib.parse import urlparse
@@ -174,9 +176,10 @@ class MixedIntegerLinearProgrammingConfig:
 
 
 @dataclass(frozen=True)
-class OptimiserSpecificConfig:
+class OptimiserConfig:
+    model: str = "mix_integer_linear_prog"
     mix_integer_linear_prog: MixedIntegerLinearProgrammingConfig = field(default_factory=MixedIntegerLinearProgrammingConfig)
-    dynamic_programing: DynamicProgrammingConfig = field(default_factory=DynamicProgrammingConfig)
+    dynamic_programming: DynamicProgrammingConfig = field(default_factory=DynamicProgrammingConfig)
 
 
 @dataclass(frozen=True)
@@ -193,7 +196,7 @@ class EnergyPlanConfig:
     min_forced_discharge_power_kw: float = 0.1
     max_forced_charge_power_kw: float = 999.
     max_forced_discharge_power_kw: float = 999.
-    optimiser_specific: OptimiserSpecificConfig = field(default_factory=OptimiserSpecificConfig)
+    optimiser: OptimiserConfig = field(default_factory=OptimiserConfig)
 
 
 @dataclass(frozen=True)
@@ -275,6 +278,11 @@ def load_config(path: str | Path = "config.yaml") -> Config:
     with open(path, encoding="utf-8") as file:
         raw_config = yaml.safe_load(file)
 
+    return config_from_mapping(raw_config, str(path))
+
+
+def config_from_mapping(raw_config: dict, source: str = "configuration", *, strict: bool = False) -> Config:
+    """Normalise and validate a complete configuration mapping."""
     try:
         if isinstance(raw_config, dict) and "scenarios" in raw_config:
             raise ValueError("move scenarios under energy_plan.scenarios")
@@ -289,16 +297,18 @@ def load_config(path: str | Path = "config.yaml") -> Config:
                     if not isinstance(level, dict) or set(level) != {"multiplier", "probability"}:
                         raise ValueError(f"energy_plan.scenarios.{name} entries require multiplier and probability")
         if isinstance(energy_plan_data, dict):
+            if "optimiser_specific" in energy_plan_data:
+                raise ValueError("rename energy_plan.optimiser_specific to energy_plan.optimiser")
             if "projection_resolution_mins" in energy_plan_data or "dynamic_programming" in energy_plan_data:
-                raise ValueError("move optimiser settings under energy_plan.optimiser_specific: mix_integer_linear_prog and dynamic_programing")
-            optimiser_data = energy_plan_data.get("optimiser_specific", {})
-            dp_data = optimiser_data.get("dynamic_programing", {}) if isinstance(optimiser_data, dict) else {}
+                raise ValueError("move optimiser settings under energy_plan.optimiser: mix_integer_linear_prog and dynamic_programming")
+            optimiser_data = energy_plan_data.get("optimiser", {})
+            dp_data = optimiser_data.get("dynamic_programming", {}) if isinstance(optimiser_data, dict) else {}
             if isinstance(dp_data, dict) and "backend" in dp_data:
-                raise ValueError("dynamic_programing: replace backend with use_numba: true/false")
+                raise ValueError("dynamic_programming: replace backend with use_numba: true/false")
             if isinstance(dp_data, dict) and ("coarse_grid_step_percent" in dp_data or "coarse_power_divisions" in dp_data):
-                raise ValueError("dynamic_programing: move coarse settings into the first refinement_stages entry with band_percent: null")
+                raise ValueError("dynamic_programming: move coarse settings into the first refinement_stages entry with band_percent: null")
             milp_data = optimiser_data.get("mix_integer_linear_prog", {}) if isinstance(optimiser_data, dict) else {}
-            for name, settings in (("mix_integer_linear_prog", milp_data), ("dynamic_programing", dp_data)):
+            for name, settings in (("mix_integer_linear_prog", milp_data), ("dynamic_programming", dp_data)):
                 if not isinstance(settings, dict):
                     continue
                 resolutions = settings.get("projection_resolution_mins")
@@ -323,6 +333,12 @@ def load_config(path: str | Path = "config.yaml") -> Config:
                 backup_data.pop("comment", None)
                 if "rules" in backup_data:
                     energy_plan_data["minimum_battery_kwh"] = backup_data["rules"]
+            for name in ("minimum_battery_kwh", "maximum_battery_kwh", "limit_battery_export_rate_to_grid_kw"):
+                rules = energy_plan_data.get(name)
+                if isinstance(rules, list):
+                    for rule in rules:
+                        if isinstance(rule, dict):
+                            rule.pop("comment", None)
 
         tariff_data = raw_config.get("tariffs") if isinstance(raw_config, dict) else None
         if isinstance(tariff_data, dict) and isinstance(tariff_data.get("periods"), list):
@@ -334,12 +350,150 @@ def load_config(path: str | Path = "config.yaml") -> Config:
             data=raw_config,
             config=dacite.Config(
                 cast=[tuple],
+                strict=strict,
             ),
         )
         validate_config(config)
         return config
     except (dacite.DaciteError, TypeError, ValueError) as error:
-        raise ValueError(f"invalid configuration in {path}: {error}") from error
+        raise ValueError(f"invalid configuration in {source}: {error}") from error
+
+
+class EnergyPlanYamlDumper(yaml.SafeDumper):
+    """Use the compact list/map layout of the hand-written configuration."""
+
+    def increase_indent(self, flow=False, indentless=False):
+        return super().increase_indent(flow, False)
+
+    def represent_sequence(self, tag, sequence, flow_style=None):
+        inline = all(not isinstance(value, (dict, list, tuple)) for value in sequence)
+        return super().represent_sequence(tag, sequence, flow_style=inline)
+
+    def represent_mapping(self, tag, mapping, flow_style=None):
+        inline = set(mapping) in ({"multiplier", "probability"}, {"grid_step_percent", "power_divisions", "band_percent"})
+        return super().represent_mapping(tag, mapping, flow_style=inline)
+
+    def represent_scalar(self, tag, value, style=None):
+        if tag == "tag:yaml.org,2002:str" and re.fullmatch(r"[0-9]{2}:[0-9]{2}", value):
+            style = '"'
+        return super().represent_scalar(tag, value, style)
+
+
+def energy_plan_yaml(settings: EnergyPlanConfig) -> str:
+    """Serialise the public YAML layout rather than dumping the dataclass layout."""
+    sections = [{
+        "num_projection_hours": settings.num_projection_hours,
+        "num_visible_projection_hours": settings.num_visible_projection_hours,
+        "preferred_reserve_kwh": settings.preferred_reserve_kwh,
+        "protection_preference": settings.protection_preference,
+    }]
+    sections.append({"scenarios": {
+        name: {level_name: {"multiplier": level.multiplier, "probability": level.probability} for level_name, level in dimension.items()}
+        for name, dimension in (("solar", settings.scenarios.solar), ("house_load", settings.scenarios.house_load))
+    }})
+    sections.append({
+        "min_forced_charge_power_kw": settings.min_forced_charge_power_kw,
+        "min_forced_discharge_power_kw": settings.min_forced_discharge_power_kw,
+        "max_forced_charge_power_kw": settings.max_forced_charge_power_kw,
+        "max_forced_discharge_power_kw": settings.max_forced_discharge_power_kw,
+    })
+    optimiser = {"model": settings.optimiser.model}
+    for name in ("mix_integer_linear_prog", "dynamic_programming"):
+        model = getattr(settings.optimiser, name)
+        values = {"use_numba": model.use_numba} if name == "dynamic_programming" else {}
+        values["projection_resolution_mins"] = collapse_projection_resolutions(model.projection_resolution_mins)
+        if name == "dynamic_programming":
+            values["refinement_stages"] = [
+                {"grid_step_percent": stage.grid_step_percent, "power_divisions": stage.power_divisions, "band_percent": stage.band_percent}
+                for stage in model.refinement_stages
+            ]
+        optimiser[name] = values
+    sections.append({"optimiser": optimiser})
+    for name in ("minimum_battery_kwh", "maximum_battery_kwh", "limit_battery_export_rate_to_grid_kw"):
+        sections.append({name: collapse_scheduled_rules(getattr(settings, name))})
+    text = "\n".join(yaml.dump(section, Dumper=EnergyPlanYamlDumper, sort_keys=False, allow_unicode=True, width=1000) for section in sections)
+    for name in ("mix_integer_linear_prog", "dynamic_programming"):
+        text = text.replace(f"\n  {name}:", f"\n\n  {name}:", 1)
+    model_line = f"  model: {settings.optimiser.model}"
+    return text.replace(model_line + "\n", "  # model - mix_integer_linear_prog, dynamic_programming\n" + model_line + "\n", 1)
+
+
+def collapse_projection_resolutions(resolutions: tuple[int, ...]) -> list[int | str]:
+    """Encode consecutive equal timesteps as minutes*count, preserving order."""
+    runs = []
+    for minutes in resolutions:
+        if runs and runs[-1][0] == minutes:
+            runs[-1][1] += 1
+        else:
+            runs.append([minutes, 1])
+    return [f"{minutes}*{count}" if count > 1 else minutes for minutes, count in runs]
+
+
+def collapse_scheduled_rules(rules: tuple[TariffRule, ...]) -> list[dict]:
+    """Combine matching schedules across weekdays without changing time windows."""
+    grouped = {}
+    for rule in rules:
+        key = (rule.start_time, rule.end_time, rule.rate, rule.name)
+        if key not in grouped:
+            grouped[key] = set()
+        grouped[key].update(rule.days)
+    result = []
+    for (start, end, rate, name), days in grouped.items():
+        entry = {"days": [day for day in WEEKDAYS if day in days]}
+        if name is not None:
+            entry["name"] = name
+        entry.update(start_time=start, end_time=end, rate=rate)
+        result.append(entry)
+    return result
+
+
+def parse_energy_plan_yaml(config: Config, text: str) -> EnergyPlanConfig:
+    """Parse a full UI energy_plan replacement without mutating the global config."""
+    try:
+        data = yaml.safe_load(text)
+    except yaml.YAMLError as error:
+        raise ValueError(f"Invalid energy_plan YAML: {error}") from error
+    if not isinstance(data, dict):
+        raise ValueError("Energy plan settings must be a YAML mapping")
+    raw = yaml.safe_load(yaml.safe_dump(asdict(config)))
+    raw["energy_plan"] = data
+    return config_from_mapping(raw, "energy_plan editor", strict=True).energy_plan
+
+
+def save_energy_plan_yaml(path: str | Path, config: Config, text: str) -> None:
+    """Atomically replace only energy_plan; preserve all text outside that section."""
+    parse_energy_plan_yaml(config, text)
+    path = Path(path)
+    with path.open(encoding="utf-8", newline="") as file:
+        original = file.read()
+    try:
+        root = yaml.compose(original)
+    except yaml.YAMLError as error:
+        raise ValueError(f"Invalid configuration file YAML: {error}") from error
+    if not isinstance(root, yaml.MappingNode):
+        raise ValueError("Configuration file must be a YAML mapping")
+    section = next(((key, value) for key, value in root.value if key.value == "energy_plan"), None)
+    if section is None:
+        raise ValueError("Configuration file has no energy_plan section")
+    key, value = section
+    end = value.end_mark.index
+    # Leave trailing blank lines and comments outside the regenerated section intact.
+    section_lines = original[key.start_mark.index:end].splitlines(keepends=True)
+    while section_lines and (not section_lines[-1].strip() or section_lines[-1].lstrip().startswith("#")):
+        end -= len(section_lines.pop())
+    replacement = "energy_plan:\n" + "".join("  " + line + "\n" for line in text.rstrip().splitlines())
+    updated = original[:key.start_mark.index] + replacement + original[end:]
+    # Also validate against the latest on-disk configuration, before writing anything.
+    config_from_mapping(yaml.safe_load(updated), str(path))
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", newline="", dir=path.parent, delete=False) as file:
+            temporary = Path(file.name)
+            file.write(updated)
+        os.replace(temporary, path)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
 
 
 def validate_config(config: Config) -> None:
@@ -356,16 +510,18 @@ def validate_config(config: Config) -> None:
 
     config.forecast.models  # Validate model-specific requirements across both sections.
     energy_plan = config.energy_plan
-    dp = energy_plan.optimiser_specific.dynamic_programing
+    if energy_plan.optimiser.model not in ("mix_integer_linear_prog", "dynamic_programming"):
+        raise ValueError("energy_plan.optimiser.model must be mix_integer_linear_prog or dynamic_programming")
+    dp = energy_plan.optimiser.dynamic_programming
     if type(dp.use_numba) is not bool:
-        raise ValueError("dynamic_programing.use_numba must be a boolean")
-    milp = energy_plan.optimiser_specific.mix_integer_linear_prog
+        raise ValueError("dynamic_programming.use_numba must be a boolean")
+    milp = energy_plan.optimiser.mix_integer_linear_prog
     if not dp.refinement_stages or dp.refinement_stages[0].band_percent is not None:
-        raise ValueError("dynamic_programing.refinement_stages must start with a full-range stage using band_percent: null")
+        raise ValueError("dynamic_programming.refinement_stages must start with a full-range stage using band_percent: null")
     for index, stage in enumerate(dp.refinement_stages):
         step, divisions, band = stage.grid_step_percent, stage.power_divisions, stage.band_percent
         if not math.isfinite(step) or not 0 < step <= 100 or type(divisions) is not int or divisions <= 0 or (index > 0 and (band is None or not math.isfinite(band) or not 0 < band <= 100)):
-            raise ValueError("dynamic_programing requires grid/band percentages in (0,100] and positive integer power divisions")
+            raise ValueError("dynamic_programming requires grid/band percentages in (0,100] and positive integer power divisions")
     for name in (
         "min_forced_charge_power_kw",
         "min_forced_discharge_power_kw",
@@ -381,7 +537,7 @@ def validate_config(config: Config) -> None:
         raise ValueError("num_projection_hours must be a positive integer")
     if type(energy_plan.num_visible_projection_hours) is not int or not 0 < energy_plan.num_visible_projection_hours <= energy_plan.num_projection_hours:
         raise ValueError("num_visible_projection_hours must be positive and no greater than num_projection_hours")
-    for name, settings in (("mix_integer_linear_prog", milp), ("dynamic_programing", dp)):
+    for name, settings in (("mix_integer_linear_prog", milp), ("dynamic_programming", dp)):
         resolutions = settings.projection_resolution_mins
         if not resolutions or any(type(minutes) is not int or minutes <= 0 for minutes in resolutions):
             raise ValueError(f"{name}.projection_resolution_mins must contain positive integer minutes")

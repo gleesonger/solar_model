@@ -6,15 +6,14 @@ from dataclasses import dataclass
 from enum import StrEnum
 from html import escape
 import json
-import math
 from zoneinfo import ZoneInfo
 from typing import Literal
 
 from nicegui import run, ui
 import pandas as pd
 
-from solar_model.config import Config, ScenariosConfig
-from solar_model.dashboard.components.warnings import notify_error
+from solar_model.config import Config, EnergyPlanConfig, ScenariosConfig, energy_plan_yaml, parse_energy_plan_yaml, save_energy_plan_yaml
+from solar_model.dashboard.components.warnings import notify_error, notify_success
 from solar_model.dashboard.planning_worker import ensure_planning_worker
 from solar_model.dashboard.components.tables import mark_final_total_row
 from solar_model.dashboard.components.download_dialog import excel_bytes
@@ -22,7 +21,7 @@ from solar_model.logging_setup import LOGGER
 from solar_model.planning.plan_optimisation_milp import battery_protection_score
 from solar_model.planning.scenarios import scenario_probabilities
 from solar_model.planning.types import OperatingMode, SimulationResult
-from solar_model.services.planning import plan_with_preference
+from solar_model.services.planning import generate_plan_report
 from solar_model.utils import table_to_object_list
 
 
@@ -134,6 +133,14 @@ def scenario_average_cost(results: dict[str, pd.DataFrame], settings: ScenariosC
     return sum(weights[name] * float(frame.net_cost.sum()) for name, frame in results.items()) / sum(weights[name] for name in results)
 
 
+def scenario_cost_summary(results: dict[str, pd.DataFrame], selected_scenario: str) -> str:
+    """Format the selected scenario visible cost and range across all scenarios."""
+    costs = [float(frame.net_cost.sum()) for frame in results.values()]
+    values = [(float(results[selected_scenario].net_cost.sum()), 3), (min(costs), 2), (max(costs), 2)]
+    selected, minimum, maximum = [f"{'-' if value < 0 else ''}\u20ac{abs(value):.{precision}f}" for value, precision in values]
+    return f"{selected} ({minimum} to {maximum})"
+
+
 def scenario_summary(frame: pd.DataFrame, reserve: float) -> dict[str, float]:
     """Summarise interval energy/costs and duration-weighted retained protection."""
     durations = (pd.to_datetime(frame.ends_at) - pd.to_datetime(frame.starts_at)).dt.total_seconds() / 3600
@@ -199,6 +206,28 @@ def detail_rows(frame: pd.DataFrame, timezone_name: str, first_mode: OperatingMo
             display[column] = pd.to_numeric(display[column]).round(4)
     display = display.astype(object).where(pd.notna(display), None)
     return [{"period": index + 1, **row} for index, row in enumerate(display.to_dict("records"))]
+
+
+def advanced_plan_frame(frame: pd.DataFrame, timezone_name: str, first_mode: OperatingMode | None = None) -> pd.DataFrame:
+    """Describe projected period-average exports and ending battery targets."""
+    display = frame.copy()
+    actions = []
+    for row, formatted in zip(frame.to_dict("records"), detail_rows(frame, timezone_name, first_mode)):
+        parts = []
+        hours = (row["ends_at"] - row["starts_at"]).total_seconds() / 3600
+        export = row.get("grid_export_kwh")
+        if hours > 0 and pd.notna(export):
+            parts.append(f"{export / hours:.2f}kW")
+        target = row.get("battery_end_kwh")
+        if pd.notna(target):
+            text = f"{target:.2f}kWh"
+            soc = row.get("battery_end_soc_percent")
+            if pd.notna(soc):
+                text += f"/{soc:.1f}%"
+            parts.append(text)
+        actions.append(formatted["plan_action"] + (": " + " to ".join(parts) if parts else ""))
+    display["plan_action"] = actions
+    return display
 
 
 def detail_totals(frame: pd.DataFrame) -> dict:
@@ -313,8 +342,11 @@ def plan_chart_options(frame: pd.DataFrame, actuals: pd.DataFrame, timezone_name
 
 
 class PlanTab:
-    def __init__(self, config: Config) -> None:
+    def __init__(self, config: Config, config_path: str = "config.yaml") -> None:
         self.config = config
+        self.config_path = config_path
+        self.energy_plan_override: EnergyPlanConfig | None = None
+        self.report = None
         self.timezone = ZoneInfo(config.timezone)
         self.result: SimulationResult | None = None
         self.actuals = pd.DataFrame()
@@ -327,12 +359,7 @@ class PlanTab:
 
     def render_plan_tab(self) -> None:
         with ui.row().classes("w-full items-end gap-4 flex-wrap"):
-            self.model = ui.select(["MILP", "DP"], label="Model", value="MILP", on_change=self._settings_changed).props("outlined dense").classes("w-32 max-w-full")
-            self.adjustment = ui.number(
-                "Protection adjustment", value=self.config.energy_plan.protection_preference,
-                min=0, step=1, on_change=self._settings_changed,
-            ).props("outlined dense").classes("w-64 max-w-full")
-            self.adjustment.tooltip(f"Higher values give battery protection more value relative to net cost. 0 considers cost only. Target reserve: {self.config.energy_plan.preferred_reserve_kwh:g} kWh.")
+            self.settings_button = ui.button("Plan settings", icon="settings", on_click=self.open_plan_settings)
             self.refresh_button = ui.button("Refresh plan", icon="refresh", on_click=self.refresh)
             with ui.row().classes("items-center gap-2") as self.loading:
                 ui.spinner(size="sm")
@@ -341,41 +368,98 @@ class PlanTab:
         self.status = ui.label("Refresh to calculate a plan from the latest available data.").classes("text-sm text-gray-600")
         self.output = ui.column().classes("w-full min-w-0 gap-4")
 
+    def open_plan_settings(self) -> None:
+        with ui.dialog() as dialog, ui.card().classes("w-full").style("width: 938px; max-width: calc(100vw - 48px)"):
+            ui.label("Energy plan settings").classes("text-lg font-semibold")
+            ui.label("Edit the contents of energy_plan. Apply affects only this browser's plans. Saving also updates the file for future starts.").classes("text-sm text-gray-600")
+            editor = ui.textarea("YAML", value=energy_plan_yaml(self.energy_plan_override or self.config.energy_plan)).props("outlined rows=20 input-class=font-mono").classes("w-full").style("max-height: 60vh; overflow: auto")
+            error_label = ui.label().classes("text-negative whitespace-pre-wrap")
+
+            async def apply() -> None:
+                try:
+                    self.apply_plan_settings(editor.value)
+                except (ValueError, OSError) as error:
+                    error_label.set_text(str(error))
+                    return
+                dialog.close()
+                await self.refresh()
+
+            async def save() -> None:
+                text = editor.value
+                try:
+                    parse_energy_plan_yaml(self.config, text)
+                except ValueError as error:
+                    error_label.set_text(str(error))
+                    return
+                with ui.dialog() as confirmation, ui.card():
+                    ui.label("Save energy plan settings to disk?").classes("text-lg font-semibold")
+                    ui.label("This replaces energy_plan in the configuration file for future starts. The running global settings stay unchanged.")
+                    with ui.row().classes("w-full justify-end gap-2"):
+                        ui.button("Cancel", on_click=lambda: confirmation.submit(False)).props("flat")
+                        ui.button("Confirm save", on_click=lambda: confirmation.submit(True))
+                confirmed = await confirmation
+                confirmation.delete()
+                if not confirmed:
+                    return
+                try:
+                    self.save_plan_settings(text)
+                except (ValueError, OSError) as error:
+                    error_label.set_text(str(error))
+                    return
+                error_label.set_text("")
+                notify_success("Energy plan settings saved to disk.")
+
+            def reset() -> None:
+                self.energy_plan_override = None
+                self._settings_changed()
+                dialog.close()
+
+            with ui.row().classes("w-full items-center flex-wrap gap-2"):
+                ui.button("Save To Disk", on_click=save).props("outline color=primary")
+                ui.space()
+                ui.button("Reset to global", on_click=reset).props("flat")
+                ui.button("Cancel", on_click=dialog.close).props("flat")
+                ui.button("Apply", on_click=apply)
+        dialog.on("hide", dialog.delete)
+        dialog.open()
+
+    def save_plan_settings(self, text: str) -> None:
+        save_energy_plan_yaml(self.config_path, self.config, text)
+
+    def apply_plan_settings(self, text: str) -> None:
+        self.energy_plan_override = parse_energy_plan_yaml(self.config, text)
+        self._settings_changed()
+
     def _settings_changed(self) -> None:
         if not self.running:
-            self.refresh_button.set_enabled(self.applied_adjustment is None or self.adjustment.value != self.applied_adjustment or self.model.value != self.applied_model)
+            self.refresh_button.enable()
 
     async def refresh(self) -> None:
         if self.running:
             return
-        try:
-            value = self.adjustment.value
-            if value is None or not math.isfinite(float(value)) or float(value) < 0:
-                raise ValueError("Protection adjustment must be finite and non-negative")
-            preference = float(value)
-            model = self.model.value
-        except (ValueError, TypeError) as error:
-            notify_error(str(error))
-            return
+        override = self.energy_plan_override
+        settings = override or self.config.energy_plan
+        preference = settings.protection_preference
+        model = "MILP" if settings.optimiser.model == "mix_integer_linear_prog" else "DP"
         self.running = True
         self.refresh_button.set_visibility(False)
         self.loading.set_visibility(True)
-        self.adjustment.disable()
-        self.model.disable()
+        self.settings_button.disable()
         self.status.set_visibility(False)
         as_of = datetime.now(timezone.utc).replace(microsecond=0)
         succeeded = False
         try:
             await ensure_planning_worker()
-            report = await run.cpu_bound(plan_with_preference, self.config, as_of, preference, model)
+            report = await run.cpu_bound(generate_plan_report, self.config, as_of, override)
             if report is None:
                 raise RuntimeError("The plan calculation did not return a result")
+            self.report = report
             self.result, self.actuals = report.simulation, report.actuals
             self.battery_capacity_kwh = report.battery_capacity_kwh
             self.applied_model = model
             with self.output:
                 self._render_result()
-            self.applied_adjustment = preference
+            self.applied_adjustment = report.protection_preference if report.protection_preference is not None else preference
             succeeded = True
         except Exception as error:
             LOGGER.exception("Dashboard plan refresh failed")
@@ -388,8 +472,7 @@ class PlanTab:
             self.loading.set_visibility(False)
             self.refresh_button.set_visibility(True)
             self.refresh_button.set_enabled(not succeeded)
-            self.adjustment.enable()
-            self.model.enable()
+            self.settings_button.enable()
 
     def _render_result(self) -> None:
         result = self.result
@@ -402,23 +485,22 @@ class PlanTab:
             description = f"Force discharge up to {action.force_battery_discharge_rate:.2f} kW until {action.discharge_cut_off_soc_percent:.1f}% SOC"
         else:
             description = "Self-consumption"
-        action_text = f"Action for next {minutes:g} mins - {description}"
-        costs = [float(frame.net_cost.sum()) for frame in result.results.values()]
-        average_cost = scenario_average_cost(result.results, self.config.energy_plan.scenarios)
-        cost_text = f"Scenario-average net cost: €{average_cost:.2f} · Range €{min(costs):.2f} to €{max(costs):.2f}"
+        action_period = f"Next {minutes:g} mins"
+        scenarios = self.report.scenarios if self.report is not None and self.report.scenarios is not None else self.config.energy_plan.scenarios
         if self.chart is not None:
-            self.model_label.set_text(f"Model: {self.applied_model}")
-            self.action_label.set_text(action_text)
-            self.cost_label.set_text(cost_text)
-            self.actuals_hint.set_visibility(self.actuals.empty)
+            self.action_period_label.set_text(action_period)
+            self.action_label.set_text(description)
+            for control, dimension in ((self.solar_scenario, scenarios.solar), (self.load_scenario, scenarios.house_load)):
+                control.options = {name: f"{name.title()} ({level.multiplier:g}x)" for name, level in dimension.items()}
+                control.update()
             self._render_scenario()
             return
-        self.model_label = ui.label(f"Model: {self.applied_model}").classes("text-sm text-gray-600")
-        self.action_label = ui.label(action_text).classes("text-base font-semibold")
-        with ui.row().classes("w-full items-center justify-between flex-wrap gap-2"):
-            self.cost_label = ui.label(cost_text).classes("text-base font-semibold")
+        with ui.column().classes("w-full gap-1 rounded-lg border border-blue-100 bg-blue-50 px-4 py-3").props("data-testid=plan-action"):
+            self.action_period_label = ui.label(action_period).classes("text-xs text-blue-800")
+            self.action_label = ui.label(description).classes("text-base font-medium text-blue-950")
+        with ui.row().classes("w-full items-center justify-end flex-wrap gap-2"):
             with ui.row().classes("items-center flex-wrap gap-6"):
-                for label, dimension in (("Solar", self.config.energy_plan.scenarios.solar), ("Load", self.config.energy_plan.scenarios.house_load)):
+                for label, dimension in (("Solar", scenarios.solar), ("Load", scenarios.house_load)):
                     with ui.element("fieldset").classes("plan-scenario-group").props(f"data-testid=plan-{label.lower()}-scenario"):
                         ui.html(label, tag="legend").classes("text-sm font-semibold")
                         control = ui.toggle(
@@ -431,8 +513,6 @@ class PlanTab:
                     else:
                         self.load_scenario = control
         self.summary_output = ui.column().classes("w-full min-w-0 gap-3")
-        self.actuals_hint = ui.label("No actual measurements available for today.").classes("text-sm text-gray-600")
-        self.actuals_hint.set_visibility(self.actuals.empty)
         self.chart = ui.echart(plan_chart_options(self._scenario_frame(), self.actuals, self.config.timezone)).classes("w-full h-96").props("data-testid=plan-chart")
         self.scenario_output = ui.column().classes("w-full min-w-0 gap-3")
         self._render_scenario()
@@ -451,7 +531,9 @@ class PlanTab:
 
     def _render_scenario(self) -> None:
         frame = self.result.results[self.scenario_name]
-        summary = scenario_summary(frame, self.config.energy_plan.preferred_reserve_kwh)
+        reserve = self.report.preferred_reserve_kwh if self.report is not None and self.report.preferred_reserve_kwh is not None else self.config.energy_plan.preferred_reserve_kwh
+        summary = scenario_summary(frame, reserve)
+        cost_text = scenario_cost_summary(self.result.results, self.scenario_name)
         series = plan_chart_options(self._scenario_frame(), self.actuals, self.config.timezone)["series"]
         self.chart.options["series"] = series
         self.chart.run_chart_method("setOption", {"series": series}, {"replaceMerge": ["series"]})
@@ -459,7 +541,7 @@ class PlanTab:
         with self.summary_output:
             with ui.element("div").classes("grid w-full grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 rounded border"):
                 for label, value in (
-                    ("Net cost", f"€{summary['cost']:.2f}"),
+                    ("Net cost", cost_text),
                     ("Solar / House Load", f"{summary['solar']:.2f} / {summary['load']:.2f} kWh"),
                     ("Grid import / export", f"{summary['import']:.2f} / {summary['export']:.2f} kWh"),
                     ("Minimum / ending battery", f"{summary['minimum']:.2f} / {summary['ending']:.2f} kWh"),
@@ -480,6 +562,8 @@ class PlanTab:
         if self.detail_view == "Compact":
             frame["losses_kwh"] += frame["solar_clipped_kwh"]
             frame = hourly_detail_frame(frame, self.config.timezone, self.result.next_action.mode)
+        else:
+            frame = advanced_plan_frame(frame, self.config.timezone, self.result.next_action.mode)
         self.scenario_output.clear()
         with self.scenario_output:
             with ui.row().classes("w-full items-center justify-between flex-wrap gap-2"):
@@ -500,8 +584,6 @@ class PlanTab:
                 for column in columns
             ) + "</q-tr>")
             mark_final_total_row(table).classes("plan-detail-table")
-            if self.detail_view == "Advanced":
-                table.classes("plan-detail-advanced")
 
     def _download_detail(self, frame: pd.DataFrame, columns: list[dict]) -> None:
         try:

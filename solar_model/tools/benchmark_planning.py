@@ -52,8 +52,8 @@ def _worker(connection, case: str, config_path: str, grid: str = "historical", m
 
         config = load_config(Path(config_path))
         if model == "dp" and dp_backend is not None:
-            settings = replace(config.energy_plan.optimiser_specific.dynamic_programing, use_numba=dp_backend == "numba")
-            config = replace(config, energy_plan=replace(config.energy_plan, optimiser_specific=replace(config.energy_plan.optimiser_specific, dynamic_programing=settings)))
+            settings = replace(config.energy_plan.optimiser.dynamic_programming, use_numba=dp_backend == "numba")
+            config = replace(config, energy_plan=replace(config.energy_plan, optimiser=replace(config.energy_plan.optimiser, dynamic_programming=settings)))
         start = datetime(2026, 10, 27, 10, 5, tzinfo=timezone.utc)
         timestamp = start.replace(minute=0)
         coverage_end = timestamp + timedelta(hours=config.energy_plan.num_projection_hours + 1)
@@ -125,7 +125,7 @@ def _worker(connection, case: str, config_path: str, grid: str = "historical", m
         def projection_intervals(cfg, when):
             return list(periods)
 
-        metrics = {"dp_settings": asdict(config.energy_plan.optimiser_specific.dynamic_programing) if model == "dp" else None, "build_seconds": None, "compile_seconds": None, "highs_solve_seconds": None}
+        metrics = {"dp_settings": asdict(config.energy_plan.optimiser.dynamic_programming) if model == "dp" else None, "build_seconds": None, "compile_seconds": None, "highs_solve_seconds": None}
         original_solve = cp.Problem.solve if model == "lp" else None
 
         def timed_solve(problem, *args, **kwargs):
@@ -143,7 +143,7 @@ def _worker(connection, case: str, config_path: str, grid: str = "historical", m
             return value
 
         if model == "dp":
-            use_numba = config.energy_plan.optimiser_specific.dynamic_programing.use_numba
+            use_numba = config.energy_plan.optimiser.dynamic_programming.use_numba
             metrics["numba_initialisation_in_timing"] = use_numba
             metrics["numpy_version"] = np.__version__
             if use_numba:
@@ -158,7 +158,7 @@ def _worker(connection, case: str, config_path: str, grid: str = "historical", m
             if model == "lp":
                 stack.enter_context(patch.object(cp.Problem, "solve", timed_solve))
             options = {"grid_step_percent": grid_step_percent, "power_divisions": power_divisions} if model == "dp" else {}
-            initial_stage = config.energy_plan.optimiser_specific.dynamic_programing.refinement_stages[0]
+            initial_stage = config.energy_plan.optimiser.dynamic_programming.refinement_stages[0]
             stages = refinement_stages or ([(initial_stage.grid_step_percent if grid_step_percent is None else grid_step_percent, initial_stage.power_divisions if power_divisions is None else power_divisions, refine_band_percent)] if refine_band_percent is not None else [])
             if not stages:
                 result = simulate(device, DeviceState(initial_battery), scenarios, config, start, **options)

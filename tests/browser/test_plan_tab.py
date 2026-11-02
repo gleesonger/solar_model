@@ -72,7 +72,7 @@ async def calculate(callback, *args):
         result.lookahead_results[name] = extra
     stamp = result.results['med'].starts_at.iloc[0]
     actuals = pd.DataFrame(dict(timestamp=[stamp - pd.Timedelta(hours=1), stamp], solar=[2.,2.], house_load=[1.,1.], battery=[4.,4.], grid_import=[.3,.4], grid_export=[.1,0.]))
-    return PlanReport(result, actuals, 20., config.energy_plan.scenarios, config.energy_plan.preferred_reserve_kwh, preference)
+    return PlanReport(result, actuals, 20., config.energy_plan.scenarios, config.energy_plan.preferred_reserve_kwh, preference, 20.)
 run.cpu_bound = calculate
 
 @ui.page('/')

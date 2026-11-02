@@ -26,6 +26,8 @@ def group_plan(plan: pd.DataFrame, output_timestep_mins: int) -> pd.DataFrame:
         for column in sum_columns:
             row[column] = group[column].sum()
         row["tariff_name"] = " / ".join(dict.fromkeys(str(value) for value in group["tariff_name"]))
+        if "plan_action" in group:
+            row["plan_action"] = " / ".join(dict.fromkeys(group["plan_action"]))
         for rate_column, volume_column in (("import_rate", "grid_import_kwh"), ("export_rate", "grid_export_kwh")):
             volume = group[volume_column].sum()
             row[rate_column] = (group[rate_column] * group[volume_column]).sum() / volume if volume else group[rate_column].iloc[0]

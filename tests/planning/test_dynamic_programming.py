@@ -11,7 +11,7 @@ import numpy as np
 
 from solar_model.planning import plan_optimisation_dynamic_programming as dp
 from solar_model.planning.scenarios import create_scenarios
-from solar_model.planning.types import ForecastData, OperatingMode, SimulationResult
+from solar_model.planning.types import ForecastData, OperatingMode, PlanCommand, SimulationResult
 from tests.planning.test_next_action import inputs, simulate
 
 
@@ -25,7 +25,7 @@ def test_epoch_periods_preserve_fractional_utc_report_timestamps(inputs):
     start = inputs[-1].replace(microsecond=123456)
     end = start + timedelta(minutes=30)
     p = period(starts_at=start.timestamp(), ends_at=end.timestamp())
-    step = dp.simulate_system_single_time_period(inputs[0], 10., p, 2., dp.Action(OperatingMode.SELF_CONSUMPTION, 0.))
+    step = dp.simulate_system_single_time_period(inputs[0], 10., p, 2., dp.Action(PlanCommand.SELF_CONSUMPTION, 0.))
     frame = dp.result_frame(inputs[0], [p], [step], 2., .2)
     assert frame.starts_at.iloc[0] == start
     assert frame.ends_at.iloc[0] == end
@@ -49,7 +49,7 @@ builtins.__import__ = block_numba
 device = dp.DeviceParameters(.95, .95, 5., 5., 5., 5.)
 periods = [dp.Period(0., 900., 0., .25, .4, .1, "flat", 0., 10., 9999., .25, .01, 3.)]
 grids = [[0., 5., 10.], [0., 5., 10.]]
-choices = [dp.Action(dp.OperatingMode.SELF_CONSUMPTION, 0.)]
+choices = [dp.Action(dp.PlanCommand.SELF_CONSUMPTION, 0.)]
 values = dp.backward_values(device, 10., periods, grids, choices, .2)
 expected = dp.forward_projection(device, 10., periods, grids, values, choices, 5., choices[0])
 assert expected is not None
@@ -77,7 +77,7 @@ def test_numba_and_python_match_value_tables_and_bounded_paths(inputs):
     from numba.typed import List
 
     device = replace(inputs[0], charge_efficiency=.95, discharge_efficiency=.9)
-    periods = [period(solar=.8, load=.2, protection_weight=.02), period(solar=.1, load=.8, export_limit=0., protection_weight=.02)]
+    periods = [period(solar=3., load=.2, minimum=3., maximum=4., protection_weight=.02), period(solar=.1, load=.8, minimum=3., maximum=4., export_limit=0., protection_weight=.02)]
     grids = dp.bounded_grids([float(i) for i in range(11)], 10., [(.1, .4), (0., .5)])
     choices = dp.actions(device, inputs[3].energy_plan)
     numerical_device = dp.DeviceParameters(*(getattr(device, field) for field in dp.DeviceParameters._fields))
@@ -261,25 +261,25 @@ def test_dp_calculations_do_not_call_milp_or_shared_physics_helpers(inputs, monk
 
 def test_actions_span_minimum_to_maximum_and_interpolation_keeps_physical_energy_separate(inputs):
     choices = dp.actions(inputs[0], inputs[3].energy_plan)
-    assert len(choices) == 11
-    for mode in (OperatingMode.CHARGE_PV_FIRST, OperatingMode.DISCHARGE_PV_FIRST):
-        assert [action.rate_kw for action in choices if action.mode == mode] == pytest.approx([.88, 1.66, 2.44, 3.22, 4.])
+    assert len(choices) == 14
+    for mode in (PlanCommand.FORCE_CHARGE, PlanCommand.FORCE_DISCHARGE):
+        assert [action.rate_kw for action in choices if action.command_type == mode] == pytest.approx([.88, 1.66, 2.44, 3.22, 4.])
     assert dp.interpolate([0., 1.], [0., 10.], .37) == pytest.approx(3.7)
     assert dp.interpolate([0., 1.], [-float("inf"), 10.], .37) == -float("inf")
 
 
-def test_tenths_option_generates_twenty_one_commands(inputs):
+def test_tenths_option_generates_twenty_four_commands(inputs):
     choices = dp.actions(inputs[0], inputs[3].energy_plan, power_divisions=10)
-    assert len(choices) == 21
-    for mode in (OperatingMode.CHARGE_PV_FIRST, OperatingMode.DISCHARGE_PV_FIRST):
-        rates = [action.rate_kw for action in choices if action.mode == mode]
+    assert len(choices) == 24
+    for mode in (PlanCommand.FORCE_CHARGE, PlanCommand.FORCE_DISCHARGE):
+        rates = [action.rate_kw for action in choices if action.command_type == mode]
         assert rates == pytest.approx([.49, .88, 1.27, 1.66, 2.05, 2.44, 2.83, 3.22, 3.61, 4.])
 
 
 @pytest.mark.parametrize("energy,expected", [(0., 0.), (2., 100 * (1 - .3 ** .5)), (4., 70.), (8., 80.)])
 def test_transition_uses_exact_protection_curve(inputs, energy, expected):
     p = period(solar=0., load=0., protection_weight=.2, preferred_reserve_kwh=4.)
-    step = dp.simulate_system_single_time_period(inputs[0], 10., p, energy, dp.Action(OperatingMode.SELF_CONSUMPTION, 0.))
+    step = dp.simulate_system_single_time_period(inputs[0], 10., p, energy, dp.Action(PlanCommand.SELF_CONSUMPTION, 0.))
     assert step.protection_score == pytest.approx(.2 * expected, abs=1e-12)
     assert step.score == pytest.approx(step.protection_score - step.net_cost)
 
@@ -288,46 +288,49 @@ def test_transition_uses_exact_protection_curve(inputs, energy, expected):
 def test_minimum_power_choices_are_unique_and_within_hardware_limits(inputs, maximum, expected):
     device = replace(inputs[0], inverter_battery_charge_power_kw=maximum, inverter_battery_discharge_power_kw=maximum)
     choices = dp.actions(device, inputs[3].energy_plan)
-    assert choices[0] == dp.Action(OperatingMode.SELF_CONSUMPTION, 0.)
-    for mode in (OperatingMode.CHARGE_PV_FIRST, OperatingMode.DISCHARGE_PV_FIRST):
-        assert [action.rate_kw for action in choices if action.mode == mode] == pytest.approx(expected)
+    assert choices[0] == dp.Action(PlanCommand.SELF_CONSUMPTION, 0.)
+    for mode in (PlanCommand.FORCE_CHARGE, PlanCommand.FORCE_DISCHARGE):
+        assert [action.rate_kw for action in choices if action.command_type == mode] == pytest.approx(expected)
 
 
 def test_charge_and_discharge_use_separate_minimum_power(inputs):
     settings = replace(inputs[3].energy_plan, min_forced_charge_power_kw=1., min_forced_discharge_power_kw=2.)
     choices = dp.actions(inputs[0], settings)
-    assert [action.rate_kw for action in choices if action.mode == OperatingMode.CHARGE_PV_FIRST] == pytest.approx([1.6, 2.2, 2.8, 3.4, 4.])
-    assert [action.rate_kw for action in choices if action.mode == OperatingMode.DISCHARGE_PV_FIRST] == pytest.approx([2.4, 2.8, 3.2, 3.6, 4.])
+    assert [action.rate_kw for action in choices if action.command_type == PlanCommand.FORCE_CHARGE] == pytest.approx([1.6, 2.2, 2.8, 3.4, 4.])
+    assert [action.rate_kw for action in choices if action.command_type == PlanCommand.FORCE_DISCHARGE] == pytest.approx([2.4, 2.8, 3.2, 3.6, 4.])
 
 
 @pytest.mark.parametrize("maximum,expected", [(1., [.28, .46, .64, .82, 1.]), (999., [.88, 1.66, 2.44, 3.22, 4.]), (.05, [])])
 def test_forced_power_maximum_caps_choices_or_disables_mode(inputs, maximum, expected):
     settings = replace(inputs[3].energy_plan, max_forced_charge_power_kw=maximum, max_forced_discharge_power_kw=maximum)
     choices = dp.actions(inputs[0], settings)
-    assert choices[0] == dp.Action(OperatingMode.SELF_CONSUMPTION, 0.)
-    for mode in (OperatingMode.CHARGE_PV_FIRST, OperatingMode.DISCHARGE_PV_FIRST):
-        assert [action.rate_kw for action in choices if action.mode == mode] == pytest.approx(expected)
+    assert choices[0] == dp.Action(PlanCommand.SELF_CONSUMPTION, 0.)
+    for mode in (PlanCommand.FORCE_CHARGE, PlanCommand.FORCE_DISCHARGE):
+        assert [action.rate_kw for action in choices if action.command_type == mode] == pytest.approx(expected)
 
 
 @pytest.mark.parametrize("mode,minimum,maximum,expected", [
-    (OperatingMode.CHARGE_PV_FIRST, 0., 2.5, 2.5),
-    (OperatingMode.DISCHARGE_PV_FIRST, 1.5, 10., 1.5),
+    (PlanCommand.FORCE_CHARGE, 0., 2.5, 4.),
+    (PlanCommand.FORCE_DISCHARGE, 1.5, 10., 0.),
 ])
-def test_energy_stopping_is_encoded_in_the_returned_command(inputs, mode, minimum, maximum, expected):
+def test_scheduled_bounds_are_scored_without_stopping_the_command(inputs, mode, minimum, maximum, expected):
     p = period(minimum=minimum, maximum=maximum)
     action = (mode, 4.)
     step = dp.simulate_system_single_time_period(inputs[0], 10., p, 2., action)
-    command = dp.command(action, p, 10.)
+    command = dp.command(action, inputs[0])
     assert step.battery_end == pytest.approx(expected)
-    assert command.charge_cut_off_soc_percent == pytest.approx(maximum * 10)
-    assert command.discharge_cut_off_soc_percent == pytest.approx(minimum * 10)
+    assert step.limit_score < 0
+    assert command.charge_cut_off_soc_percent == 100.
+    assert command.discharge_cut_off_soc_percent == 0.
 
 
-def test_user_bounds_and_export_limits_reject_unsupported_behavior(inputs):
+def test_self_consumption_scores_user_bounds_and_export_limits_stay_hard(inputs):
     device = inputs[0]
-    assert dp.simulate_system_single_time_period(device, 10., period(minimum=1.8), 2., (OperatingMode.SELF_CONSUMPTION, 0.)) is None
-    assert dp.simulate_system_single_time_period(device, 10., period(minimum=1.5, export_limit=0.), 2., (OperatingMode.DISCHARGE_PV_FIRST, 4.)) is None
-    step = dp.simulate_system_single_time_period(device, 10., period(export_limit=0.), 2., (OperatingMode.DISCHARGE_PV_FIRST, 1.))
+    step = dp.simulate_system_single_time_period(device, 10., period(minimum=1.8), 2., (PlanCommand.SELF_CONSUMPTION, 0.))
+    assert step.battery_end == pytest.approx(1.5)
+    assert step.limit_score < 0
+    assert dp.simulate_system_single_time_period(device, 10., period(minimum=1.5, export_limit=0.), 2., (PlanCommand.FORCE_DISCHARGE, 4.)) is None
+    step = dp.simulate_system_single_time_period(device, 10., period(export_limit=0.), 2., (PlanCommand.FORCE_DISCHARGE, 1.))
     assert step.discharge == pytest.approx(.5)
     assert step.grid_export == pytest.approx(0.)
 
@@ -335,7 +338,7 @@ def test_user_bounds_and_export_limits_reject_unsupported_behavior(inputs):
 def test_backward_values_match_exhaustive_search_when_states_align(inputs):
     device = replace(inputs[0], inverter_battery_charge_power_kw=2., inverter_battery_discharge_power_kw=2.)
     periods = [period(load=0., import_rate=.1, export_rate=.1, maximum=2.), period(load=0., import_rate=.5, export_rate=.5, maximum=2.)]
-    choices = [(OperatingMode.SELF_CONSUMPTION, 0.), (OperatingMode.CHARGE_PV_FIRST, 2.), (OperatingMode.DISCHARGE_PV_FIRST, 2.)]
+    choices = [(PlanCommand.SELF_CONSUMPTION, 0.), (PlanCommand.FORCE_CHARGE, 2.), (PlanCommand.FORCE_DISCHARGE, 2.)]
     best = -float("inf")
     for schedule in product(choices, repeat=2):
         battery, score = 0., 0.
@@ -356,13 +359,13 @@ def test_period_bounds_restrict_paths_without_changing_soc_stops(inputs):
     p = period(load=0.)
     grids = dp.bounded_grids([0., 2., 4., 6., 8., 10.], 10., [(.2, .3)])
     assert grids[1] == [2., 3.]
-    charge = dp.Action(OperatingMode.CHARGE_PV_FIRST, 2.)
-    choices = [dp.Action(OperatingMode.SELF_CONSUMPTION, 0.), charge]
+    charge = dp.Action(PlanCommand.FORCE_CHARGE, 2.)
+    choices = [dp.Action(PlanCommand.SELF_CONSUMPTION, 0.), charge]
     values = dp.backward_values(inputs[0], 10., [p], grids, choices, 1.)
     path = dp.forward_projection(inputs[0], 10., [p], grids, values, choices, 2., charge)
     assert path[0].battery_end == pytest.approx(3.)
-    assert dp.command(charge, p, 10.).charge_cut_off_soc_percent == 100.
-    outside = dp.Action(OperatingMode.CHARGE_PV_FIRST, 4.)
+    assert dp.command(charge, inputs[0]).charge_cut_off_soc_percent == 100.
+    outside = dp.Action(PlanCommand.FORCE_CHARGE, 4.)
     assert dp.simulate_system_single_time_period(inputs[0], 10., p, 2., outside).battery_end == pytest.approx(4.)
     assert dp.forward_projection(inputs[0], 10., [p], grids, values, choices, 2., outside) is None
 
@@ -375,8 +378,8 @@ def test_pruning_preserves_exhaustive_values_and_paths_and_skips_simulations(bou
     periods = [period(**{"load": 0., **changes})] * 2
     nodes = [float(i) for i in range(11)]
     grids = [nodes, [4., 5., 6.], [4., 5., 6.]] if bounded else [nodes] * 3
-    first = dp.Action(OperatingMode.SELF_CONSUMPTION, 0.)
-    choices = [first] + [dp.Action(mode, float(rate)) for mode in (OperatingMode.CHARGE_PV_FIRST, OperatingMode.DISCHARGE_PV_FIRST) for rate in range(1, 11)]
+    first = dp.Action(PlanCommand.SELF_CONSUMPTION, 0.)
+    choices = [first, dp.Action(PlanCommand.SOLAR_CHARGE_ONLY, 0.), dp.Action(PlanCommand.SOLAR_EXPORT_FIRST, 0.), dp.Action(PlanCommand.HOLD_BATTERY, 0.)] + [dp.Action(mode, float(rate)) for mode in (PlanCommand.FORCE_CHARGE, PlanCommand.FORCE_DISCHARGE) for rate in range(1, 11)]
     if reordered:
         choices = choices[::2] + choices[1::2][::-1]
     simulate_period = dp.simulate_system_single_time_period
@@ -482,7 +485,7 @@ def test_forced_first_command_is_shared_and_selected_using_all_nine_scenarios(in
     assert "backward_seconds=" in timings[0].getMessage()
     assert "forward_seconds=" in timings[0].getMessage()
     assert result.next_action.mode == OperatingMode.CHARGE_PV_FIRST
-    chosen = (result.next_action.mode, result.next_action.force_battery_charge_rate)
+    chosen = (result.next_action.command, result.next_action.force_battery_charge_rate)
     selected = [record for record in records if record[0] == chosen]
     assert len(selected) == 9
     assert len({id(periods) for action, periods, path in selected}) == 9
@@ -498,7 +501,7 @@ def test_forced_first_command_is_shared_and_selected_using_all_nine_scenarios(in
     assert scores[chosen] == pytest.approx(max(scores.values()))
     replay = simulate((device, state, scenarios, config, start), result.next_action, return_result=True)
     for scenario, (action, periods, path) in zip(scenarios, selected):
-        assert dp.command(action, periods[0], 10.) == result.next_action
+        assert dp.command(action, device) == result.next_action
         row = result.results[scenario.name].iloc[0]
         assert row.battery_end_kwh == pytest.approx(path[0].battery_end)
         assert row.grid_import_kwh == pytest.approx(path[0].grid_import)
@@ -506,3 +509,177 @@ def test_forced_first_command_is_shared_and_selected_using_all_nine_scenarios(in
         expected = replay.results[scenario.name].iloc[0]
         for column in ("battery_end_kwh", "grid_import_kwh", "grid_export_kwh", "solar_clipped_kwh"):
             assert row[column] == pytest.approx(expected[column], abs=1e-6)
+
+
+@pytest.mark.parametrize("energy,expected", [(4., 0.), (6., 0.), (5., 0.), (3.99, -100 / 2501), (3.9, -100 / 26), (6.5, -50.), (7., -80.), (8., -1600 / 17)])
+def test_limit_penalty_is_bounded_symmetric_and_duration_weighted(energy, expected):
+    score = dp.battery_limit_score(energy, 4., 6., 10., 1.)
+    assert score == pytest.approx(expected)
+    assert -100 < score <= 0
+    assert dp.battery_limit_score(energy, 4., 6., 10., .25) == pytest.approx(score / 4)
+    assert dp.battery_limit_score(energy * 2, 8., 12., 20., 1.) == pytest.approx(score)
+
+
+@pytest.mark.parametrize("breach,expected", [(1e-300, 0.), (1e300, -100.)])
+def test_limit_penalty_remains_finite_for_extreme_breaches(breach, expected):
+    assert dp.battery_limit_score(0., breach, breach, 10., 1.) == pytest.approx(expected)
+
+
+@pytest.mark.parametrize("mode,initial,expected", [
+    (PlanCommand.FORCE_CHARGE, 9.5, 10.),
+    (PlanCommand.FORCE_DISCHARGE, .5, 0.),
+])
+def test_soft_bounds_preserve_physical_battery_capacity(inputs, mode, initial, expected):
+    step = dp.simulate_system_single_time_period(inputs[0], 10., period(minimum=4., maximum=6.), initial, dp.Action(mode, 4.))
+    assert step.battery_end == expected
+    assert step.limit_score < 0
+
+
+@pytest.mark.parametrize("solar,load", [(0., 100.), (100., 0.), (0., 0.)])
+def test_full_range_values_and_self_consumption_path_remain_finite(solar, load):
+    device = dp.DeviceParameters(.95, .9, 4., 4., 4., 4.)
+    periods = [period(solar=solar, load=load, minimum=4., maximum=6., export_limit=0.)] * 2
+    nodes = [float(i) for i in range(11)]
+    choices = [dp.Action(PlanCommand.SELF_CONSUMPTION, 0.)]
+    values = dp.backward_values(device, 10., periods, [nodes] * 3, choices, .2)
+    assert all(np.isfinite(value) for row in values for value in row)
+    path = dp.forward_projection(device, 10., periods, [nodes] * 3, values, choices, 2., choices[0])
+    assert path is not None
+    assert all(0 <= step.battery_end <= 10 for step in path)
+    assert all(-50 < step.limit_score <= 0 for step in path)
+
+
+@pytest.mark.parametrize("minimum,maximum,initial", [(4., 6., 2.), (1., 3., 8.), (12., 15., 2.)])
+def test_unavoidable_breach_returns_plan_and_reconciles_objective(inputs, minimum, maximum, initial):
+    device, state, scenarios, config, start = inputs
+    settings = config.energy_plan
+    dp_settings = replace(settings.optimiser.dynamic_programming, use_numba=False)
+    settings = replace(
+        settings,
+        minimum_battery_kwh=(replace(settings.minimum_battery_kwh[0], rate=minimum),),
+        maximum_battery_kwh=(replace(settings.maximum_battery_kwh[0], rate=maximum),),
+        max_forced_charge_power_kw=0.,
+        max_forced_discharge_power_kw=0.,
+        optimiser=replace(settings.optimiser, dynamic_programming=dp_settings),
+    )
+    result = dp.solve_pass(device, replace(state, battery_kwh=initial), scenarios, replace(config, energy_plan=settings), start)
+    frame = pd.concat([result.results["base"], result.lookahead_results["base"]])
+    hours = (frame.ends_at - frame.starts_at).dt.total_seconds() / 3600
+    expected = [dp.battery_limit_score(energy, minimum, maximum, 10., duration) for energy, duration in zip(frame.battery_end_kwh, hours)]
+    assert frame.limit_score.tolist() == pytest.approx(expected)
+    assert frame.limit_score.min() < 0
+    assert frame.protection_score.sum() == 0
+    assert frame.total_score.tolist() == pytest.approx(frame.cost_score + frame.protection_score + frame.limit_score + frame.terminal_score)
+    assert dp.result_score(result, scenarios) == pytest.approx(frame.total_score.sum())
+    assert frame.minimum_battery_kwh.tolist() == [minimum] * len(frame)
+    assert frame.maximum_battery_kwh.tolist() == [maximum] * len(frame)
+
+
+@pytest.mark.parametrize("initial,mode,ending", [(3., PlanCommand.FORCE_CHARGE, 4.), (7., PlanCommand.FORCE_DISCHARGE, 6.)])
+def test_policy_pays_small_energy_cost_to_avoid_limit_penalty(initial, mode, ending):
+    device = dp.DeviceParameters(1., 1., 4., 4., 4., 4.)
+    p = period(load=0., minimum=4., maximum=6., export_rate=-.1)
+    nodes = [float(i) for i in range(11)]
+    choices = [dp.Action(PlanCommand.SELF_CONSUMPTION, 0.), dp.Action(mode, 2.)]
+    values = dp.backward_values(device, 10., [p, p], [nodes] * 3, choices, 0.)
+    path = dp.forward_projection(device, 10., [p, p], [nodes] * 3, values, choices, initial, choices[0])
+    assert path[0].limit_score < 0
+    assert path[1].battery_end == ending
+    assert path[1].limit_score == 0
+    assert path[1].net_cost > 0
+
+
+@pytest.mark.parametrize("kind", [PlanCommand.HOLD_BATTERY, PlanCommand.SOLAR_CHARGE_ONLY])
+@pytest.mark.parametrize("solar,load", [(0., .5), (.2, .8), (1.5, .5), (5., 0.)])
+def test_passive_commands_use_grid_for_shortfalls_and_only_solar_can_charge(kind, solar, load):
+    device = dp.DeviceParameters(.95, .9, 4., 4., 4., 4.)
+    p = period(solar=solar, load=load)
+    step = dp.simulate_system_single_time_period(device, 10., p, 2., dp.Action(kind, 0.))
+    expected_charge = min(max(0., solar - min(solar, load, 2.)), 2.) if kind == PlanCommand.SOLAR_CHARGE_ONLY else 0.
+    assert step.command_type == kind
+    assert step.charge == pytest.approx(expected_charge)
+    assert step.discharge == 0
+    assert step.battery_end == pytest.approx(2. + expected_charge * .95)
+    assert step.grid_import == pytest.approx(max(0., load - min(solar, 2.)))
+    assert step.solar_used <= solar
+    assert step.solar_used - step.charge - load == pytest.approx(step.grid_export - step.grid_import)
+
+
+@pytest.mark.parametrize("kind,mode,charge,discharge", [
+    (PlanCommand.SELF_CONSUMPTION, OperatingMode.SELF_CONSUMPTION, 4., 4.),
+    (PlanCommand.SOLAR_CHARGE_ONLY, OperatingMode.SELF_CONSUMPTION, 4., 0.),
+    (PlanCommand.HOLD_BATTERY, OperatingMode.SELF_CONSUMPTION, 0., 0.),
+    (PlanCommand.SOLAR_EXPORT_FIRST, OperatingMode.DISCHARGE_PV_FIRST, 4., 0.),
+    (PlanCommand.FORCE_CHARGE, OperatingMode.CHARGE_PV_FIRST, 1., 0.),
+    (PlanCommand.FORCE_DISCHARGE, OperatingMode.DISCHARGE_PV_FIRST, 0., 1.),
+])
+def test_commands_define_complete_modbus_power_profiles(inputs, kind, mode, charge, discharge):
+    profile = dp.command(dp.Action(kind, 1. if kind in (PlanCommand.FORCE_CHARGE, PlanCommand.FORCE_DISCHARGE) else 0.), inputs[0])
+    assert profile.command == kind
+    assert profile.mode == mode
+    assert profile.charge_power_limit_kw == charge
+    assert profile.discharge_power_limit_kw == discharge
+    assert profile.force_battery_charge_rate == (1. if kind == PlanCommand.FORCE_CHARGE else 0.)
+    assert profile.force_battery_discharge_rate == (1. if kind == PlanCommand.FORCE_DISCHARGE else 0.)
+
+
+@pytest.mark.parametrize("solar,load,minimum,maximum,sell,expected", [
+    (0., 1., 2., 10., .1, PlanCommand.SOLAR_CHARGE_ONLY),
+    (1., 0., 0., 10., .8, PlanCommand.SOLAR_EXPORT_FIRST),
+    (10., 0., 0., 2., .8, PlanCommand.HOLD_BATTERY),
+])
+def test_dp_selects_passive_commands_and_reports_them_across_scenarios(inputs, solar, load, minimum, maximum, sell, expected):
+    device, state, scenarios, config, start = inputs
+    base = scenarios[0].forecast_data
+    forecast = ForecastData([replace(base.solar[0], kwh=solar), *base.solar[1:]], [replace(base.load[0], kwh=load), *base.load[1:]])
+    scenarios = create_scenarios(forecast, config.energy_plan.scenarios)
+    settings = config.energy_plan
+    dp_settings = replace(settings.optimiser.dynamic_programming, use_numba=False)
+    settings = replace(
+        settings,
+        minimum_battery_kwh=(replace(settings.minimum_battery_kwh[0], rate=minimum),),
+        maximum_battery_kwh=(replace(settings.maximum_battery_kwh[0], rate=maximum),),
+        max_forced_charge_power_kw=.05,
+        max_forced_discharge_power_kw=.05,
+        optimiser=replace(settings.optimiser, dynamic_programming=dp_settings),
+    )
+    tariff = replace(config.tariffs.periods[0], export=(replace(config.tariffs.periods[0].export[0], rate=sell),))
+    config = replace(config, energy_plan=settings, tariffs=replace(config.tariffs, periods=(tariff,)))
+    result = dp.solve_pass(device, state, scenarios, config, start, grid_step_percent=10.)
+    assert result.next_action.command == expected
+    for frame in result.results.values():
+        assert frame.plan_action.iloc[0] == expected.label
+        assert frame.battery_start_kwh.iloc[0] == frame.battery_end_kwh.iloc[0]
+    assert result.next_action.discharge_power_limit_kw == 0
+
+
+def test_grouped_cli_reports_preserve_distinct_selected_commands(inputs):
+    from solar_model.tools.reports import group_plan
+
+    first = period(solar=1., load=.5)
+    second = first._replace(starts_at=first.ends_at, ends_at=first.ends_at + 1800.)
+    solar = dp.simulate_system_single_time_period(inputs[0], 10., first, 2., dp.Action(PlanCommand.SOLAR_CHARGE_ONLY, 0.))
+    hold = dp.simulate_system_single_time_period(inputs[0], 10., second, solar.battery_end, dp.Action(PlanCommand.HOLD_BATTERY, 0.))
+    frame = dp.result_frame(inputs[0], [first, second], [solar, hold], 2., .1)
+    assert frame.plan_action.tolist() == ["Solar charge only", "Hold battery"]
+    assert group_plan(frame, 60).plan_action.tolist() == ["Solar charge only / Hold battery"]
+
+
+@pytest.mark.parametrize("solar,load,initial,charge,used,imported,exported", [
+    (.5, 1., 2., 0., .5, .5, 0.),
+    (1.5, .5, 2., 0., 1.5, 0., 1.),
+    (3., .5, 2., 1., 3., 0., 1.5),
+    (5., .5, 2., 2., 4., 0., 1.5),
+    (5., .5, 10., 0., 2., 0., 1.5),
+    (5., .5, 9.9, .1 / .95, 2. + .1 / .95, 0., 1.5),
+])
+def test_solar_export_first_charges_only_inverter_overflow(solar, load, initial, charge, used, imported, exported):
+    device = dp.DeviceParameters(.95, .9, 4., 4., 4., 4.)
+    step = dp.simulate_system_single_time_period(device, 10., period(solar=solar, load=load), initial, dp.Action(PlanCommand.SOLAR_EXPORT_FIRST, 0.))
+    assert step.charge == pytest.approx(charge)
+    assert step.discharge == 0
+    assert step.solar_used == pytest.approx(used)
+    assert step.grid_import == pytest.approx(imported)
+    assert step.grid_export == pytest.approx(exported)
+    assert step.battery_end == pytest.approx(initial + .95 * charge)
+    assert step.solar_used - charge - load == pytest.approx(exported - imported)

@@ -49,6 +49,7 @@ class PlanReport:
     scenarios: ScenariosConfig | None = None
     preferred_reserve_kwh: float | None = None
     protection_preference: float | None = None
+    command_battery_capacity_kwh: float | None = None
 
 
 def generate_plan_report(config: Config, as_of: datetime, energy_plan_override: EnergyPlanConfig | None = None) -> PlanReport:
@@ -60,8 +61,18 @@ def generate_plan_report(config: Config, as_of: datetime, energy_plan_override: 
     database = SolarDatabase(create_engine_for_database(config.database.path))
     try:
         result = plan_as_of(database, config, as_of)
-        capacity = load_device_info_as_of(database, config, as_of).system_battery_capacity_kwh
+        device = load_device_info_as_of(database, config, as_of)
+        capacity = device.system_battery_capacity_kwh
+        command_capacity = capacity * device.battery_state_of_health_percent / 100
         day_start = as_of.astimezone(ZoneInfo(config.timezone)).replace(hour=0, minute=0, second=0, microsecond=0)
-        return PlanReport(result, load_plan_actuals(database, day_start, as_of, capacity), capacity, config.energy_plan.scenarios, config.energy_plan.preferred_reserve_kwh, config.energy_plan.protection_preference)
+        return PlanReport(
+            simulation=result,
+            actuals=load_plan_actuals(database, day_start, as_of, capacity),
+            battery_capacity_kwh=capacity,
+            scenarios=config.energy_plan.scenarios,
+            preferred_reserve_kwh=config.energy_plan.preferred_reserve_kwh,
+            protection_preference=config.energy_plan.protection_preference,
+            command_battery_capacity_kwh=command_capacity,
+        )
     finally:
         database.close()

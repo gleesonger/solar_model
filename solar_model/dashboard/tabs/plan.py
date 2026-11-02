@@ -21,7 +21,7 @@ from solar_model.dashboard.components.download_dialog import excel_bytes
 from solar_model.logging_setup import LOGGER
 from solar_model.planning.plan_optimisation_milp import battery_protection_score
 from solar_model.planning.scenarios import scenario_probabilities
-from solar_model.planning.types import NoFeasiblePlanError, OperatingMode, SimulationResult
+from solar_model.planning.types import NoFeasiblePlanError, OperatingMode, PlanCommand, SimulationResult
 from solar_model.services.planning import generate_plan_report
 from solar_model.utils import table_to_object_list
 
@@ -94,6 +94,7 @@ PLAN_COLUMNS = {column.name: column for column in table_to_object_list(PlanColum
     ("net_cost",                             "Net cost (€)",                         "Net (€)",       17,           "number", 2,       Aggregation.QUANTITY,      False,   True),
     ("cost_score",                           "Cost Score",                           None,            None,         "number", 2,       Aggregation.QUANTITY,      True,    True),
     ("protection_score",                     "Protection Score",                     None,            None,         "number", 2,       Aggregation.QUANTITY,      True,    True),
+    ("limit_score",                          "Limit Score",                          None,            None,         "number", 2,       Aggregation.QUANTITY,      True,    True),
     ("terminal_score",                       "Terminal Score",                       None,            None,         "number", 2,       Aggregation.QUANTITY,      True,    True),
     ("total_score",                          "Total Score",                          None,            None,         "number", 2,       Aggregation.QUANTITY,      True,    True),
 )}
@@ -217,7 +218,7 @@ def advanced_plan_frame(frame: pd.DataFrame, timezone_name: str, first_mode: Ope
         parts = []
         hours = (row["ends_at"] - row["starts_at"]).total_seconds() / 3600
         energy = row.get("grid_import_kwh" if formatted["plan_action"] == "Force charge" else "grid_export_kwh")
-        if hours > 0 and pd.notna(energy):
+        if formatted["plan_action"] not in ("Hold battery", "Solar charge only") and hours > 0 and pd.notna(energy):
             parts.append(f"{energy / hours:.2f}kW")
         target = row.get("battery_end_kwh")
         if pd.notna(target):
@@ -484,12 +485,15 @@ class PlanTab:
         first = next(iter(result.results.values()))
         action = result.next_action
         minutes = (first.ends_at.iloc[0] - first.starts_at.iloc[0]).total_seconds() / 60
-        if action.mode == OperatingMode.CHARGE_PV_FIRST:
-            description = f"Force charge up to {action.force_battery_charge_rate:.2f} kW until {action.charge_cut_off_soc_percent:.1f}% SOC"
-        elif action.mode == OperatingMode.DISCHARGE_PV_FIRST:
-            description = f"Force discharge up to {action.force_battery_discharge_rate:.2f} kW until {action.discharge_cut_off_soc_percent:.1f}% SOC"
+        if action.command in (PlanCommand.FORCE_CHARGE, PlanCommand.FORCE_DISCHARGE):
+            charging = action.command == PlanCommand.FORCE_CHARGE
+            rate = action.force_battery_charge_rate if charging else action.force_battery_discharge_rate
+            soc = action.charge_cut_off_soc_percent if charging else action.discharge_cut_off_soc_percent
+            capacity = self.report.command_battery_capacity_kwh if self.report is not None else None
+            target = f"{capacity * soc / 100:.2f} kWh ({soc:.1f}%)" if capacity is not None and capacity > 0 else f"{soc:.1f}%"
+            description = f"{action.command.label} at {rate:.2f} kW until {target}"
         else:
-            description = "Self-consumption"
+            description = action.command.label
         action_period = f"Next {minutes:g} mins"
         scenarios = self.report.scenarios if self.report is not None and self.report.scenarios is not None else self.config.energy_plan.scenarios
         if self.chart is not None:

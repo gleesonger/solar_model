@@ -7,7 +7,7 @@ import pytest
 
 from solar_model.config import load_config
 from solar_model.dashboard.tabs.plan import detail_frame, detail_rows, detail_totals, hourly_detail_frame, plan_chart_options, scenario_summary, table_detail_frame
-from solar_model.planning.types import NextAction, OperatingMode, SimulationResult
+from solar_model.planning.types import NextAction, OperatingMode, PlanCommand, SimulationResult
 
 
 def sample_result():
@@ -50,11 +50,17 @@ def test_excel_filename_uses_applied_model_adjustment_scenario_and_plan_date(mon
 
     monkeypatch.setattr(plan, "excel_bytes", capture_workbook)
     monkeypatch.setattr(plan.ui, "download", lambda content, **kwargs: downloads.append(kwargs))
-    frame = tab.result.results[tab.scenario_name]
+    frame = tab.result.results[tab.scenario_name].assign(limit_score=[-2., -3.], plan_action=["Solar charge only", "Hold battery"])
     tab._download_detail(frame, plan.detail_columns(frame, compact=view == "Compact"))
     assert downloads[0]["filename"] == f"plan-{model}-{abbreviation}-protection-{adjustment:g}-solar-{solar}-load-{load}-20261027-1005.xlsx"
     assert exported_frames[0].Start.iloc[0] == "2026-10-27 10:05:00"
     assert exported_frames[0].End.iloc[0] == "2026-10-27 10:20:00"
+    action_column = "Action" if view == "Compact" else "Plan action"
+    assert exported_frames[0][action_column].tolist() == ["Solar charge only", "Hold battery", None]
+    if view == "Advanced":
+        assert exported_frames[0]["Limit Score"].tolist() == [-2., -3., -5.]
+    else:
+        assert "Limit Score" not in exported_frames[0]
     assert plan.detail_rows(frame, tab.config.timezone)[0]["starts_at"] == "10:05"
 
 
@@ -145,12 +151,13 @@ def test_detail_rows_show_local_time_only_and_preserve_missing_values():
 
 
 def test_table_scores_are_hourly_rates_whose_time_weighted_sum_matches_contributions():
-    original = sample_result().results["med"]
+    original = sample_result().results["med"].assign(limit_score=[-2., -3.])
     display = table_detail_frame(original)
     assert display.t.tolist() == [.25, 1.]
     assert display.cost_score.tolist() == [-4., .25]
     assert display.protection_score.tolist() == [.04, .02]
-    for column in ("cost_score", "protection_score", "total_score"):
+    assert display.limit_score.tolist() == [-8., -3.]
+    for column in ("cost_score", "protection_score", "limit_score", "total_score"):
         assert (display[column] * display.t).sum() == pytest.approx(original[column].sum())
     assert "t" not in original
     assert original.protection_score.tolist() == [.01, .02]
@@ -263,7 +270,7 @@ def test_preference_is_request_local_and_database_is_closed(monkeypatch, fails, 
     fake_db = SimpleNamespace(close=lambda: closed.append(True))
     monkeypatch.setattr(planning, "SolarDatabase", lambda engine: fake_db)
     monkeypatch.setattr(planning, "create_engine_for_database", lambda path: None)
-    monkeypatch.setattr(planning, "load_device_info_as_of", lambda *args: SimpleNamespace(system_battery_capacity_kwh=18.))
+    monkeypatch.setattr(planning, "load_device_info_as_of", lambda *args: SimpleNamespace(system_battery_capacity_kwh=18., battery_state_of_health_percent=90.))
     monkeypatch.setattr(planning, "load_plan_actuals", lambda *args: pd.DataFrame())
     config = load_config()
     original = config.energy_plan.protection_preference
@@ -401,7 +408,7 @@ def test_ui_report_without_override_uses_global_settings(monkeypatch):
     config = load_config()
     monkeypatch.setattr(planning, "create_engine_for_database", lambda path: None)
     monkeypatch.setattr(planning, "SolarDatabase", lambda engine: SimpleNamespace(close=lambda: None))
-    monkeypatch.setattr(planning, "load_device_info_as_of", lambda *args: SimpleNamespace(system_battery_capacity_kwh=18.))
+    monkeypatch.setattr(planning, "load_device_info_as_of", lambda *args: SimpleNamespace(system_battery_capacity_kwh=18., battery_state_of_health_percent=90.))
     monkeypatch.setattr(planning, "load_plan_actuals", lambda *args: pd.DataFrame())
 
     def calculate(database, configured, as_of):
@@ -410,6 +417,8 @@ def test_ui_report_without_override_uses_global_settings(monkeypatch):
 
     monkeypatch.setattr(planning, "plan_as_of", calculate)
     report = planning.generate_plan_report(config, datetime.now(timezone.utc))
+    assert report.battery_capacity_kwh == 18.
+    assert report.command_battery_capacity_kwh == pytest.approx(16.2)
     assert report.scenarios is config.energy_plan.scenarios
     assert report.preferred_reserve_kwh == config.energy_plan.preferred_reserve_kwh
     assert report.protection_preference == config.energy_plan.protection_preference
@@ -498,3 +507,50 @@ def test_infeasible_refresh_reports_message_without_traceback(monkeypatch, caplo
     assert tab.result is previous and not tab.running
     assert enabled == [True]
     assert all(record.exc_info is None for record in caplog.records)
+
+
+@pytest.mark.parametrize("kind,soc,capacity,expected", [
+    (PlanCommand.SOLAR_CHARGE_ONLY, 0., 18., "Solar charge only"),
+    (PlanCommand.HOLD_BATTERY, 0., 18., "Hold battery"),
+    (PlanCommand.SOLAR_EXPORT_FIRST, 0., 18., "Solar export first"),
+    (PlanCommand.FORCE_DISCHARGE, 0., 18., "Force discharge at 2.85 kW until 0.00 kWh (0.0%)"),
+    (PlanCommand.FORCE_DISCHARGE, 20., 18., "Force discharge at 2.85 kW until 3.60 kWh (20.0%)"),
+    (PlanCommand.FORCE_CHARGE, 80., 18., "Force charge at 2.85 kW until 14.40 kWh (80.0%)"),
+    (PlanCommand.FORCE_DISCHARGE, 20., None, "Force discharge at 2.85 kW until 20.0%"),
+])
+def test_next_action_summary_uses_program_command_label(kind, soc, capacity, expected):
+    from solar_model.dashboard.tabs import plan
+    from solar_model.services.planning import PlanReport
+
+    tab = plan.PlanTab(load_config())
+    tab.result = sample_result()
+    action = replace(
+        tab.result.next_action,
+        command_type=kind,
+        force_battery_charge_rate=2.85,
+        force_battery_discharge_rate=2.85,
+        charge_cut_off_soc_percent=soc,
+        discharge_cut_off_soc_percent=soc,
+    )
+    tab.result = replace(tab.result, next_action=action)
+    tab.report = PlanReport(tab.result, pd.DataFrame(), battery_capacity_kwh=20., command_battery_capacity_kwh=capacity)
+    labels = []
+    tab.chart = object()
+    tab.action_period_label = SimpleNamespace(set_text=lambda text: None)
+    tab.action_label = SimpleNamespace(set_text=labels.append)
+    tab.solar_scenario = tab.load_scenario = SimpleNamespace(options={}, update=lambda: None)
+    tab._render_scenario = lambda: None
+    tab._render_result()
+    assert labels == [expected]
+
+
+def test_passive_command_labels_survive_detail_grouping_and_advanced_formatting():
+    from solar_model.dashboard.tabs.plan import advanced_plan_frame
+
+    frame = detail_frame(sample_result().results["med"], 20.).assign(plan_action=["Solar charge only", "Hold battery"])
+    assert [row["plan_action"] for row in detail_rows(frame, "Europe/Dublin", OperatingMode.CHARGE_PV_FIRST)] == ["Solar charge only", "Hold battery"]
+    hourly = hourly_detail_frame(frame, "Europe/Dublin", OperatingMode.SELF_CONSUMPTION)
+    assert hourly.plan_action.tolist() == ["Solar charge only / Hold battery", "Hold battery"]
+    advanced = advanced_plan_frame(frame, "Europe/Dublin")
+    assert advanced.plan_action.tolist() == ["Solar charge only: 4.20kWh/21.0%", "Hold battery: 3.00kWh/15.0%"]
+    assert detail_totals(frame)["plan_action"] is None

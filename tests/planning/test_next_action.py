@@ -49,7 +49,7 @@ def simulate(inputs, action=None, extra_constraints=None, *, return_result=False
                      for variable in constraint.variables()}
         if action is not None:
             constraints.extend(variables["next_" + field.name] == getattr(action, field.name)
-                               for field in fields(action) if field.name != "mode")
+                               for field in fields(action) if field.name != "mode" and "next_" + field.name in variables)
         if extra_constraints is not None:
             constraints.extend(extra_constraints(variables))
         return original_score(costs, levels, scenarios, device, config, constraints,

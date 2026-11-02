@@ -5,6 +5,7 @@ from collections.abc import Iterable
 from enum import IntEnum
 
 import pandas as pd
+from solar_model.config import SolarArrayConfig
 from solar_model.time_utils import utc_instant
 
 @dataclass(frozen=True)
@@ -22,6 +23,28 @@ class OperatingMode(IntEnum):
     CHARGE_PV_FIRST = 4
     DISCHARGE_PV_FIRST = 5
 
+class PlanCommand(IntEnum):
+    """Program commands, distinct from Sigenergy's remote EMS mode numbers."""
+    SELF_CONSUMPTION = 0    # PV serves the house with surplus to the battery. Load shortfalls meet by the battery before falling back to grid.
+    SOLAR_CHARGE_ONLY = 1   # PV serves the house then charges the battery; no battery discharge.
+    HOLD_BATTERY = 2        # No battery flow; PV/grid supply the house and surplus PV exports.
+    SOLAR_EXPORT_FIRST = 5  # PV serves house/exports first; only inverter overflow charges the battery, with no discharge.
+    
+    FORCE_CHARGE = 3        # Fill battery from solar+grid
+    FORCE_DISCHARGE = 4     # Empty the battery to load+grid
+
+    @property
+    def label(self) -> str:
+        return {
+            PlanCommand.SELF_CONSUMPTION: "Self-consumption",
+            PlanCommand.SOLAR_CHARGE_ONLY: "Solar charge only",
+            PlanCommand.HOLD_BATTERY: "Hold battery",
+            PlanCommand.FORCE_CHARGE: "Force charge",
+            PlanCommand.FORCE_DISCHARGE: "Force discharge",
+            PlanCommand.SOLAR_EXPORT_FIRST: "Solar export first",
+        }[self]
+
+
 @dataclass(frozen=True)
 class NextAction:
     """Shared next command; battery power ceilings in kW and SOC stops in percent.
@@ -29,12 +52,29 @@ class NextAction:
     Achieved first-interval power can differ between scenarios due to PV,
     equipment saturation and commanded SOC stops. User limits constrain the
     command and its response; this object does not execute EMS.
+
+    DP specifies command_type and both global battery power limits explicitly.
+    Legacy MILP results leave those fields unset; command resolves their mode.
     """
     mode: OperatingMode
     force_battery_charge_rate: float
     force_battery_discharge_rate: float
     charge_cut_off_soc_percent: float
     discharge_cut_off_soc_percent: float
+    command_type: PlanCommand | None = None
+    charge_power_limit_kw: float | None = None
+    discharge_power_limit_kw: float | None = None
+
+    @property
+    def command(self) -> PlanCommand:
+        """Resolve legacy MILP results as well as explicit DP command profiles."""
+        if self.command_type is not None:
+            return self.command_type
+        return {
+            OperatingMode.SELF_CONSUMPTION: PlanCommand.SELF_CONSUMPTION,
+            OperatingMode.CHARGE_PV_FIRST: PlanCommand.FORCE_CHARGE,
+            OperatingMode.DISCHARGE_PV_FIRST: PlanCommand.FORCE_DISCHARGE,
+        }[self.mode]
 
 @dataclass
 class DeviceInfo:

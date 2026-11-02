@@ -25,6 +25,7 @@ class SystemLimits(NamedTuple):
     max_discharge_kwh: float
     charge_loss_factor: float
     discharge_loss_factor: float
+    max_grid_import_kwh: float = float("inf")
 
 
 class Period(NamedTuple):
@@ -51,6 +52,7 @@ class DeviceParameters(NamedTuple):
     inverter_max_absorption_power_kw: float
     inverter_battery_charge_power_kw: float
     inverter_battery_discharge_power_kw: float
+    grid_max_import_power_kw: float = float("inf")
 
 
 class Step(NamedTuple):
@@ -541,7 +543,7 @@ def simulate_system_single_time_period(device: DeviceParameters, capacity: float
             discharge = min(load - pv_load, discharge_limit, output - pv_load, battery * device.discharge_efficiency)
         used = min(pv, charge + output - discharge)
     elif command_type == PlanCommand.FORCE_CHARGE:
-        charge = min(rate * hours, max(0., capacity - battery) / device.charge_efficiency, charge_limit, pv + absorption)
+        charge = min(rate * hours, max(0., capacity - battery) / device.charge_efficiency, charge_limit, pv + absorption, max(0., pv + device.grid_max_import_power_kw * hours - load))
         used = min(pv, charge + output)
     elif command_type == PlanCommand.HOLD_BATTERY:
         used = min(pv, output)
@@ -562,6 +564,8 @@ def simulate_system_single_time_period(device: DeviceParameters, capacity: float
     battery_end = min(capacity, max(0., battery + device.charge_efficiency * charge - discharge / device.discharge_efficiency))
     exchange = used - charge + discharge - load
     grid_export, grid_import = max(0., exchange), max(0., -exchange)
+    if grid_import > device.grid_max_import_power_kw * hours + 1e-9:
+        return None
     if min(discharge, grid_export) > period.export_limit * hours + 1e-9:
         return None
     protection = battery_protection_score(battery_end, period.preferred_reserve_kwh)
@@ -624,13 +628,21 @@ def system_limits(device: DeviceInfo, interval_hours: float) -> SystemLimits:
     """Convert nameplate limits and efficiencies into one interval's limits."""
     if not (0 < device.charge_efficiency <= 1) or not (0 < device.discharge_efficiency <= 1):
         raise ValueError("battery efficiencies must be between 0 and 1 (inclusive)")
+    if math.isnan(device.grid_max_import_power_kw) or device.grid_max_import_power_kw < 0:
+        raise ValueError("grid import limit must be non-negative")
     capacity = device.system_battery_capacity_kwh * device.battery_state_of_health_percent / 100
     max_charge_kwh = device.inverter_battery_charge_power_kw * interval_hours
     max_discharge_kwh = min(device.inverter_battery_discharge_power_kw, device.inverter_max_active_power_kw) * interval_hours
     if capacity <= 0 or max_charge_kwh < 0 or max_discharge_kwh < 0:
         raise ValueError("battery capacity and charge/discharge limits must be non-negative")
-    return SystemLimits(capacity, max_charge_kwh, max_discharge_kwh,
-                        1 / device.charge_efficiency - 1, 1 / device.discharge_efficiency - 1)
+    return SystemLimits(
+        capacity,
+        max_charge_kwh,
+        max_discharge_kwh,
+        1 / device.charge_efficiency - 1,
+        1 / device.discharge_efficiency - 1,
+        device.grid_max_import_power_kw * interval_hours,
+    )
 
 
 def allocate_energy_routes(solar: Iterable[float], load: Iterable[float], solar_used: Iterable[float],

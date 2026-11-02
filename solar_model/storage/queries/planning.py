@@ -235,6 +235,7 @@ def load_device_info_as_of(database: SolarDatabase, config: Config, as_of: datet
         latest.setdefault(variable_name, value)
 
     latest.update(asdict(config.additional_device_info))
+    latest.setdefault("grid_max_import_power_kw", float("inf"))
     missing = [name for name in DeviceInfo.__dataclass_fields__ if name not in latest]
     if missing:
         raise ValueError(f"as-of device information is missing: {', '.join(missing)}")

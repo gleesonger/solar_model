@@ -177,7 +177,7 @@ save_device_info(readings, collected, variable_names)
   append only changed value/unit pairs
 ```
 
-Typical ORM row: `{id, collected_at_utc, collected_at_local, variable_name, variable, value, unit}`. `variable_name` is a stable identifier used by planning; `variable` is a human label. Empty strings, text `"0"`, numeric zero, and non-finite numeric values are not saved. This history is not a complete metadata snapshot at every electrical timestamp.
+Typical ORM row: `{id, collected_at_utc, collected_at_local, variable_name, variable, value, unit}`. `variable_name` is a stable identifier used by planning; `variable` is a human label. Empty strings, text `"0"`, numeric zero, and non-finite numeric values are not saved, except that zero is valid and preserved for `Grid maximum import limitation` (`grid_max_import_power_kw`). That setting is stored as physical kW text in the existing device table; no measurement column, rollup or schema migration is needed. Changes append history; identical consecutive readings do not append rows. This history is not a complete metadata snapshot at every electrical timestamp.
 
 ## 6. Retrieval contracts and consumers
 

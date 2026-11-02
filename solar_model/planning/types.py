@@ -99,6 +99,7 @@ class DeviceInfo:
     maximum_pv_input_power_kw: float
     charge_efficiency: float
     discharge_efficiency: float
+    grid_max_import_power_kw: float = float("inf")  # Unknown in device history predating collection.
 
 @dataclass
 class DeviceState:

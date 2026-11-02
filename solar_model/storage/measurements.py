@@ -292,7 +292,7 @@ class MeasurementStorage:
         valid_values = {
             variable: (value_text, unit)
             for variable, (value, unit, _) in values_to_save.items()
-            if (value_text := device_value_text(value)) is not None
+            if (value_text := device_value_text(value, allow_zero=variable == "Grid maximum import limitation")) is not None
         }
         if not valid_values:
             return 0
@@ -321,11 +321,11 @@ class MeasurementStorage:
                 changed += 1
         return changed
 
-def device_value_text(value: float | str) -> str | None:
+def device_value_text(value: float | str, *, allow_zero: bool = False) -> str | None:
     if isinstance(value, str):
         cleaned = value.replace("\x00", "").strip()
-        return cleaned if cleaned and cleaned != "0" else None
-    if not math.isfinite(value) or value == 0:
+        return cleaned if cleaned and (allow_zero or cleaned != "0") else None
+    if not math.isfinite(value) or (value == 0 and not allow_zero):
         return None
     return format(value, ".15g")
 

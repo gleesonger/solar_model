@@ -29,7 +29,7 @@ All functions below live in `solar_model/planning/plan_optimisation_dynamic_prog
 | Period calculation | `simulate_system_single_time_period`, `battery_protection_score`, `battery_limit_score`, `step_score` | Physical command response and the shared period objective: economics, protection reward and soft-limit penalty |
 | Backend | `get_numba_functions` | Locally import Numba, register shared helpers and lazily compile the same backward/forward functions |
 | Report boundary | `result_frame`, `command`, `allocate_energy_routes` | Reconstruct routes, expose score components, split visible/lookahead frames and describe the shared next command |
-| Physical inputs | `system_limits`, `SystemLimits` | Health-adjusted capacity, interval equipment limits and loss factors |
+| Physical inputs | `system_limits`, `SystemLimits` | Health-adjusted capacity, interval equipment/grid-import limits and loss factors |
 
 `services.planning.plan_as_of` calls the public planner. Dashboard column metadata in `dashboard/tabs/plan.py` controls score display, aggregation and Excel export. MILP owns a separate simulator/objective and is unaffected by DP-only changes.
 
@@ -52,7 +52,7 @@ See the [paired experiment](../reviews/dp-loop-optimisation-experiment.md) for t
 -> (1% /40, +/-1 percentage point)
 ```
 
-The first `refinement_stages` entry is the full-range solve with `band_percent: null`; its grid and power settings replace the former separate coarse parameters. Later entries use numeric widths. Each corridor is centred on the best retained path so far, separately for every scenario and period end, including lookahead. The first command is still shared across scenarios. If a refinement is infeasible or has a lower/equal realised score, retain the earlier result. With valid inputs, the full physical-range pass always has a self-consumption continuation: remaining household demand imports from the grid and surplus solar can export or clip. Scheduled Min/Max breaches carry finite penalties instead of making nodes infeasible. An explicitly restricted single pass can still raise `NoFeasiblePlanError` (a `ValueError` subclass). Timings cover each solve pass, each attempted refinement and the entire plan.
+The first `refinement_stages` entry is the full-range solve with `band_percent: null`; its grid and power settings replace the former separate coarse parameters. Later entries use numeric widths. Each corridor is centred on the best retained path so far, separately for every scenario and period end, including lookahead. The first command is still shared across scenarios. If a refinement is infeasible or has a lower/equal realised score, retain the earlier result. Without a known site import cap, the full physical-range pass has a self-consumption continuation: remaining household demand imports from the grid and surplus solar can export or clip. With a known cap, insufficient solar/battery supply can make even the full-range pass infeasible; DP raises `NoFeasiblePlanError` rather than inventing supply or dropping household demand. Scheduled Min/Max breaches carry finite penalties instead of making nodes infeasible. An explicitly restricted single pass can still raise `NoFeasiblePlanError` (a `ValueError` subclass). Timings cover each solve pass, each attempted refinement and the entire plan.
 
 The implementation owns its interval generation, exact protection curve, tariff-reference scaling, terminal credit, physical limits and report energy allocation. All DP code lives in `plan_optimisation_dynamic_programming.py`; DP does not import MILP, CVXPY or `planning.system`. Shared configuration, domain types, tariff lookup and UTC utilities remain common. MILP keeps its own configured timestep grid and calculations, and remains the dashboard/service default.
 
@@ -316,3 +316,12 @@ solve_pass(...)
 ├── result_frame(...) → per-scenario selected command labels, energy routes and reports
 └── Return SimulationResult with command(...), results and lookahead_results
 ```
+
+
+## Grid connection import limit
+
+`DeviceInfo.grid_max_import_power_kw` carries the latest as-of device-history reading of V2.9 holding register 40040. Positive infinity means no reading is known; zero means no grid imports are allowed. Negative and NaN limits are rejected. Both system-limit helpers expose `max_grid_import_kwh = grid_max_import_power_kw * interval_hours`; DP's numerical `DeviceParameters` carries the kW value for the shared Python/Numba period calculation.
+
+Every command and scenario, including hidden lookahead periods, must satisfy `grid_import <= grid_max_import_power_kw * hours` (1e-9 kWh numerical tolerance). Forced charging also caps its charging input at `max(0, solar_kwh + import_limit_kwh - load_kwh)`, alongside battery, SOC and inverter limits. This reserves import capacity for household demand and permits solar charging beyond the site import cap. This saturation is a model assumption about the configured global limit, not verified firmware behaviour. The final import check rejects any command whose remaining household demand exceeds the cap, including passive modes and empty-battery states. No load shedding is modelled. Infeasible candidate transitions are excluded from backward values and forward rollouts; if no complete shared-command plan exists, `NoFeasiblePlanError` is reported. This is an interval-average power constraint; transient peaks are not modelled.
+
+The setting appears automatically in the System information table through device history. Collection and modelling send no control writes. MILP currently carries the field through its inputs/system-limit result but does not enforce it in its optimisation constraints.

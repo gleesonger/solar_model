@@ -683,3 +683,73 @@ def test_solar_export_first_charges_only_inverter_overflow(solar, load, initial,
     assert step.grid_export == pytest.approx(exported)
     assert step.battery_end == pytest.approx(initial + .95 * charge)
     assert step.solar_used - charge - load == pytest.approx(exported - imported)
+
+
+@pytest.mark.parametrize("hours", [.25, 1., 4.])
+@pytest.mark.parametrize("solar_kw", [0., 1., 5.])
+def test_grid_import_limit_reduces_forced_charging_after_household_demand(inputs, hours, solar_kw):
+    device = replace(inputs[0], grid_max_import_power_kw=2.)
+    p = period(hours=hours, solar=solar_kw * hours, load=hours)
+    step = dp.simulate_system_single_time_period(device, 100., p, 0., dp.Action(PlanCommand.FORCE_CHARGE, 4.))
+    assert step is not None
+    assert step.grid_import <= 2. * hours + 1e-9
+    assert step.charge == pytest.approx(min(4., solar_kw + 1.) * hours)
+    assert step.solar_used + step.grid_import == pytest.approx(step.charge + hours + step.grid_export)
+
+
+@pytest.mark.parametrize("command", list(PlanCommand))
+def test_grid_import_limit_rejects_unserved_household_demand(inputs, command):
+    device = replace(inputs[0], grid_max_import_power_kw=1.)
+    assert dp.simulate_system_single_time_period(device, 10., period(load=2.), 0., dp.Action(command, 4.)) is None
+
+
+def test_zero_grid_import_limit_allows_battery_and_solar_supply(inputs):
+    device = replace(inputs[0], grid_max_import_power_kw=0.)
+    p = period(load=.5)
+    step = dp.simulate_system_single_time_period(device, 10., p, 2., dp.Action(PlanCommand.SELF_CONSUMPTION, 0.))
+    assert step is not None and step.grid_import == 0.
+    assert step.discharge == pytest.approx(.5)
+    step = dp.simulate_system_single_time_period(device, 10., p._replace(solar=2.), 0., dp.Action(PlanCommand.FORCE_CHARGE, 4.))
+    assert step is not None and step.grid_import == 0.
+    assert step.charge == pytest.approx(1.5)
+
+
+@pytest.mark.parametrize("limit", [-1., float("nan"), -float("inf")])
+def test_grid_import_limit_validation(inputs, limit):
+    with pytest.raises(ValueError, match="grid import limit"):
+        dp.system_limits(replace(inputs[0], grid_max_import_power_kw=limit), 1.)
+
+
+def test_numba_grid_import_limit_matches_python():
+    from numba import njit
+
+    device = dp.DeviceParameters(1., 1., 4., 4., 4., 4., 2.)
+    calculate = njit(dp.simulate_system_single_time_period)
+    # register helpers before compiling the shared numerical function
+    dp.get_numba_functions()
+    for p, action in [(period(), dp.Action(PlanCommand.FORCE_CHARGE, 4.)), (period(load=2.), dp.Action(PlanCommand.HOLD_BATTERY, 0.))]:
+        expected = dp.simulate_system_single_time_period(device, 10., p, 0., action)
+        actual = calculate(device, 10., p, 0., action)
+        assert actual == expected
+    assert calculate(device, 10., period(), 0., dp.Action(PlanCommand.FORCE_CHARGE, 4.)).grid_import == pytest.approx(1.)
+
+
+@pytest.mark.parametrize("limit", [0., 1.5])
+def test_grid_import_limit_applies_to_dp_search_and_lookahead(inputs, limit):
+    device, state, scenarios, config, start = inputs
+    device = replace(device, grid_max_import_power_kw=limit)
+    settings = replace(config.energy_plan.optimiser.dynamic_programming, use_numba=False)
+    config = replace(config, energy_plan=replace(config.energy_plan, optimiser=replace(config.energy_plan.optimiser, dynamic_programming=settings)))
+    result = dp.solve_pass(device, state, scenarios, config, start, grid_step_percent=5., power_divisions=1)
+    for frame in [result.results["base"], result.lookahead_results["base"]]:
+        hours = (frame.ends_at - frame.starts_at).dt.total_seconds() / 3600
+        assert (frame.grid_import_kwh <= limit * hours + 1e-9).all()
+
+
+def test_grid_import_limit_reports_no_feasible_dp_plan(inputs):
+    device, state, scenarios, config, start = inputs
+    device = replace(device, grid_max_import_power_kw=0.)
+    settings = replace(config.energy_plan.optimiser.dynamic_programming, use_numba=False)
+    config = replace(config, energy_plan=replace(config.energy_plan, optimiser=replace(config.energy_plan.optimiser, dynamic_programming=settings)))
+    with pytest.raises(dp.NoFeasiblePlanError):
+        dp.solve_pass(device, replace(state, battery_kwh=0.), scenarios, config, start, grid_step_percent=50., power_divisions=1)

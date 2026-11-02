@@ -16,5 +16,6 @@
   { "metric": "System battery capacity"         , "variable_name": "system_battery_capacity_kwh"    , "address": 30083, "kind": "input", "unit": "kWh", "data_type": "u32", "scale": 100 , "words": 2, "device_id": 247 },
   { "metric": "Battery charge cut-off SOC"      , "variable_name": "battery_charge_cut_off_soc_percent", "address": 30085, "kind": "input", "unit": "%"  , "data_type": "u16", "scale": 10  , "words": 1, "device_id": 247 },
   { "metric": "Battery discharge cut-off SOC"   , "variable_name": "battery_discharge_cut_off_soc_percent", "address": 30086, "kind": "input", "unit": "%"  , "data_type": "u16", "scale": 10  , "words": 1, "device_id": 247 },
-  { "metric": "Battery state of health"         , "variable_name": "battery_state_of_health_percent", "address": 30087, "kind": "input", "unit": "%"  , "data_type": "u16", "scale": 10  , "words": 1, "device_id": 247 }
+  { "metric": "Battery state of health"         , "variable_name": "battery_state_of_health_percent", "address": 30087, "kind": "input", "unit": "%"  , "data_type": "u16", "scale": 10  , "words": 1, "device_id": 247 },
+  { "metric": "Grid maximum import limitation"   , "variable_name": "grid_max_import_power_kw"         , "address": 40040, "kind": "holding", "unit": "kW" , "data_type": "u32", "scale": 1000, "words": 2, "device_id": 247 }
 ]

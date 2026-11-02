@@ -101,7 +101,7 @@ def _worker(connection, case: str, config_path: str, grid: str = "historical", m
             device, system_battery_capacity_kwh=18., battery_state_of_health_percent=100.,
             inverter_max_active_power_kw=5., inverter_max_absorption_power_kw=5.,
             inverter_battery_charge_power_kw=5., inverter_battery_discharge_power_kw=5.,
-            charge_efficiency=.95, discharge_efficiency=.95,
+            charge_efficiency=.95, discharge_efficiency=.95, grid_max_import_power_kw=float("inf"),
             battery_discharge_cut_off_soc_percent=10., battery_charge_cut_off_soc_percent=100.,
         )
 

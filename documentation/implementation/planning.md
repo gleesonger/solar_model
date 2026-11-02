@@ -6,7 +6,7 @@ The scoring implementation follows [plan-model scoring](../overview/plan-model.m
 
 ## 1. CLI call hierarchy
 
-The synthetic performance tool runs with `python -m solar_model.tools.benchmark_planning --output planning-benchmark.json`. Its default nineteen input variants use nine joint scenarios and the historical 43-period grid. `--grid production` selects configured intervals; `--cases` selects named variants and supports `solar_4` and `load_4`. Each case starts in a fresh controller worker and performs one public simulation. No database or device is accessed. JSON records source/configuration hashes, native timings, per-scenario full/visible costs and scores, and battery endpoints.
+The synthetic performance tool runs with `python -m solar_model.tools.benchmark_planning --output planning-benchmark.json`. Its default nineteen input variants use nine joint scenarios and the historical 43-period grid. `--grid production` selects configured intervals; `--cases` selects named variants and supports `solar_4` and `load_4`. Each case starts in a fresh controller worker and performs one public simulation. No database or device is accessed. The synthetic baseline explicitly leaves the site grid-import cap unbounded. JSON records source/configuration hashes, native timings, per-scenario full/visible costs and scores, and battery endpoints.
 
 The controller kills and reaps the simulation process tree after five seconds, records N/A and continues without retrying. Windows uses `taskkill /T`; POSIX isolates the case in a process group. Controller imports/input preparation precede a ready/start handshake with a separate 30-second limit. The five-second budget includes construction, compilation, solving, extraction and physical/cost/duration validation. `simulation_seconds` stops when the public call returns; `total_seconds` includes independent validation. Build, compilation and native solve timings are recorded separately. BLAS/OpenMP limits are one; the single HiGHS solver uses automatic settings. The independently reconstructed weighted report score must match the native objective within 0.000001. See [performance measurements](../reviews/performance.md).
 
@@ -44,13 +44,14 @@ Database observations and forecast vintages use the cutoff. Efficiencies/tariffs
 
 `load_device_info_as_of()` inspects whether `variable_name` exists, queries device rows ordered descending ID, and filters parsed UTC timestamps to ≤ cutoff in Python. It keeps the first value for each stable identifier. Missing machine names are derived from human variable text; unit suffixes are appended when needed (`kw`, `kwh`, `kva`, `v`, `hz`, `percent`). Numeric text becomes float; other text stays string.
 
-`config.additional_device_info` then overrides values, providing charge/discharge efficiency. Missing any `DeviceInfo` dataclass field raises an error, even when that field is informational to the solver.
+`config.additional_device_info` then overrides values, providing charge/discharge efficiency. Missing required `DeviceInfo` metadata raises an error, even when informational to the solver. The newly collected `grid_max_import_power_kw` is optional for historical compatibility: before its first available reading it defaults to positive infinity (unknown/unbounded), rather than zero or a future reading. Once available, the latest reading at or before the cutoff applies throughout the projection, including zero.
 
 | DeviceInfo fields | Solver use |
 | --- | --- |
 | `system_battery_capacity_kwh`, `battery_state_of_health_percent` | Usable capacity = product /100 |
 | `inverter_battery_charge_power_kw`, `inverter_max_absorption_power_kw` | Separate total battery charging-input limit and grid-to-battery AC absorption limit |
 | `inverter_battery_discharge_power_kw`, `inverter_max_active_power_kw` | Discharge energy limit and combined inverter-flow constraint |
+| `grid_max_import_power_kw` | Grid-point import cap from 40040; both system-limit helpers expose duration-scaled `max_grid_import_kwh`. DP enforces it; MILP does not yet enforce this site cap |
 | `charge_efficiency`, `discharge_efficiency` | Explicit loss expressions |
 | Model/serial/firmware, rated power/apparent power, grid ratings, pack/string/MPPT counts | Required metadata but no direct optimisation constraint |
 | Battery discharge SOC cutoff | Does not shift protection scoring; scheduled kWh bounds and action SOC stopping govern the existing flow model |

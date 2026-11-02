@@ -26,7 +26,7 @@ def inputs():
     device = replace(device, system_battery_capacity_kwh=10., battery_state_of_health_percent=100.,
         inverter_max_active_power_kw=4., inverter_max_absorption_power_kw=4.,
         inverter_battery_charge_power_kw=4., inverter_battery_discharge_power_kw=4.,
-        charge_efficiency=1., discharge_efficiency=1.)
+        charge_efficiency=1., discharge_efficiency=1., grid_max_import_power_kw=float("inf"))
     rule = TariffRule(("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"), "00:00", "24:00", 0., "flat")
     config = load_config()
     config = replace(config, tariffs=TariffsConfig((TariffPeriod("2000-01-01",

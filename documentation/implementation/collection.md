@@ -97,7 +97,7 @@ The dictionary contract is `metric -> (physical value, unit, cumulative flag)`. 
 
 The handoff to `save_modbus_sample()` contains decoded tuples, the mutable `previous` state, timestamp pair, and typed tariffs. The collector does not compute deltas or pre-scale stored integers.
 
-After that write succeeds, device collection reads another block set. A `variable_names` dictionary maps human-readable device metrics to stable machine names; maximum PV input power receives a derived machine name. Device-history persistence is separate from the electrical transaction.
+After that write succeeds, device collection reads another block set. A `variable_names` dictionary maps human-readable device metrics to stable machine names; maximum PV input power receives a derived machine name. Device-history persistence is separate from the electrical transaction. The device map includes `Grid maximum import limitation` / `grid_max_import_power_kw`: holding register 40040, device 247, U32 over two 16-bit words, scale divisor 1000, kW. This adds a holding-register read alongside the existing input-register metadata reads; it sends no writes. A failed holding read follows the same metadata-failure boundary.
 
 | Failure boundary | Result |
 | --- | --- |

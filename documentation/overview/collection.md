@@ -26,7 +26,9 @@ Source: [solar_model/runtime/collector.py](../../solar_model/runtime/collector.p
 - Words decode in big-endian order; signed types use two's complement. Numeric result is divided by map `scale`; strings decode UTF-8 through the first NUL.
 - The client tries the `device_id` argument, with a `slave` fallback for API compatibility.
 - An error or short response rejects the electrical interval. The connection is closed and retried next cycle.
-- Metadata failure retains an already saved electrical row. Empty/zero/non-finite metadata is discarded; valid changed values append history. Known inverter models add maximum PV input power from [solar_model/integrations/sigenstor/datasheets.py](../../solar_model/integrations/sigenstor/datasheets.py).
+- Metadata failure retains an already saved electrical row. Empty/zero/non-finite metadata is discarded (zero is valid for the grid import limit); valid changed values append history. Known inverter models add maximum PV input power from [solar_model/integrations/sigenstor/datasheets.py](../../solar_model/integrations/sigenstor/datasheets.py).
+
+The device map also reads holding register **40040** on plant device **247**: Grid maximum import limitation (`grid_max_import_power_kw`), U32 over two words, divided by 1000 into kW. This is the grid-connection import cap, requires a grid sensor and applies across EMS modes per V2.9. Changes, including zero, enter device history and appear in System information. Installed-firmware response still requires verification.
 
 ## Forecast collection
 

@@ -1,4 +1,5 @@
 """Physical battery/inverter limits used by the optimisation model."""
+import math
 from dataclasses import dataclass
 from collections.abc import Iterable
 
@@ -12,19 +13,28 @@ class SystemLimits:
     max_discharge_kwh: float
     charge_loss_factor: float
     discharge_loss_factor: float
+    max_grid_import_kwh: float = float("inf")
 
 
 def system_limits(device: DeviceInfo, interval_hours: float) -> SystemLimits:
     """Convert nameplate limits and efficiencies into one interval's limits."""
     if not (0 < device.charge_efficiency <= 1) or not (0 < device.discharge_efficiency <= 1):
         raise ValueError("battery efficiencies must be between 0 and 1 (inclusive)")
+    if math.isnan(device.grid_max_import_power_kw) or device.grid_max_import_power_kw < 0:
+        raise ValueError("grid import limit must be non-negative")
     capacity = device.system_battery_capacity_kwh * device.battery_state_of_health_percent / 100
     max_charge_kwh = device.inverter_battery_charge_power_kw * interval_hours
     max_discharge_kwh = min(device.inverter_battery_discharge_power_kw, device.inverter_max_active_power_kw) * interval_hours
     if capacity <= 0 or max_charge_kwh < 0 or max_discharge_kwh < 0:
         raise ValueError("battery capacity and charge/discharge limits must be non-negative")
-    return SystemLimits(capacity, max_charge_kwh, max_discharge_kwh,
-                        1 / device.charge_efficiency - 1, 1 / device.discharge_efficiency - 1)
+    return SystemLimits(
+        capacity,
+        max_charge_kwh,
+        max_discharge_kwh,
+        1 / device.charge_efficiency - 1,
+        1 / device.discharge_efficiency - 1,
+        device.grid_max_import_power_kw * interval_hours,
+    )
 
 
 def allocate_energy_routes(solar: Iterable[float], load: Iterable[float], solar_used: Iterable[float],

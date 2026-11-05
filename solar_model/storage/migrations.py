@@ -11,6 +11,7 @@ from solar_model.storage.schema import (
     SigenStorDevice,
     DatabaseMetadata,
     ForecastHouseLoadSample,
+    HolidayPeriod,
     ForecastSolarSample,
     PV_ARRAY_IDS,
     SigenStorHourlySample,
@@ -18,7 +19,8 @@ from solar_model.storage.schema import (
 from solar_model.storage.connection import SolarDatabase, create_engine_for_database
 from solar_model.storage.measurements import house_load_energy
 
-DATABASE_VERSION = "0.3.1"
+NO_SOLAR_COST_VERSION = "0.3.1"
+DATABASE_VERSION = "0.3.2"
 
 def open_database(path: str | Path) -> SolarDatabase:
     engine = create_engine_for_database(path)
@@ -27,7 +29,7 @@ def open_database(path: str | Path) -> SolarDatabase:
             version = connection.exec_driver_sql(
                 "SELECT value FROM database_metadata WHERE key = 'database_version'"
             ).scalar_one_or_none()
-        if version not in (None, "0.1.0", "0.2.0", "0.3.0", DATABASE_VERSION):
+        if version not in (None, "0.1.0", "0.2.0", "0.3.0", NO_SOLAR_COST_VERSION, DATABASE_VERSION):
             raise RuntimeError(f"Unsupported database version: {version!r}")
     _rename_forecast_solar_raw_columns(engine)
     _rename_sigenstor_battery_available_discharge_column(engine)
@@ -56,6 +58,7 @@ def open_database(path: str | Path) -> SolarDatabase:
     _migrate_house_load(database)
     _migrate_house_load_forecast(database)
     _migrate_no_solar_cost(database)
+    _migrate_holiday_period(database)
     return database
 
 
@@ -66,7 +69,7 @@ def _migrate_house_load(database: SolarDatabase) -> None:
         version = connection.exec_driver_sql(
             "SELECT value FROM database_metadata WHERE key = 'database_version'"
         ).scalar_one_or_none()
-        if version in ("0.2.0", "0.3.0", DATABASE_VERSION):
+        if version in ("0.2.0", "0.3.0", NO_SOLAR_COST_VERSION, DATABASE_VERSION):
             return
         if version not in (None, "0.1.0"):
             raise RuntimeError(f"Unsupported database version: {version!r}")
@@ -101,7 +104,7 @@ def _migrate_house_load_forecast(database: SolarDatabase) -> None:
         ForecastHouseLoadSample.__table__.create(connection, checkfirst=True)
         if connection.exec_driver_sql(
             "SELECT value FROM database_metadata WHERE key = 'database_version'"
-        ).scalar_one_or_none() in ("0.3.0", DATABASE_VERSION):
+        ).scalar_one_or_none() in ("0.3.0", NO_SOLAR_COST_VERSION, DATABASE_VERSION):
             return
         connection.exec_driver_sql("DROP TABLE IF EXISTS forecast_load")
         connection.exec_driver_sql(
@@ -116,7 +119,7 @@ def _migrate_no_solar_cost(database: SolarDatabase) -> None:
         connection.exec_driver_sql("BEGIN IMMEDIATE")
         if connection.exec_driver_sql(
             "SELECT value FROM database_metadata WHERE key = 'database_version'"
-        ).scalar_one_or_none() == DATABASE_VERSION:
+        ).scalar_one_or_none() in (NO_SOLAR_COST_VERSION, DATABASE_VERSION):
             return
         connection.exec_driver_sql(
             "UPDATE sigenstor SET no_solar_battery_import_cost_period = "
@@ -125,7 +128,18 @@ def _migrate_no_solar_cost(database: SolarDatabase) -> None:
         connection.execute(SigenStorHourlySample.__table__.delete())
         database._insert_hourly_rollup(connection)
         connection.exec_driver_sql(
-            "UPDATE database_metadata SET value = ? WHERE key = 'database_version'", (DATABASE_VERSION,),
+            "UPDATE database_metadata SET value = ? WHERE key = 'database_version'", (NO_SOLAR_COST_VERSION,),
+        )
+
+
+def _migrate_holiday_period(database: SolarDatabase) -> None:
+    """Create the holiday table and publish its version in one transaction."""
+    with database.engine.begin() as connection:
+        connection.exec_driver_sql("BEGIN IMMEDIATE")
+        HolidayPeriod.__table__.create(connection, checkfirst=True)
+        connection.exec_driver_sql(
+            "UPDATE database_metadata SET value = ? WHERE key = 'database_version' AND value <> ?",
+            (DATABASE_VERSION, DATABASE_VERSION),
         )
 
 def _add_missing_columns(engine: Engine, model: type[Base]) -> None:

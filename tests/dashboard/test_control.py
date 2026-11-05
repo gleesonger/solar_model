@@ -1,7 +1,9 @@
 from datetime import date
 from pathlib import Path
 
-from solar_model.dashboard.tabs.control import one_year_before, recalculation_command, restart_application
+import pytest
+
+from solar_model.dashboard.tabs.control import holiday_periods_from_rows, one_year_before, recalculation_command, restart_application
 
 
 def test_recalculation_command_passes_an_inclusive_date_range() -> None:
@@ -17,6 +19,23 @@ def test_recalculation_command_passes_an_inclusive_date_range() -> None:
 
 def test_one_year_before_handles_leap_day() -> None:
     assert one_year_before(date(2024, 2, 29)) == date(2023, 2, 28)
+
+
+def test_holiday_row_uses_entered_date_for_one_day_period() -> None:
+    assert holiday_periods_from_rows([{"start_date": "2026-12-24", "end_date": ""}]) == [("2026-12-24", "2026-12-24")]
+    assert holiday_periods_from_rows([{"start_date": "", "end_date": "2026-12-25"}]) == [("2026-12-25", "2026-12-25")]
+    assert holiday_periods_from_rows([{"start_date": "", "end_date": ""}]) == []
+
+
+def test_holiday_row_rejects_end_before_start() -> None:
+    with pytest.raises(ValueError, match="end date must not precede start date"):
+        holiday_periods_from_rows([{"start_date": "2026-12-25", "end_date": "2026-12-24"}])
+
+
+@pytest.mark.parametrize("invalid", ["20261224", "2026-02-30"])
+def test_holiday_row_rejects_invalid_iso_date(invalid) -> None:
+    with pytest.raises(ValueError):
+        holiday_periods_from_rows([{"start_date": invalid, "end_date": ""}])
 
 
 def test_restart_application_requests_supervisor_restart(tmp_path, monkeypatch) -> None:

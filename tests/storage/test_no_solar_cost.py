@@ -66,7 +66,7 @@ def test_migration_overwrites_raw_and_hourly_costs_atomically_and_runs_once(tmp_
         with database.engine.connect() as connection:
             assert connection.exec_driver_sql("SELECT no_solar_battery_import_cost_period FROM sigenstor ORDER BY collected_at_utc").scalars().all() == [4000, 1000, 0, None, None, 3702]
             assert connection.exec_driver_sql("SELECT SUM(no_solar_battery_import_cost_period) FROM sigenstor_hourly").scalar() == 8702
-            assert connection.exec_driver_sql("SELECT value FROM database_metadata WHERE key='database_version'").scalar() == "0.3.1"
+            assert connection.exec_driver_sql("SELECT value FROM database_metadata WHERE key='database_version'").scalar() == "0.3.2"
             assert connection.exec_driver_sql("SELECT SUM(net_cost_period), SUM(grid_import_cost_period), SUM(grid_export_revenue_period) FROM sigenstor").one() == (30000, 45000, 15000)
     finally:
         database.close()

@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
 import subprocess
 import sys
+from calendar import monthrange
 from datetime import date, datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -13,6 +15,8 @@ from nicegui import run, ui
 
 from solar_model.paths import subprocess_environment
 from solar_model.config import Config
+from solar_model.services.forecasting import backfill_daily_house_load_forecasts
+from solar_model.storage.migrations import open_database
 
 from solar_model.dashboard.components.warnings import notify_error, notify_info
 
@@ -60,6 +64,53 @@ def one_year_before(value: date) -> date:
         return value.replace(year=value.year - 1, day=28)
 
 
+def load_holidays(database_path: str) -> list[tuple[str, str]]:
+    database = open_database(database_path)
+    try:
+        return database.list_holiday_periods()
+    finally:
+        database.close()
+
+
+def save_holidays(database_path: str, periods: list[tuple[str, str]]) -> list[tuple[str, str]]:
+    database = open_database(database_path)
+    try:
+        database.replace_holiday_periods(periods)
+        return database.list_holiday_periods()
+    finally:
+        database.close()
+
+
+def holiday_periods_from_rows(rows: list[dict]) -> list[tuple[str, str]]:
+    """Convert edited rows to inclusive ranges, defaulting a missing date to one day."""
+    def parse(value: str) -> date:
+        day = date.fromisoformat(value)
+        if day.isoformat() != value:
+            raise ValueError("Holiday dates must use YYYY-MM-DD")
+        return day
+
+    periods = []
+    for row in rows:
+        start = str(row.get("start_date") or "").strip()
+        end = str(row.get("end_date") or "").strip()
+        if not start and not end:
+            continue
+        start_day = parse(start or end)
+        end_day = parse(end or start)
+        if end_day < start_day:
+            raise ValueError("Holiday end date must not precede start date")
+        periods.append((start_day.isoformat(), end_day.isoformat()))
+    return periods
+
+
+def backfill_load_months(config: Config, first: date, last: date) -> tuple[int, int]:
+    database = open_database(config.database.path)
+    try:
+        return backfill_daily_house_load_forecasts(database, first, last, config.timezone, models=config.forecast.models)
+    finally:
+        database.close()
+
+
 class ControlTab:
     def __init__(self, config: Config) -> None:
         self.config = config
@@ -67,6 +118,11 @@ class ControlTab:
         # The dashboard and recalculation script both load config.yaml from
         # their working directory (the mounted /config directory in Docker).
         self.config_path = Path.cwd() / "config.yaml"
+        self.holiday_grid = None
+
+    def show_latest_holiday(self) -> None:
+        if self.holiday_grid is not None and self.holiday_grid.options["rowData"]:
+            self.holiday_grid.run_grid_method("ensureIndexVisible", len(self.holiday_grid.options["rowData"]) - 1, "bottom")
 
     def render_control_tab(self) -> None:
         def restart_with_feedback() -> None:
@@ -79,6 +135,110 @@ class ControlTab:
         year_start = one_year_before(today)
         ui.label("Control").classes("text-xl font-semibold")
         ui.label("Administrative actions update the shared database or restart the application.").classes("text-sm text-gray-600")
+
+        with ui.card().classes("w-full max-w-xl mt-4"):
+            ui.label("Holiday periods").classes("text-lg font-semibold")
+            ui.label("Inclusive local dates use a separate holiday load profile. Changes affect new forecasts and the next Plan calculation; use Backfill below to replace saved days.").classes("text-sm text-gray-600")
+            periods = load_holidays(self.config.database.path)
+            rows = [{"id": index, "start_date": start, "end_date": end} for index, (start, end) in enumerate(periods)]
+            grid = ui.aggrid({
+                "columnDefs": [
+                    {"field": "start_date", "headerName": "Start date", "editable": True, "cellDataType": "dateString", "cellEditor": "agDateStringCellEditor", "flex": 1},
+                    {"field": "end_date", "headerName": "End date", "editable": True, "cellDataType": "dateString", "cellEditor": "agDateStringCellEditor", "flex": 1},
+                ],
+                "rowData": rows,
+                "rowSelection": "single",
+                "stopEditingWhenCellsLoseFocus": True,
+            }).classes("w-full h-64")
+            self.holiday_grid = grid
+            save_lock = asyncio.Lock()
+
+            async def persist_holidays(rows_to_save: list[dict], focus_index: int | None = None) -> None:
+                try:
+                    periods = holiday_periods_from_rows(rows_to_save)
+                    saved = await run.io_bound(save_holidays, self.config.database.path, periods)
+                except Exception as error:
+                    notify_error(f"Unable to save holidays: {error}")
+                    return
+                grid.options["rowData"] = [
+                    {"id": index, "start_date": start, "end_date": end}
+                    for index, (start, end) in enumerate(saved)
+                ]
+                grid.update()
+                if focus_index is not None and saved:
+                    index = min(focus_index, len(saved) - 1)
+                    ui.timer(0.1, lambda: grid.run_grid_method("ensureIndexVisible", index, "bottom"), once=True)
+
+            async def autosave_holidays(_event) -> None:
+                async with save_lock:
+                    await persist_holidays(await grid.get_client_data(), _event.args.get("rowIndex"))
+
+            grid.on("cellValueChanged", autosave_holidays)
+
+            async def add_holiday() -> None:
+                async with save_lock:
+                    data = await grid.get_client_data()
+                    next_id = max((row["id"] for row in data), default=-1) + 1
+                    grid.options["rowData"] = [*data, {"id": next_id, "start_date": "", "end_date": ""}]
+                    grid.update()
+                    self.show_latest_holiday()
+
+            async def delete_holiday() -> None:
+                selected = await grid.get_selected_row()
+                if selected is None:
+                    notify_error("Select a holiday period to remove.")
+                    return
+                async with save_lock:
+                    data = [row for row in await grid.get_client_data() if row["id"] != selected["id"]]
+                    await persist_holidays(data)
+
+            with ui.row().classes("gap-2 flex-wrap"):
+                ui.button("Add period", on_click=add_holiday, icon="add").props("flat")
+                ui.button("Remove selected", on_click=delete_holiday, icon="delete").props("flat")
+
+            ui.separator().classes("my-2")
+            ui.label("Backfill household-load forecasts").classes("text-lg font-semibold")
+            ui.label("Holiday edits save automatically. Recalculate selected months using only readings before each day; existing forecasts in that range are replaced.").classes("text-sm text-gray-600")
+            with ui.row().classes("gap-3 flex-wrap"):
+                first_month = ui.input("From month", value=f"{year_start.year:04d}-{year_start.month:02d}").props("type=month outlined dense").classes("w-40")
+                last_month = ui.input("To month", value=f"{today.year:04d}-{today.month:02d}").props("type=month outlined dense").classes("w-40")
+            backfill_status = ui.label().classes("text-sm")
+
+            async def backfill() -> None:
+                try:
+                    first = date.fromisoformat(f"{first_month.value}-01")
+                    last_start = date.fromisoformat(f"{last_month.value}-01")
+                    last = date(last_start.year, last_start.month, monthrange(last_start.year, last_start.month)[1])
+                    last = min(last, today)
+                    if first > last:
+                        raise ValueError("From month must not be after To month or in the future")
+                except ValueError as error:
+                    notify_error(f"Backfill failed: {error}")
+                    return
+                backfill_button.set_enabled(False)
+                backfill_status.set_text("Recalculating forecasts...")
+                try:
+                    days, hours = await run.io_bound(backfill_load_months, self.config, first, last)
+                except Exception as error:
+                    backfill_status.set_text("Backfill did not complete.")
+                    notify_error(f"Backfill failed: {error}")
+                else:
+                    backfill_status.set_text(f"Recalculated {days} daily profiles ({hours} hourly rows).")
+                finally:
+                    backfill_button.set_enabled(True)
+
+            with ui.dialog() as backfill_confirm, ui.card():
+                ui.label("Backfill household-load forecasts?").classes("text-lg font-semibold")
+                ui.label("Existing daily profiles in the selected months will be replaced in the database.")
+                with ui.row().classes("w-full justify-end gap-2"):
+                    ui.button("Cancel", on_click=backfill_confirm.close).props("flat")
+
+                    async def confirm_backfill() -> None:
+                        backfill_confirm.close()
+                        await backfill()
+
+                    ui.button("Backfill", on_click=confirm_backfill, color="primary")
+            backfill_button = ui.button("Backfill forecasts", on_click=backfill_confirm.open, icon="history", color="primary")
 
         with ui.card().classes("w-full max-w-xl mt-4"):
             ui.label("Recalculate tariff costs").classes("text-lg font-semibold")

@@ -12,7 +12,7 @@ from solar_model.time_utils import add_elapsed, utc_instant
 from solar_model.storage.schema import ForecastSolarSample, SigenStorDevice, SigenStorModbusSample
 from solar_model.storage.connection import SolarDatabase
 from solar_model.planning.types import DeviceInfo, DeviceState, ForecastData, ForecastInterval
-from solar_model.planning.forecasts.house_load import predict_day
+from solar_model.planning.forecasts.house_load import history_start_day, holiday_days, predict_day
 from solar_model.storage.queries.forecasting import load_hourly_house_load
 
 
@@ -51,16 +51,19 @@ def load_house_load_intervals(database: SolarDatabase, as_of: datetime, config: 
     zone = ZoneInfo(config.timezone)
     settings = config.forecast.load.model_calibration_parameters
     cutoff = pd.Timestamp(datetime.combine(as_of.astimezone(zone).date(), time.min, zone))
-    history = load_hourly_house_load(database.engine.url.database, zone,
-        start=cutoff - pd.Timedelta(days=settings.lookback), end=cutoff)
     start, end = map(pd.Timestamp, _forecast_bounds(as_of, config))
+    periods = database.list_holiday_periods()
+    first_day = history_start_day(periods, cutoff.date(), settings)
+    holidays = holiday_days(periods, first_day, end.tz_convert(zone).date())
+    history = load_hourly_house_load(database.engine.url.database, zone,
+        start=pd.Timestamp(datetime.combine(first_day, time.min, zone)), end=cutoff, holidays=holidays)
     predictions = {}
     intervals = []
     for hour in pd.date_range(start.floor("h"), end, freq="h", inclusive="left"):
         local = hour.tz_convert(zone)
         day = local.date()
         if day not in predictions:
-            predictions[day] = predict_day(history, day, zone, settings).set_index("hour").prediction_kwh
+            predictions[day] = predict_day(history, day, zone, settings, holidays).set_index("hour").prediction_kwh
         energy = predictions[day].loc[local.hour]
         if pd.isna(energy):
             raise ValueError(f"no historical house-load profile exists for {local.isoformat()}")

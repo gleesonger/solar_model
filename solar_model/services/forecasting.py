@@ -1,7 +1,7 @@
 """Schedule forecast collection, calibrate raw snapshots and freeze daily load."""
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
 import pandas as pd
@@ -11,7 +11,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from solar_model.config import ForecastModelsConfig, SolarArrayConfig
 from solar_model.integrations.forecast_solar import fetch_array
 from solar_model.logging_setup import LOGGER, heavy_work
-from solar_model.planning.forecasts.house_load import predict_day
+from solar_model.planning.forecasts.house_load import history_start_day, holiday_days, predict_day
 from solar_model.planning.forecasts.solar import PANEL_IDS, _day_bounds, calculate_adjusted_forecast
 from solar_model.storage.queries.forecasting import load_adjusted_snapshot, load_hourly_house_load, load_operational_inputs
 from solar_model.time_utils import timestamps, utc_now
@@ -74,27 +74,48 @@ def refresh_adjusted_forecast(database, as_of: datetime | str | pd.Timestamp, ti
     _recalculate_energy(database, current_snapshot, timezone)
     return len(values)
 
-def refresh_daily_house_load_forecast(database, as_of: datetime | str | pd.Timestamp, timezone_name: str = "Europe/Dublin", *, models: ForecastModelsConfig | None = None) -> int:
+def refresh_daily_house_load_forecast(database, as_of: datetime | str | pd.Timestamp, timezone_name: str = "Europe/Dublin", *, models: ForecastModelsConfig | None = None, holiday_periods: list[tuple[str, str]] | None = None, replace_existing: bool = False, generated_at: str | None = None) -> int:
     """Freeze today's profile once, using history strictly before local midnight."""
     timestamp = pd.Timestamp(as_of)
     if timestamp.tzinfo is None:
         timestamp = timestamp.tz_localize("UTC")
     zone = ZoneInfo(timezone_name)
     day = timestamp.tz_convert(zone).date()
-    if database.has_house_load_forecast(day.isoformat()):
+    if not replace_existing and database.has_house_load_forecast(day.isoformat()):
         return 0
     settings = (models or ForecastModelsConfig()).load
     start, end = _day_bounds(day, zone)
+    periods = database.list_holiday_periods() if holiday_periods is None else holiday_periods
+    first_day = history_start_day(periods, day, settings)
+    history_start = pd.Timestamp(datetime.combine(first_day, time.min, zone)).tz_convert("UTC")
+    holidays = holiday_days(periods, first_day, day)
     history = load_hourly_house_load(database.engine.url.database, zone,
-                               start=start - pd.Timedelta(days=settings.lookback), end=start)
-    prediction = predict_day(history, day, zone, settings).set_index("hour").prediction_kwh
+                               start=history_start, end=start, holidays=holidays)
+    prediction = predict_day(history, day, zone, settings, holidays).set_index("hour").prediction_kwh
     # UTC targets preserve both repeated autumn hours and the missing spring hour.
     targets = pd.date_range(start, end, freq="h", inclusive="left")
     rows = [{"forecast_time": target.isoformat(),
              "load_kwh": float(prediction.loc[target.tz_convert(zone).hour])
                  if pd.notna(prediction.loc[target.tz_convert(zone).hour]) else None}
             for target in targets]
-    return database.save_daily_house_load_forecast(day.isoformat(), timestamp.isoformat(), rows)
+    writer = database.replace_daily_house_load_forecast if replace_existing else database.save_daily_house_load_forecast
+    return writer(day.isoformat(), generated_at or timestamp.isoformat(), rows)
+
+
+def backfill_daily_house_load_forecasts(database, start: date, end: date, timezone_name: str, *, models: ForecastModelsConfig | None = None) -> tuple[int, int]:
+    """Replace daily profiles in date order using only prior-day history."""
+    if end < start:
+        raise ValueError("End date must not precede start date")
+    zone = ZoneInfo(timezone_name)
+    periods = database.list_holiday_periods()
+    generated_at = utc_now().isoformat()
+    days = rows = 0
+    for day in pd.date_range(start, end, freq="D").date:
+        as_of = datetime.combine(day, time.min, zone)
+        count = refresh_daily_house_load_forecast(database, as_of, timezone_name, models=models, holiday_periods=periods, replace_existing=True, generated_at=generated_at)
+        days += count > 0
+        rows += count
+    return days, rows
 
 
 @heavy_work("solar forecast collection update")

@@ -107,7 +107,7 @@ def test_load_cli_reads_model_database_and_timezone_from_config(tmp_path, config
     monkeypatch.setattr(load, "evaluate", evaluate)
     monkeypatch.setattr("sys.argv", ["load-profile", "--config", str(path), "--start", "2026-10-20", "--end", "2026-10-23"])
     load.main()
-    read.assert_called_once_with("configured.db", ZoneInfo("Asia/Kolkata"))
+    read.assert_called_once_with("configured.db", ZoneInfo("Asia/Kolkata"), holidays=set())
     assert evaluate.call_args.args[4] == ForecastModelConfig(9., 3., 0.5)
 
 

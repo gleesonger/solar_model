@@ -1,14 +1,36 @@
 from __future__ import annotations
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any
 from sqlalchemy import or_, select
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from solar_model.config import SolarArrayConfig
 from solar_model.time_utils import utc_instant
 
-from solar_model.storage.schema import DatabaseMetadata, ForecastHouseLoadSample, ForecastSolarSample, PV_ARRAY_IDS
+from solar_model.storage.schema import DatabaseMetadata, ForecastHouseLoadSample, ForecastSolarSample, HolidayPeriod, PV_ARRAY_IDS
 
 class ForecastStorage:
+
+    def list_holiday_periods(self) -> list[tuple[str, str]]:
+        with self.sessions() as session:
+            return [(row.start_date, row.end_date) for row in session.scalars(
+                select(HolidayPeriod).order_by(HolidayPeriod.start_date, HolidayPeriod.end_date)
+            )]
+
+    def replace_holiday_periods(self, periods: list[tuple[str, str]]) -> None:
+        """Atomically replace validated, non-overlapping inclusive date ranges."""
+        ordered = sorted((date.fromisoformat(start), date.fromisoformat(end)) for start, end in periods)
+        for index, (start, end) in enumerate(ordered):
+            if end < start:
+                raise ValueError("Holiday end date must not precede start date")
+            if index and start <= ordered[index - 1][1]:
+                raise ValueError("Holiday periods must not overlap")
+        with self.engine.begin() as connection:
+            connection.exec_driver_sql("BEGIN IMMEDIATE")
+            connection.execute(HolidayPeriod.__table__.delete())
+            if ordered:
+                connection.execute(HolidayPeriod.__table__.insert(), [
+                    {"start_date": start.isoformat(), "end_date": end.isoformat()} for start, end in ordered
+                ])
 
     def has_house_load_forecast(self, target_day: str) -> bool:
         with self.sessions() as session:
@@ -28,6 +50,15 @@ class ForecastStorage:
             connection.execute(table.insert(), [dict(target_day=target_day, collected_at_utc=collected_at, **row) for row in values])
             connection.commit()
             return len(values)
+
+    def replace_daily_house_load_forecast(self, target_day: str, collected_at: str, values: list[dict]) -> int:
+        """Replace one day's complete profile in a single write transaction."""
+        with self.engine.begin() as connection:
+            connection.exec_driver_sql("BEGIN IMMEDIATE")
+            table = ForecastHouseLoadSample.__table__
+            connection.execute(table.delete().where(table.c.target_day == target_day))
+            connection.execute(table.insert(), [dict(target_day=target_day, collected_at_utc=collected_at, **row) for row in values])
+        return len(values)
 
     def claim_forecast_collection(self, now: datetime, interval_seconds: int) -> tuple[bool, datetime | None]:
         """Reserve a due external scan, retaining its attempt time across restarts."""

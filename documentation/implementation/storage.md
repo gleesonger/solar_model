@@ -25,6 +25,8 @@ open_database(path)
   _migrate_no_solar_cost(): BEGIN IMMEDIATE
     overwrite No Solar Cost from house_load_kwh_period and stored import_rate
     rebuild hourly aggregates; commit database_version = "0.3.1"
+  _migrate_holiday_period(): BEGIN IMMEDIATE
+    create holiday_period if absent; commit database_version = "0.3.2"
 ```
 
 `SolarDatabase.sessions()` creates a session; `sessions.begin()` owns a committing transaction. `close()` disposes the engine's pooled connections. Cached Engine identity is reused by path, but disposed engines can reconnect; a `SolarDatabase` is not a permanently open cursor.
@@ -41,6 +43,8 @@ open_database(path)
 Electrical/forecast `collected_at_local` is a hybrid expression/property, not a stored column. Its local-time conversion uses the host timezone. Device history stores both timestamp strings directly and keeps `value` as text.
 
 `ForecastHouseLoadSample` stores `target_day` (local ISO date), `forecast_time` (UTC epoch/ISO), `collected_at_utc` (generation epoch/ISO), and nullable `load_kwh` (scaled integer/physical float). The composite key is `(target_day, forecast_time)`. `has_house_load_forecast()` skips fitting an existing day; `save_daily_house_load_forecast()` serializes a second check and all hourly inserts with `BEGIN IMMEDIATE`. Concurrent or repeated writers cannot overwrite the first committed profile. Version 0.3.0 creates this table and drops the old undeployed `forecast_load` table in one transaction with the version update, without synthesizing historical house predictions.
+
+`HolidayPeriod` stores inclusive local `start_date` and `end_date` ISO strings. `_migrate_holiday_period()` creates the table and advances `database_version` from `0.3.1` to `0.3.2` under one immediate transaction; normal `open_database()` and the migration CLI both invoke it. No existing measurement or forecast data is rewritten. `list_holiday_periods()` returns sorted ranges. `replace_holiday_periods()` validates dates and non-overlap before atomically replacing all rows under a SQLite immediate write lock. The planner and daily load collector read ranges when calculating. Live collection never overwrites a daily profile; explicit backfill uses `replace_daily_house_load_forecast()` to delete and insert one complete day in a single transaction.
 
 ## 2. Electrical sample construction
 
@@ -140,7 +144,7 @@ Hourly **energy/cost** is already an aggregate. Hourly **power/rate/SOC/availabl
 
 Manual `backfill_hourly_rollup()` still inserts missing groups with `OR IGNORE`; it does not repair stale existing groups. `rebuild_hourly_rollup(start,end,zone,connection=None)` replaces whole UTC hours overlapping the inclusive local-date range, including neighboring-date samples in boundary hours. It owns a transaction unless a caller supplies one; tariff recalculation supplies its raw-update connection. Adding unrelated columns alone does not backfill derived historical data.
 
-The separate `database_version` metadata key controls the house-load migration: `0.1.0` or absent upgrades to `0.2.0`; startup then replaces the undeployed forecast table and advances to `0.3.0`. Unsupported values are rejected before schema changes. After raw/hourly missing-column additions and hourly readiness initialization, `_migrate_house_load()` locks writers, reads ordered raw power samples, computes and rounds interval energy using the same helper as collection, writes only the new raw energy field, replaces hourly aggregates, and updates the version in one transaction. Failure rolls back data/version; already-added nullable columns can remain and are safe on retry. Versions `0.2.0`, `0.3.0` and `0.3.1` skip this energy backfill. This version is independent of the existing v3 hourly readiness marker.
+The separate `database_version` metadata key controls the house-load migration: `0.1.0` or absent upgrades to `0.2.0`; startup then replaces the undeployed forecast table and advances to `0.3.0`. Unsupported values are rejected before schema changes. After raw/hourly missing-column additions and hourly readiness initialization, `_migrate_house_load()` locks writers, reads ordered raw power samples, computes and rounds interval energy using the same helper as collection, writes only the new raw energy field, replaces hourly aggregates, and updates the version in one transaction. Failure rolls back data/version; already-added nullable columns can remain and are safe on retry. Versions `0.2.0`, `0.3.0`, `0.3.1` and `0.3.2` skip this energy backfill. This version is independent of the existing v3 hourly readiness marker.
 
 ## 4. Forecast persistence and adjusted writers
 

@@ -52,6 +52,8 @@ class DashboardLayout:
             if self.state.active_tab == "Analysis" and self.elements.historical_charts is None:
                 with historical_panel:
                     self.historical_tab.render_historical_tab()
+            if self.state.active_tab == "Control":
+                ui.timer(0.1, self.control_tab.show_latest_holiday, once=True)
             self.historical_tab.set_controls_visibility(self.state.active_tab == "Analysis")
 
         with container:
@@ -90,6 +92,8 @@ class DashboardLayout:
                     self.plan_tab.render_plan_tab()
                 with ui.tab_panel(control).classes("p-0"):
                     self.control_tab.render_control_tab()
+                    if self.state.active_tab == "Control":
+                        ui.timer(0.1, self.control_tab.show_latest_holiday, once=True)
 
     def apply_snapshot(self, snapshot: DashboardSnapshot) -> None:
         """Apply shared data to this client's existing UI elements."""

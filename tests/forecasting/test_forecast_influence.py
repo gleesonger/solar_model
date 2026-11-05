@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, timedelta
 from zoneinfo import ZoneInfo
 
 import numpy as np
@@ -9,6 +9,7 @@ from solar_model.config import ForecastModelConfig
 
 import solar_model.tools.evaluate_load as load
 import solar_model.planning.forecasts.solar as solar
+from solar_model.planning.forecasts.house_load import history_start_day
 
 
 def load_history():
@@ -36,6 +37,43 @@ def test_load_without_matching_day_type_uses_all_days_mean(fraction):
     assert result.loc[0, "type_weight"] == 0
     assert result.loc[0, "prediction_kwh"] == 2.
     assert pd.isna(result.loc[1, "prediction_kwh"])
+
+
+def test_normal_profile_excludes_holiday_observations():
+    history = load_history().iloc[:1].copy()
+    holiday = history.copy()
+    holiday["timestamp"] = pd.Timestamp("2026-10-21T00:00Z")
+    holiday["day"] = date(2026, 10, 21)
+    holiday["day_type"] = "holiday"
+    holiday["load_kwh"] = 100.
+    result = load.predict_day(pd.concat([history, holiday]), date(2026, 10, 23), ZoneInfo("UTC"), ForecastModelConfig(42., 14., 1.))
+    assert result.loc[0, "prediction_kwh"] == 2.
+
+
+def test_holiday_baseline_is_lowest_of_30_hourly_means_and_is_flat():
+    target = date(2026, 10, 23)
+    history = pd.DataFrame([
+        {"timestamp": pd.Timestamp(day.isoformat(), tz="UTC") + pd.Timedelta(hours=hour),
+         "day": day, "hour": hour, "day_type": "weekday", "load_kwh": 2. if hour == 3 else 5.}
+        for day in (target - timedelta(days=offset) for offset in range(1, 31))
+        for hour in range(24)
+    ])
+    result = load.predict_day(history, target, ZoneInfo("UTC"), ForecastModelConfig(42., 14., .2), {target})
+    assert result.prediction_kwh.tolist() == [2.] * 24
+
+
+def test_holiday_lookback_counts_holiday_dates_even_a_year_old():
+    target = date(2026, 10, 23)
+    days = [target - timedelta(days=30 * index) for index in range(1, 23)]
+    periods = [(day.isoformat(), day.isoformat()) for day in days]
+    assert history_start_day(periods, target, ForecastModelConfig(42., 14., 1.)) == days[20]
+    history = pd.DataFrame([
+        {"timestamp": pd.Timestamp(day.isoformat(), tz="UTC"), "day": day,
+         "hour": 0, "day_type": "holiday", "load_kwh": 100. if index == 21 else 2.}
+        for index, day in enumerate(days)
+    ])
+    result = load.predict_day(history, target, ZoneInfo("UTC"), ForecastModelConfig(42., 14., 1.), set(days + [target]))
+    assert result.loc[0, "prediction_kwh"] == pytest.approx(2.)
 
 
 @pytest.mark.parametrize("fraction", [0.2, 1 / 3, 0.3333, 0.5, 1.])

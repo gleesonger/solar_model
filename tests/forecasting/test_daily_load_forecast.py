@@ -70,6 +70,49 @@ def test_missing_history_is_frozen_as_missing_not_zero(tmp_path):
         db.close()
 
 
+def test_holiday_ranges_change_training_and_target_day_type(tmp_path):
+    db = open_database(tmp_path / "holidays.db")
+    zone = ZoneInfo("UTC")
+    settings = ForecastModelsConfig(load=ForecastModelConfig(42., 14., 1.))
+    try:
+        # Wednesday is ordinary; Thursday and the Friday target are holidays.
+        db.replace_holiday_periods([("2026-10-22", "2026-10-23")])
+        with db.sessions.begin() as session:
+            for day, load in (("2026-10-21", 1.), ("2026-10-22", 4.)):
+                for hour in pd.date_range(f"{day}T00:00Z", periods=24, freq="h"):
+                    session.add(SigenStorHourlySample(hour_start_utc=hour.isoformat(), import_tariff_band="day",
+                        sample_count=1, house_load_kwh_period=load))
+        count = model.refresh_daily_house_load_forecast(db, "2026-10-23T00:00Z", zone.key, models=settings)
+        assert count == 24
+        assert {row[1] for row in read_profile(db)} == {4.}
+        assert db.list_holiday_periods() == [("2026-10-22", "2026-10-23")]
+        with pytest.raises(ValueError, match="overlap"):
+            db.replace_holiday_periods([("2026-10-22", "2026-10-23"), ("2026-10-23", "2026-10-24")])
+        assert db.list_holiday_periods() == [("2026-10-22", "2026-10-23")]
+    finally:
+        db.close()
+
+
+def test_backfill_replaces_saved_profiles_using_updated_history(tmp_path):
+    db = open_database(tmp_path / "backfill.db")
+    try:
+        with db.sessions.begin() as session:
+            for hour in pd.date_range("2026-10-20T00:00Z", periods=48, freq="h"):
+                session.add(SigenStorHourlySample(hour_start_utc=hour.isoformat(), import_tariff_band="day",
+                    sample_count=1, house_load_kwh_period=1.))
+        from solar_model.services.forecasting import backfill_daily_house_load_forecasts
+        assert backfill_daily_house_load_forecasts(db, date(2026, 10, 22), date(2026, 10, 23), "UTC") == (2, 48)
+        first = read_profile(db)
+        with db.sessions.begin() as session:
+            for row in session.scalars(select(SigenStorHourlySample)):
+                row.house_load_kwh_period = 2.
+        assert backfill_daily_house_load_forecasts(db, date(2026, 10, 22), date(2026, 10, 23), "UTC") == (2, 48)
+        assert {row[1] for row in read_profile(db)} == {2.}
+        assert read_profile(db) != first
+    finally:
+        db.close()
+
+
 def test_house_profile_only_appears_in_analysis_hourly_energy(tmp_path):
     path = str(tmp_path / "dashboard.db")
     db = open_database(path)
@@ -145,6 +188,34 @@ def test_planning_house_forecast_covers_whole_hours_for_scenarios(tmp_path):
         db.close()
 
 
+def test_plan_recalculates_with_new_holidays_without_rewriting_daily_profile(tmp_path):
+    from dataclasses import replace
+    from solar_model.config import load_config
+    from solar_model.storage.queries.planning import load_house_load_intervals
+
+    db = open_database(tmp_path / "fresh-plan.db")
+    try:
+        with db.sessions.begin() as session:
+            for day, load in (("2026-10-21", 1.), ("2026-10-22", 4.)):
+                for stamp in pd.date_range(f"{day}T00:00Z", periods=24, freq="h"):
+                    session.add(SigenStorHourlySample(hour_start_utc=stamp.isoformat(), import_tariff_band="day",
+                        sample_count=1, house_load_kwh_period=load))
+        config = load_config()
+        settings = ForecastModelConfig(42., 14., 1.)
+        config = replace(config, timezone="UTC", forecast=replace(config.forecast,
+            load=replace(config.forecast.load, model_calibration_parameters=settings)),
+            energy_plan=replace(config.energy_plan, num_projection_hours=26, num_visible_projection_hours=2))
+        as_of = datetime(2026, 10, 23, 10, 30, tzinfo=ZoneInfo("UTC"))
+        model.refresh_daily_house_load_forecast(db, as_of, "UTC", models=config.forecast.models)
+        saved = read_profile(db)
+        db.replace_holiday_periods([("2026-10-22", "2026-10-23")])
+        intervals = load_house_load_intervals(db, as_of, config)
+        assert intervals[0].kwh == pytest.approx(4.)  # Forecast input covers the whole UTC hour.
+        assert read_profile(db) == saved
+    finally:
+        db.close()
+
+
 def test_migration_discards_old_forecasts_and_does_not_rebackfill_house_energy(tmp_path):
     from solar_model.storage.schema import SigenStorModbusSample
     path = tmp_path / "legacy.db"
@@ -163,6 +234,6 @@ def test_migration_discards_old_forecasts_and_does_not_rebackfill_house_energy(t
             assert connection.exec_driver_sql("SELECT name FROM sqlite_master WHERE name='forecast_load'").scalar() is None
             assert connection.exec_driver_sql("SELECT COUNT(*) FROM forecast_house_load").scalar() == 0
             assert connection.exec_driver_sql("SELECT house_load_kwh_period FROM sigenstor").scalar() == 1234
-            assert connection.exec_driver_sql("SELECT value FROM database_metadata WHERE key='database_version'").scalar() == "0.3.1"
+            assert connection.exec_driver_sql("SELECT value FROM database_metadata WHERE key='database_version'").scalar() == "0.3.2"
     finally:
         db.close()

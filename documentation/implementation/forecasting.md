@@ -4,6 +4,8 @@ Source: [solar_model/planning/forecasts/solar.py](../../solar_model/planning/for
 
 Package ownership: `planning/forecasts/solar.py` contains solar mathematics, `planning/forecasts/house_load.py` contains `predict_day`, `storage/queries/forecasting.py` loads historical inputs, and `services/forecasting.py` schedules collection and persists results.
 
+For daily load, `refresh_daily_house_load_forecast()` reads current inclusive holiday ranges, marks matching historical hours and the target date as a separate holiday type, and saves one fixed profile if that date is not yet present. Ordinary fitting excludes marked holidays. Holiday fitting selects the latest half-lookback number of holiday dates, weights by holiday rank with half the normal half-life, and blends toward a flat baseline: the minimum of the previous 30 days' 24 hourly mean loads. `backfill_daily_house_load_forecasts()` snapshots the ranges and replaces every selected date's profile; each iteration uses only history before that local day's midnight. Planning reads current ranges for each fresh calculation but does not use saved daily profiles.
+
 ## 1. Function hierarchy
 
 ```text
@@ -175,11 +177,11 @@ Historical replay's `add_adjusted_energy_values()` consumes an in-memory update 
 
 ## 8. Fixed daily load profile
 
-`solar_model.services.forecasting.collect_once()` calls `refresh_daily_house_load_forecast()` once a scheduled scan is due, independently of solar HTTP/adjustment success. A saved house-profile `target_day` skips loading and fitting. `load_hourly_house_load()` queries bounded hourly `house_load_kwh_period` sums, removes the 10,000 storage scale, and adds configured-local hour/day/type. The pure `house_load.predict_day()` helper supplies collection, planning and evaluation. Device load counters do not enter this pipeline; battery losses remain explicit in optimisation.
+`solar_model.services.forecasting.collect_once()` calls `refresh_daily_house_load_forecast()` once a scheduled scan is due, independently of solar HTTP/adjustment success. A saved house-profile `target_day` skips loading and fitting. `load_hourly_house_load()` queries bounded hourly `house_load_kwh_period` sums, removes the 10,000 storage scale, and adds configured-local hour/day/type; marked dates become holiday type. The pure `house_load.predict_day()` helper supplies collection, planning and evaluation. Device load counters do not enter this pipeline; battery losses remain explicit in optimisation.
 
 Training ends strictly before target-day midnight; current-day observations do not influence a late first run. The pure helper returns 24 clock-hour predictions; the orchestration maps them to the real UTC-hour targets between local midnights, preserving the 23/25-hour DST day. Unobserved hours stay null. `save_daily_house_load_forecast()` uses `BEGIN IMMEDIATE`, checks for existing rows, then writes the whole profile in one transaction. No existing day is overwritten, even after restart or tuning changes. `collected_at_utc` records generation time separately from `forecast_time`; `target_day` is the configured-local ISO date.
 
-The operational solar rebuild command rebuilds solar fields only. It does not create historical load profiles; the evaluation CLI remains report-only.
+The operational solar rebuild command rebuilds solar fields only. Control's household-load backfill replaces selected months' daily profiles, committing one full day at a time and recording the actual backfill time as generation time; the evaluation CLI remains report-only and reads holiday ranges without migration.
 
 ## 9. Later retrieval
 

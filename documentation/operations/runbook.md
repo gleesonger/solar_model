@@ -11,6 +11,7 @@ python docker_start.py
 - Run from the directory containing the intended `config.yaml`. Relative database paths use that directory; register maps/assets resolve relative to source.
 - Supervisor migrates/initialises the database, starts collector/dashboard, and stops both if a child exits. It is not an automatic crash-retry service.
 - Control restart touches `SOLAR_MODEL_RESTART_FILE`; supervisor stops children and reloads configuration. Standalone dashboard lacks this full-restart facility.
+- Control saves each valid holiday edit and removal automatically as inclusive local date ranges in `holiday_period`. Entering just one date creates a one-day period; an end before its start is rejected. The next Plan run reads saved edits immediately; already saved daily load profiles remain as they were until Control's month-range Backfill replaces each selected day's profile. Backfill uses only readings before each target day's local midnight and records its actual generation time. It does not alter measured load history or solar forecasts.
 - For development only: `python main_dashboard.py` or `python main_data_collection.py`. These still use configured hardware/database.
 - Shutdown terminates children, waits up to 10 seconds, then kills survivors.
 

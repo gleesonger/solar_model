@@ -12,7 +12,7 @@ Read [storage.md](../implementation/storage.md) for derivations, transaction bou
 
 ## `forecast_house_load`
 
-Primary key: `target_day`, `forecast_time`; index `idx_house_load_forecast_time` on `forecast_time`. One immutable daily house-load profile; new table creation does not backfill history. Version 0.3.0 removes the previous undeployed `forecast_load` table.
+Primary key: `target_day`, `forecast_time`; index `idx_house_load_forecast_time` on `forecast_time`. Live collection keeps the first daily house-load profile; an explicit Control backfill can replace selected days. New table creation does not backfill history. Version 0.3.0 removes the previous undeployed `forecast_load` table.
 
 | Field | SQL type | ORM API | Nullable |
 | --- | --- | --- | --- |
@@ -20,6 +20,16 @@ Primary key: `target_day`, `forecast_time`; index `idx_house_load_forecast_time`
 | `forecast_time` | `INTEGER` | epoch/ISO; start of predicted hour | no |
 | `collected_at_utc` | `INTEGER` | epoch/ISO; profile generation time | no |
 | `load_kwh` | `INTEGER` | scaled number; hourly kWh | yes |
+
+## `holiday_period`
+
+Inclusive configured-local date ranges used by the separate holiday household-load model. The `0.3.2` migration creates this table through `open_database()`.
+
+| Field | SQL type | ORM API | Nullable |
+| --- | --- | --- | --- |
+| `id` | `INTEGER` | primary key | no |
+| `start_date` | `VARCHAR` | ISO local date | no |
+| `end_date` | `VARCHAR` | ISO local date | no |
 
 ## `sigenstor`
 
@@ -243,7 +253,7 @@ Declared indexes:
 
 Primary key: `key`.
 
-`database_version` is `0.3.1` after No Solar Cost conversion to House Load; `0.3.0` introduced house-forecast replacement; `0.1.0` or absent versions first run the house-energy backfill to `0.2.0`. `hourly_rollup_initialized_v3` remains a separate hourly-readiness marker.
+`database_version` is `0.3.2` after creating `holiday_period`; `0.3.1` introduced No Solar Cost conversion to House Load; `0.3.0` introduced house-forecast replacement; `0.1.0` or absent versions first run the house-energy backfill to `0.2.0`. `hourly_rollup_initialized_v3` remains a separate hourly-readiness marker.
 
 | Field | SQL type | ORM API | Nullable |
 | --- | --- | --- | --- |

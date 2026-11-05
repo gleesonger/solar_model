@@ -1,4 +1,5 @@
 from __future__ import annotations
+from datetime import date
 from zoneinfo import ZoneInfo
 import numpy as np
 import pandas as pd
@@ -6,6 +7,17 @@ from pathlib import Path
 import sqlite3
 PANEL_IDS = (1, 2, 3, 4)
 SCALE = 10_000
+
+
+def load_holiday_periods(database_path: str | Path) -> list[tuple[str, str]]:
+    """Read holiday ranges without opening or migrating the database."""
+    if not Path(database_path).exists():
+        return []
+    with sqlite3.connect(database_path) as connection:
+        exists = connection.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='holiday_period'").fetchone()
+        if not exists:
+            return []
+        return connection.execute("SELECT start_date, end_date FROM holiday_period ORDER BY start_date, end_date").fetchall()
 
 
 def _load_inputs(database_path: str | Path) -> tuple[pd.DataFrame, pd.DataFrame]:
@@ -34,7 +46,7 @@ def load_operational_inputs(database) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Load immutable raw forecast and actual inputs for an operational run."""
     return _load_inputs(database.engine.url.database)
 
-def load_hourly_house_load(database_path: str | Path, timezone: ZoneInfo, *, start: pd.Timestamp | None = None, end: pd.Timestamp | None = None) -> pd.DataFrame:
+def load_hourly_house_load(database_path: str | Path, timezone: ZoneInfo, *, start: pd.Timestamp | None = None, end: pd.Timestamp | None = None, holidays: set[date] | None = None) -> pd.DataFrame:
     connection = sqlite3.connect(database_path)
     try:
         frame = pd.read_sql_query(
@@ -54,6 +66,8 @@ def load_hourly_house_load(database_path: str | Path, timezone: ZoneInfo, *, sta
     frame["day"] = frame.local.dt.date
     frame["hour"] = frame.local.dt.hour
     frame["day_type"] = np.where(frame.local.dt.weekday < 5, "weekday", "weekend")
+    if holidays:
+        frame.loc[frame.day.isin(holidays), "day_type"] = "holiday"
     frame["load_kwh"] = frame.pop("load_scaled") / SCALE
     return frame[["timestamp", "day", "hour", "day_type", "load_kwh"]]
 

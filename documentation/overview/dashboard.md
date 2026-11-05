@@ -14,7 +14,7 @@ Plan detail column metadata lives in the insertion-ordered `PLAN_COLUMNS` dictio
 - **Analysis:** lazily loaded energy, power, battery, per-array and money charts; range/grouping/Sum–Average controls; custom chart builder and downloads.
 - **Plan:** on-demand nine-scenario MILP/DP optimisation, model selection, protection adjustment, next-action/day summaries, actual/forecast chart and scenario detail table.
 - **System Info:** newest valid metadata value per variable.
-- **Control:** confirmed tariff recalculation and managed restart actions.
+- **Control:** automatically saved holiday date ranges (a single entered date creates a one-day period), household-load forecast recalculation by selected months, confirmed tariff recalculation and managed restart actions.
 
 The dashboard startup hook warms one NiceGUI process-pool worker by importing planning dependencies and initialising HiGHS in the background as the app starts, independently of snapshot loading. It logs the worker PID and startup time. This moves the first-use process/import delay to application startup; it does not load forecasts, access planning data, solve a plan or cache a compiled model. A warm-up failure is logged and does not stop the dashboard.
 

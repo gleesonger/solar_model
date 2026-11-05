@@ -15,8 +15,8 @@ import pandas as pd
 
 
 from solar_model.config import ForecastModelConfig, load_config
-from solar_model.storage.queries.forecasting import load_hourly_house_load
-from solar_model.planning.forecasts.house_load import predict_day
+from solar_model.storage.queries.forecasting import load_holiday_periods, load_hourly_house_load
+from solar_model.planning.forecasts.house_load import holiday_days, predict_day
 
 
 def main() -> None:
@@ -29,7 +29,12 @@ def main() -> None:
     args = parser.parse_args()
     config = load_config(args.config)
     timezone = ZoneInfo(args.timezone or config.timezone)
-    result = evaluate(load_hourly_house_load(args.database or config.database.path, timezone), args.start, args.end, timezone, config.forecast.load.model_calibration_parameters)
+    database_path = args.database or config.database.path
+    settings = config.forecast.load.model_calibration_parameters
+    periods = load_holiday_periods(database_path)
+    first_holiday = min((date.fromisoformat(start) for start, _ in periods), default=args.start)
+    holidays = holiday_days(periods, first_holiday, args.end)
+    result = evaluate(load_hourly_house_load(database_path, timezone, holidays=holidays), args.start, args.end, timezone, settings, holidays)
     if result.empty:
         print("No load observations available for the requested period.")
         return
@@ -48,14 +53,14 @@ def _parse_date(value: str) -> date:
     return date.fromisoformat(value)
 
 
-def evaluate(history: pd.DataFrame, start: date, end: date, timezone: ZoneInfo, settings: ForecastModelConfig | None = None) -> pd.DataFrame:
+def evaluate(history: pd.DataFrame, start: date, end: date, timezone: ZoneInfo, settings: ForecastModelConfig | None = None, holidays: set[date] | None = None) -> pd.DataFrame:
     rows: list[pd.DataFrame] = []
     for target_day in pd.date_range(start, end, freq="D").date:
-        prediction = predict_day(history, target_day, timezone, settings)
+        prediction = predict_day(history, target_day, timezone, settings, holidays)
         actual = history[history.day == target_day][["hour", "load_kwh"]]
         frame = prediction.merge(actual, on="hour", how="inner")
         frame["day"] = target_day
-        frame["day_type"] = "weekday" if target_day.weekday() < 5 else "weekend"
+        frame["day_type"] = "holiday" if target_day in (holidays or ()) else ("weekday" if target_day.weekday() < 5 else "weekend")
         rows.append(frame)
     return pd.concat(rows, ignore_index=True) if rows else pd.DataFrame()
 

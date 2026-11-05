@@ -14,6 +14,7 @@ For a consolidated comparison of units, signs, missing values, time attribution 
 | `sigenstor_hourly` | `hour_start_utc`, `import_tariff_band` | UTC-hour aggregates, split by import tariff band; missing band becomes `Unknown` |
 | `forecast_solar` | `collected_at_utc`, `forecast_time` | One collection vintage and target time; up to four panels' raw/adjusted W and Wh fields |
 | `forecast_house_load` | `target_day`, `forecast_time` | One fixed hourly house-load profile per configured-local date; generation timestamp and nullable household kWh |
+| `holiday_period` | integer `id` | Inclusive local-date ranges used by the separate holiday household-load model |
 | `sigenstor_devices` | integer `id` | Append-only valid device-value changes, with variable/name/value/unit and ISO UTC/local timestamps |
 | `database_metadata` | `key` | Key/value storage including `database_version` and hourly-initialization completion |
 
@@ -38,16 +39,16 @@ For a consolidated comparison of units, signs, missing values, time attribution 
 - Hourly grid import/export power stores separate sign magnitudes and a valid grid observation count, preserving activity even when net power is zero. These are distinct from cumulative meter energy.
 - Hourly cumulative meters use maxima; other numeric fields use sums. Means divide by each field's non-null count (`<field>_sample_count`; grid uses `grid_power_sample_count`). Zeros count as observations; summed power is not an hourly power reading.
 - Missing measurements remain nullable. Some display paths substitute zeros; this must not be mistaken for observed zero generation.
-- Daily load forecasts store one atomically inserted profile per local date, with UTC hourly targets and a separate generation timestamp. They remain fixed across collection runs and restarts; missing history stays null and no historical profiles are backfilled.
+- Daily load forecasts store one profile per local date, with UTC hourly targets and a separate generation timestamp. Live collection keeps that profile fixed across runs/restarts; an explicit Control backfill atomically replaces selected historical profiles. Missing history stays null; migration itself does not backfill historical profiles.
 - Raw and adjusted forecast fields stay separate. Adjusted writers accept only `_adj_` fields; raw collection can update its own panel fields at the same composite key.
 
 ## Migration behavior
 
 - Version `0.3.1` overwrites No Solar Cost using stored House Load × recorded import rate, rebuilds hourly history, and updates the version atomically. Missing inputs stay null; existing Load counters are never a fallback. Startup applies the migration once, or use the existing migration CLI.
 
-- Version `0.3.0` creates `forecast_house_load` and drops the undeployed `forecast_load` table and its local predictions. The version update and forecast-table replacement share a transaction. Version `0.2.0` databases retain their already-backfilled house energy without another raw/hourly rebuild. Current startup version is `0.3.1`.
+- Version `0.3.2` creates `holiday_period` and advances the version in one transaction without rewriting measurements or forecasts. Version `0.3.0` creates `forecast_house_load` and drops the undeployed `forecast_load` table and its local predictions. The version update and forecast-table replacement share a transaction. Version `0.2.0` databases retain their already-backfilled house energy without another raw/hourly rebuild. Current startup version is `0.3.2`.
 
-- `database_metadata.database_version` advances from `0.1.0` (or absent) to `0.2.0` when the house-load historical backfill and hourly rebuild commit together. Missing columns are added before the backfill; an interrupted backfill retains the old version and retries. Versions `0.2.0`, `0.3.0` and `0.3.1` skip this energy backfill; unsupported versions are rejected before schema changes. Normal startup runs migration, or run `python -m solar_model.tools.migrate_database <database-copy.db>` explicitly.
+- `database_metadata.database_version` advances from `0.1.0` (or absent) to `0.2.0` when the house-load historical backfill and hourly rebuild commit together. Missing columns are added before the backfill; an interrupted backfill retains the old version and retries. Versions `0.2.0`, `0.3.0`, `0.3.1` and `0.3.2` skip this energy backfill; unsupported versions are rejected before schema changes. Normal startup runs migration, or run `python -m solar_model.tools.migrate_database <database-copy.db>` explicitly.
 - `open_database()` renames legacy forecast fields to `_raw_`, renames battery availability to the plant-level name, creates tables, adds missing columns, and drops legacy JSON columns.
 - Conflicting duplicate raw/legacy forecast values cause migration refusal rather than silent data loss.
 - Initial hourly creation/rebuild and `hourly_rollup_initialized_v3` commit together. Older v1/v2 or unmarked history rebuilds once to populate valid counts; interrupted initialization retries. Later marked opens skip the scan. Adding unrelated columns alone does not trigger another rebuild.

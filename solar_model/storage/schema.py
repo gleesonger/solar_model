@@ -142,7 +142,7 @@ class DatabaseMetadata(Base):
     value: Mapped[str] = mapped_column(String, nullable=False)
 
 class ForecastHouseLoadSample(Base):
-    """One immutable hourly house-demand forecast per configured local day."""
+    """One hourly house-demand forecast per local day; backfill may replace it."""
 
     __tablename__ = "forecast_house_load"
     __table_args__ = (Index("idx_house_load_forecast_time", "forecast_time"),)
@@ -150,6 +150,15 @@ class ForecastHouseLoadSample(Base):
     forecast_time: Mapped[str] = mapped_column(EpochSeconds, primary_key=True)
     collected_at_utc: Mapped[str] = mapped_column(EpochSeconds, nullable=False)
     load_kwh: Mapped[float | None] = mapped_column(Float, nullable=True)
+
+
+class HolidayPeriod(Base):
+    """Inclusive local-date range treated as a weekend by load forecasting."""
+
+    __tablename__ = "holiday_period"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    start_date: Mapped[str] = mapped_column(String, nullable=False)
+    end_date: Mapped[str] = mapped_column(String, nullable=False)
 
 
 class ForecastSolarSample(Base):

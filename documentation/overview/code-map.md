@@ -9,7 +9,7 @@ solar_model/
   config.py, tariffs.py, time_utils.py, logging_setup.py, paths.py, utils.py
   planning/
     types.py, scenarios.py, plan_optimisation_milp.py, system.py,
-    plan_optimisation_dynamic_programming.py
+    plan_optimisation_dynamic_programming.py, projection_grid.py
     forecasts/solar.py, house_load.py
   services/collection.py, forecasting.py, planning.py
   integrations/

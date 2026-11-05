@@ -10,7 +10,8 @@ import cvxpy as cp
 import pandas as pd
 from solar_model.config import Config
 from solar_model.time_utils import utc_instant
-from solar_model.tariffs import tariff_rule, tariff_rule_rate, tariff_rules_for_timestamp
+from solar_model.tariffs import BATTERY_EXPORT_LIMIT_KW_DEFAULT, MAXIMUM_BATTERY_KWH_DEFAULT, MINIMUM_BATTERY_KWH_DEFAULT, tariff_rule, tariff_rule_rate, tariff_rules_for_timestamp
+from solar_model.planning.projection_grid import projection_intervals as build_projection_intervals
 
 from solar_model.planning.types import DeviceInfo, DeviceState, ScenarioData, NextAction, OperatingMode, SimulationResult
 from solar_model.planning.system import allocate_energy_routes, system_limits
@@ -97,9 +98,9 @@ def _simulate_energy_plan(device_info: DeviceInfo, device_state: DeviceState, sc
         import_rules, export_rules = tariff_rules_for_timestamp(config.tariffs, local)
         import_rule = tariff_rule(import_rules, local)
 
-        limit_battery_export_rate_to_grid_kw = tariff_rule_rate(config.energy_plan.limit_battery_export_rate_to_grid_kw, local, 9999)
-        minimum_battery_kwh = tariff_rule(config.energy_plan.minimum_battery_kwh, local).rate
-        maximum_battery_kwh = min(limits.capacity_kwh, tariff_rule(config.energy_plan.maximum_battery_kwh, local).rate)
+        limit_battery_export_rate_to_grid_kw = tariff_rule_rate(config.energy_plan.limit_battery_export_rate_to_grid_kw, local, BATTERY_EXPORT_LIMIT_KW_DEFAULT)
+        minimum_battery_kwh = tariff_rule_rate(config.energy_plan.minimum_battery_kwh, local, MINIMUM_BATTERY_KWH_DEFAULT)
+        maximum_battery_kwh = min(limits.capacity_kwh, tariff_rule_rate(config.energy_plan.maximum_battery_kwh, local, MAXIMUM_BATTERY_KWH_DEFAULT))
         export_rate = tariff_rule(export_rules, local).rate
 
         for scenario in scenarios:
@@ -266,9 +267,10 @@ def _simulate_energy_plan(device_info: DeviceInfo, device_state: DeviceState, sc
     steps = [(end - start).total_seconds() / 60 for start, end in periods]
     summary = ", ".join(f"{minutes:g}*{sum(1 for _ in group)}" for minutes, group in groupby(steps))
     LOGGER.info(
-        "plan_model projection: periods=%d visible_periods=%d lookahead_periods=6 scenarios=%d time_steps=[%s]",
+        "plan_model projection: periods=%d visible_periods=%d lookahead_periods=%d scenarios=%d time_steps=[%s]",
         len(periods),
         visible_periods,
+        len(periods) - visible_periods,
         len(scenarios),
         summary,
     )
@@ -386,42 +388,14 @@ def _minimum(requested: cp.Expression, ceiling: float, upper: float, constraints
 
 
 def _projection_intervals(config: Config, starts_at: datetime) -> list[tuple[datetime, datetime]]:
-    """Align visible steps to UTC, then apply configured lookahead durations."""
+    """Keep the first action at 15 minutes, then follow UTC-aligned boundaries."""
     s = config.energy_plan
     timesteps = s.optimiser.mix_integer_linear_prog.projection_resolution_mins
     if s.num_projection_hours <= 0 or not timesteps or any(type(minutes) is not int or minutes <= 0 for minutes in timesteps):
         raise ValueError("projection duration and resolution must be greater than zero")
     if sum(timesteps) < s.num_projection_hours * 60:
         raise ValueError("projection_resolution_mins must cover num_projection_hours")
-    cursor = utc_instant(starts_at)
-    projection_end = cursor + timedelta(hours=s.num_projection_hours)
-    visible_end = min(projection_end, cursor + timedelta(hours=s.num_visible_projection_hours))
-    boundary = cursor.replace(minute=0, second=0, microsecond=0)
-    first_end = min(cursor + timedelta(minutes=timesteps[0]), visible_end)
-    periods = [(cursor, first_end)]
-    cursor = first_end
-    configured_minutes = 0
-    for minutes in timesteps:
-        if cursor == projection_end:
-            break
-        visible_minutes = min(minutes, max(0, s.num_visible_projection_hours * 60 - configured_minutes))
-        configured_minutes += minutes
-        boundary += timedelta(minutes=visible_minutes)
-        if boundary > cursor and cursor < visible_end:
-            next_end = min(boundary, visible_end)
-            periods.append((cursor, next_end))
-            cursor = next_end
-        hidden_minutes = minutes - visible_minutes
-        if hidden_minutes:
-            if cursor < visible_end:
-                periods.append((cursor, visible_end))
-                cursor = visible_end
-            next_end = min(cursor + timedelta(minutes=hidden_minutes), projection_end)
-            periods.append((cursor, next_end))
-            cursor = next_end
-    if cursor < projection_end:
-        periods.append((cursor, projection_end))
-    return periods
+    return build_projection_intervals(starts_at, s.num_projection_hours, s.num_visible_projection_hours, timesteps)
 
 
 

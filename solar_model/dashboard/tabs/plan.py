@@ -581,7 +581,8 @@ class PlanTab:
         capacity = self.report.command_battery_capacity_kwh if self.report is not None else None
         solar_export = first.solar_to_grid_kwh.iloc[0] if "solar_to_grid_kwh" in first else 0.
         description = next_action_description(action, solar_export, capacity)
-        action_period = f"Next {minutes:g} mins"
+        local_start = pd.Timestamp(first.starts_at.iloc[0]).tz_convert(self.timezone)
+        action_period = f"Next {minutes:g} mins - As of {local_start:%a, %H:%M}"
         scenarios = self.report.scenarios if self.report is not None and self.report.scenarios is not None else self.config.energy_plan.scenarios
         if self.chart is not None:
             self.action_period_label.set_text(action_period)

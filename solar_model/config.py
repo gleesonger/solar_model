@@ -552,18 +552,8 @@ def validate_config(config: Config) -> None:
         efficiency = getattr(additional_device_info, name)
         if not math.isfinite(efficiency) or not 0 < efficiency <= 1:
             raise ValueError(f"additional_device_info.{name} must be finite, greater than zero and at most one")
-    if energy_plan.minimum_battery_kwh:
-        validate_tariff_rules(
-            "energy_plan.minimum_battery_kwh",
-            energy_plan.minimum_battery_kwh,
-        )
-    if energy_plan.maximum_battery_kwh:
-        validate_tariff_rules("energy_plan.maximum_battery_kwh", energy_plan.maximum_battery_kwh)
-    if energy_plan.limit_battery_export_rate_to_grid_kw:
-        validate_tariff_rules(
-            "energy_plan.limit_battery_export_rate_to_grid_kw",
-            energy_plan.limit_battery_export_rate_to_grid_kw,
-        )
+    for name in ("minimum_battery_kwh", "maximum_battery_kwh", "limit_battery_export_rate_to_grid_kw"):
+        validate_tariff_rules(f"energy_plan.{name}", getattr(energy_plan, name), require_complete=False)
 
     try:
         ZoneInfo(config.timezone)
@@ -676,9 +666,11 @@ def tariff_rule_matches(
     )
 
 
-def validate_tariff_rules(direction: str, rules: tuple[TariffRule, ...]) -> None:
-    if not rules:
+def validate_tariff_rules(direction: str, rules: tuple[TariffRule, ...], *, require_complete: bool = True) -> None:
+    if not rules and require_complete:
         raise ValueError(f"tariffs.{direction} must contain at least one rule")
+    if not rules:
+        return
 
     for rule in rules:
         if not rule.days:
@@ -710,7 +702,7 @@ def validate_tariff_rules(direction: str, rules: tuple[TariffRule, ...]) -> None
                 for rule in rules
                 if tariff_rule_matches(rule, weekday_index, minute_of_day)
             ]
-            if len(matching_rules) != 1:
+            if len(matching_rules) > 1 or (require_complete and not matching_rules):
                 raise ValueError(
                     f"tariffs.{direction} must have exactly one rule for "
                     f"{day} {minute_of_day // 60:02d}:{minute_of_day % 60:02d}"

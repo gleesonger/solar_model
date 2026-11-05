@@ -145,6 +145,8 @@ class ControlTab:
                 "columnDefs": [
                     {"field": "start_date", "headerName": "Start date", "editable": True, "cellDataType": "dateString", "cellEditor": "agDateStringCellEditor", "flex": 1},
                     {"field": "end_date", "headerName": "End date", "editable": True, "cellDataType": "dateString", "cellEditor": "agDateStringCellEditor", "flex": 1},
+                    {"colId": "days", "headerName": "Days", "editable": False, "flex": .5, "minWidth": 65, "maxWidth": 100,
+                     ":valueGetter": "p => { const start = Date.parse(p.data?.start_date); const end = Date.parse(p.data?.end_date); return Number.isFinite(start) && Number.isFinite(end) && end >= start ? (end - start) / 86400000 + 1 : null; }"},
                 ],
                 "rowData": rows,
                 "rowSelection": "single",

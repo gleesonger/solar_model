@@ -77,7 +77,7 @@ config.actuals_to_forecast_panel_ids   # resolves names to IDs for queries/chart
 
 `SolarArrayConfig` contains ID, label, coordinates, declination, azimuth, and `peak_kw`. `TariffRule` contains weekday tuple, start/end text, numeric `rate`, optional band name; its minute properties parse the text. Scheduled planning limits reuse this type but assign a different unit to `rate`.
 
-Validation checks complete weekday/minute tariff coverage, effective-date ordering, positive timing/history settings, projection divisibility, weights, efficiencies, mappings, URL shape and connection values. See [configuration overview](../overview/configuration.md) for rules and gaps; this guide does not duplicate every range check.
+Validation checks complete weekday/minute tariff coverage and disallows overlapping battery-limit rules; battery schedules may omit times and use their defaults. It also checks effective-date ordering, positive timing/history settings, projection divisibility, weights, efficiencies, mappings, URL shape and connection values. See [configuration overview](../overview/configuration.md) for rules and gaps; this guide does not duplicate every range check.
 
 `ForecastConfig` contains `solar: SolarForecastConfig` and `load: LoadForecastConfig`. Solar owns provider scheduling/connection settings, arrays and day-ahead/intraday calibration. Load owns house-load calibration. `config.forecast.models` assembles the unchanged `ForecastModelsConfig` bundle passed to calculation/services APIs. Validation checks model-specific constraints while loading. Omitted calibration blocks within the nested layout retain defaults; the old flat YAML layout must be updated. No forecast model reads YAML per observation.
 

@@ -13,9 +13,10 @@ import pandas as pd
 
 from solar_model.config import Config, DPRefinementConfig, EnergyPlanConfig
 from solar_model.logging_setup import LOGGER
+from solar_model.planning.projection_grid import projection_intervals as build_projection_intervals
 from solar_model.planning.types import DeviceInfo, DeviceState, NextAction, NoFeasiblePlanError, OperatingMode, ScenarioData, SimulationResult
 from solar_model.planning.system import allocate_energy_routes, system_limits
-from solar_model.tariffs import tariff_rule, tariff_rule_rate, tariff_rules_for_timestamp
+from solar_model.tariffs import BATTERY_EXPORT_LIMIT_KW_DEFAULT, MAXIMUM_BATTERY_KWH_DEFAULT, MINIMUM_BATTERY_KWH_DEFAULT, tariff_rule, tariff_rule_rate, tariff_rules_for_timestamp
 from solar_model.time_utils import utc_instant
 
 
@@ -174,9 +175,9 @@ def solve_pass(device_info: DeviceInfo, device_state: DeviceState, scenarios: li
 
             imports, exports = tariff_rules_for_timestamp(config.tariffs, begin_local)
             buy, sell = tariff_rule(imports, begin_local), tariff_rule(exports, begin_local)
-            minimum = tariff_rule(config.energy_plan.minimum_battery_kwh, begin_local).rate
-            maximum = tariff_rule(config.energy_plan.maximum_battery_kwh, begin_local).rate
-            export_limit = tariff_rule_rate(config.energy_plan.limit_battery_export_rate_to_grid_kw, begin_local, 9999)
+            minimum = tariff_rule_rate(config.energy_plan.minimum_battery_kwh, begin_local, MINIMUM_BATTERY_KWH_DEFAULT)
+            maximum = tariff_rule_rate(config.energy_plan.maximum_battery_kwh, begin_local, MAXIMUM_BATTERY_KWH_DEFAULT)
+            export_limit = tariff_rule_rate(config.energy_plan.limit_battery_export_rate_to_grid_kw, begin_local, BATTERY_EXPORT_LIMIT_KW_DEFAULT)
             forecast = scenario.forecast_data.sum(begin_utc, end_utc)
             hours = (end_utc - begin_utc).total_seconds() / 3600
             numbers = (forecast.solar_kwh, forecast.load_kwh, buy.rate, sell.rate, minimum, maximum, export_limit)
@@ -292,39 +293,14 @@ def result_score(result: SimulationResult, scenarios: list[ScenarioData]) -> flo
 
 
 def projection_intervals(config: Config, starts_at: datetime) -> list[tuple[datetime, datetime]]:
-    """Align the first crossed UTC hour and defer the removed duration to the end."""
+    """Keep the first action at 15 minutes, then follow UTC-aligned boundaries."""
     settings = config.energy_plan
     minutes = settings.optimiser.dynamic_programming.projection_resolution_mins
     if settings.num_projection_hours <= 0 or not minutes or any(type(step) is not int or step <= 0 for step in minutes):
         raise ValueError("DP projection duration and timesteps must be positive")
     if sum(minutes) < settings.num_projection_hours * 60:
         raise ValueError("DP projection_resolution_mins must cover num_projection_hours")
-    cursor = utc_instant(starts_at)
-    end = cursor + timedelta(hours=settings.num_projection_hours)
-    visible_end = min(end, cursor + timedelta(hours=settings.num_visible_projection_hours))
-    first_hour = cursor.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
-    crossed_hour = False
-    deferred = timedelta(0)
-    intervals = []
-    for step in minutes:
-        next_end = min(end - deferred, cursor + timedelta(minutes=step))
-        if not crossed_hour and next_end >= first_hour:
-            crossed_hour = True
-            deferred = next_end - first_hour
-            next_end = first_hour
-        if cursor < visible_end < next_end:
-            intervals.append((cursor, visible_end))
-            cursor = visible_end
-        intervals.append((cursor, next_end))
-        cursor = next_end
-        if cursor == end - deferred:
-            break
-    if cursor < visible_end < end:
-        intervals.append((cursor, visible_end))
-        cursor = visible_end
-    if cursor < end:
-        intervals.append((cursor, end))
-    return intervals
+    return build_projection_intervals(starts_at, settings.num_projection_hours, settings.num_visible_projection_hours, minutes)
 
 
 
@@ -388,7 +364,7 @@ def get_numba_functions():
         raise RuntimeError('Numba requires installation with: pip install -e ".[numba]"') from error
     for helper in (simulate_system_single_time_period, interpolate, battery_protection_score, battery_limit_score, step_score):
         register_jitable(helper)
-    return njit(cache=False)(backward_values), njit(cache=False)(forward_projection)
+    return njit(cache=True)(backward_values), njit(cache=True)(forward_projection)
 
 
 def backward_values(device: DeviceParameters, capacity: float, periods: list[Period], grids: list[list[float]], choices: list[Action], terminal_rate: float) -> list[list[float]]:

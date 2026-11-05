@@ -8,6 +8,9 @@ from datetime import datetime
 from solar_model.config import TariffRule, TariffsConfig
 
 WEEKDAYS = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
+MINIMUM_BATTERY_KWH_DEFAULT = 0.
+MAXIMUM_BATTERY_KWH_DEFAULT = 999.
+BATTERY_EXPORT_LIMIT_KW_DEFAULT = 999.
 
 
 def tariff_time_minutes(value: str, *, allow_end_of_day: bool = False) -> int:
@@ -38,19 +41,19 @@ def tariff_rules_for_timestamp(tariffs: TariffsConfig, timestamp: datetime) -> t
     raise ValueError(f"no tariff period covers {local_date}")
 
 def tariff_rule_rate(rules: tuple[TariffRule, ...], timestamp: datetime, default_rate: float|None=None) -> float:
-    try:
-        return tariff_rule(rules, timestamp).rate
-    except ValueError:
-        if default_rate is not None:
-            return default_rate
-        else:
-            raise
+    minute_of_day = timestamp.hour * 60 + timestamp.minute
+    for rule in rules:
+        if tariff_rule_matches(rule, timestamp.weekday(), minute_of_day):
+            return rule.rate
+    if default_rate is not None:
+        return default_rate
+    raise ValueError(f"no tariff rule matches {timestamp:%a %H:%M}")
 
 
 def tariff_rule(rules: tuple[TariffRule, ...], timestamp: datetime) -> TariffRule:
     """Return the matching tariff rule for a local timestamp.
 
-    Configuration validation guarantees that precisely one rule matches.
+    Complete tariff schedules have exactly one matching rule after validation.
     """
     minute_of_day = timestamp.hour * 60 + timestamp.minute
     for rule in rules:

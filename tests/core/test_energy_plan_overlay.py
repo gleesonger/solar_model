@@ -1,11 +1,13 @@
 """UI YAML replacement and explicitly requested configuration writes."""
 from dataclasses import replace
+from datetime import datetime
 from pathlib import Path
 
 import pytest
 import yaml
 
 from solar_model.config import TariffRule, WEEKDAYS, energy_plan_yaml, load_config, parse_energy_plan_yaml, save_energy_plan_yaml
+from solar_model.tariffs import tariff_rule_rate
 
 
 def test_overlay_round_trip_and_validation_leave_global_unchanged():
@@ -131,6 +133,57 @@ def test_empty_optional_schedules_round_trip_as_empty_lists():
     assert "maximum_battery_kwh: []" in text
     assert "limit_battery_export_rate_to_grid_kw: []" in text
     assert parse_energy_plan_yaml(config, text) == settings
+
+
+@pytest.mark.parametrize("field,default,rate", [
+    ("minimum_battery_kwh", 0., 2.),
+    ("maximum_battery_kwh", 999., 12.),
+    ("limit_battery_export_rate_to_grid_kw", 999., 0.),
+])
+def test_partial_battery_schedules_round_trip_and_use_default(field, default, rate, tmp_path):
+    config = load_config()
+    rule = TariffRule(WEEKDAYS, "02:00", "06:00", rate)
+    settings = replace(config.energy_plan, **{field: (rule,)})
+    text = energy_plan_yaml(settings)
+    restored = parse_energy_plan_yaml(config, text)
+    schedule = getattr(restored, field)
+    for hour, expected in ((1, default), (2, rate), (5, rate), (6, default)):
+        assert tariff_rule_rate(schedule, datetime(2026, 11, 2, hour), default) == expected
+    assert tariff_rule_rate((), datetime(2026, 11, 2), default) == default
+    path = tmp_path / "config.yaml"
+    path.write_text(Path("config.yaml").read_text(encoding="utf-8"), encoding="utf-8")
+    save_energy_plan_yaml(path, config, text)
+    assert getattr(load_config(path).energy_plan, field) == schedule
+    with pytest.raises(ValueError, match="exactly one rule"):
+        parse_energy_plan_yaml(config, energy_plan_yaml(replace(settings, **{field: (rule, replace(rule, start_time="05:00"))})))
+
+
+@pytest.mark.parametrize("direction", ["import_", "export"])
+def test_tariff_schedules_still_require_full_coverage(direction):
+    from solar_model.config import validate_config
+
+    config = load_config()
+    period = config.tariffs.periods[0]
+    partial = TariffRule(WEEKDAYS, "02:00", "06:00", .1, "partial")
+    period = replace(period, **{direction: (partial,)})
+    with pytest.raises(ValueError, match="exactly one rule"):
+        validate_config(replace(config, tariffs=replace(config.tariffs, periods=(period,))))
+
+
+def test_partial_overnight_schedule_uses_starting_weekday():
+    config = load_config()
+    rule = TariffRule(("Mon",), "22:00", "06:00", 0.)
+    settings = replace(config.energy_plan, limit_battery_export_rate_to_grid_kw=(rule,))
+    schedule = parse_energy_plan_yaml(config, energy_plan_yaml(settings)).limit_battery_export_rate_to_grid_kw
+    assert tariff_rule_rate(schedule, datetime(2026, 11, 2, 23), 999.) == 0.
+    assert tariff_rule_rate(schedule, datetime(2026, 11, 3, 5), 999.) == 0.
+    assert tariff_rule_rate(schedule, datetime(2026, 11, 3, 6), 999.) == 999.
+
+
+def test_default_does_not_hide_invalid_rule():
+    rule = TariffRule(WEEKDAYS, "invalid", "06:00", 0.)
+    with pytest.raises(ValueError, match="tariff time"):
+        tariff_rule_rate((rule,), datetime(2026, 11, 2), 999.)
 
 
 @pytest.mark.parametrize("model", ["mix_integer_linear_prog", "dynamic_programming"])

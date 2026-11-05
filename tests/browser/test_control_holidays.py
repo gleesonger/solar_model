@@ -77,11 +77,13 @@ ui.run(host='127.0.0.1', port={port}, reload=False, show=False)
                     page.get_by_text("Backfill household-load forecasts", exact=True).wait_for()
                     page.wait_for_function("document.querySelector('.ag-row[row-index=\"24\"]') !== null")
                     assert page.get_by_text("2026-01-25", exact=True).first.is_visible()
+                    assert page.locator('.ag-row[row-index="24"] [col-id="days"]').inner_text() == "1"
                     assert page.get_by_role("button", name="Save holidays").count() == 0
                     assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth + 1")
                     if width == 1440:
                         page.get_by_role("button", name="Add period").click()
                         page.wait_for_function("document.querySelector('.ag-row[row-index=\"25\"]') !== null")
+                        assert page.locator('.ag-row[row-index="25"] [col-id="days"]').inner_text() == ""
                         page.locator('.ag-row[row-index="25"] [col-id="start_date"]').dblclick()
                         editor = page.locator('.ag-cell-inline-editing input')
                         assert editor.get_attribute("type") == "date"
@@ -89,11 +91,18 @@ ui.run(host='127.0.0.1', port={port}, reload=False, show=False)
                         assert editor.input_value() == "2026-01-26"
                         editor.press("Enter")
                         page.wait_for_function("document.querySelector('.ag-row[row-index=\"25\"] [col-id=\"end_date\"]')?.textContent.includes('2026-01-26')")
+                        assert page.locator('.ag-row[row-index="25"] [col-id="days"]').inner_text() == "1"
+                        page.locator('.ag-row[row-index="25"] [col-id="end_date"]').dblclick()
+                        editor = page.locator('.ag-cell-inline-editing input')
+                        editor.fill("2026-01-28")
+                        editor.press("Enter")
+                        page.wait_for_function("document.querySelector('.ag-row[row-index=\"25\"] [col-id=\"days\"]')?.textContent.trim() === '3'")
                         page.locator('.ag-row[row-index="25"] [col-id="end_date"]').dblclick()
                         editor = page.locator('.ag-cell-inline-editing input')
                         editor.fill("2026-01-24")
                         editor.press("Enter")
                         page.get_by_text("Holiday end date must not precede start date", exact=False).wait_for()
+                        assert page.locator('.ag-row[row-index="25"] [col-id="days"]').inner_text() == ""
                     page.close()
                 browser.close()
         finally:
@@ -101,6 +110,6 @@ ui.run(host='127.0.0.1', port={port}, reload=False, show=False)
             process.wait(timeout=10)
     database = open_database(database_path)
     try:
-        assert database.list_holiday_periods()[-1] == ("2026-01-26", "2026-01-26")
+        assert database.list_holiday_periods()[-1] == ("2026-01-26", "2026-01-28")
     finally:
         database.close()

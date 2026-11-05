@@ -53,7 +53,7 @@ async def calculate(callback, *args):
             name = 'med' if load == solar == 'med' else load + '_' + solar
             if name not in result.results:
                 result.results[name] = result.results['med'].copy()
-    as_of = as_of.replace(hour=10, minute=5, second=0, microsecond=0)
+    as_of = as_of.replace(year=2026, month=6, day=16, hour=10, minute=5, second=0, microsecond=0)
     for name, frame in result.results.items():
         frame = frame.assign(solar_to_load_kwh=0., solar_to_battery_kwh=0., solar_to_grid_kwh=0.,
                              grid_to_load_kwh=0., grid_to_battery_kwh=0., battery_to_load_kwh=0., battery_to_grid_kwh=0.)
@@ -152,7 +152,7 @@ if __name__ == '__main__':
                 assert not refresh.is_visible()
                 assert settings.is_disabled()
                 refresh.wait_for(state="visible")
-                page.get_by_test_id("plan-action").get_by_text("Next 15 mins", exact=True).wait_for()
+                page.get_by_test_id("plan-action").get_by_text("Next 15 mins - As of Tue, 16 Jun 2026 11:05", exact=True).wait_for()
                 page.get_by_test_id("plan-action").get_by_text("Self-consumption", exact=True).wait_for()
                 assert page.get_by_test_id("plan-action").evaluate("element => getComputedStyle(element).backgroundColor") != "rgba(0, 0, 0, 0)"
                 assert refresh.is_enabled()
@@ -186,8 +186,8 @@ if __name__ == '__main__':
                 assert page.locator(".q-table tbody tr").last.locator("td").first.inner_text() == "Total"
                 assert page.locator(".q-table tbody tr").last.locator("td").nth(8).inner_text() == "25.00"
                 assert page.locator(".q-table tbody tr").last.locator("td").nth(9).inner_text() == "2.80"
-                assert page.locator(".q-table tbody tr").first.locator("td").nth(0).inner_text() == "10:05"
-                assert page.locator(".q-table tbody tr").first.locator("td").nth(1).inner_text() == "11:00"
+                assert page.locator(".q-table tbody tr").first.locator("td").nth(0).inner_text() == "11:05"
+                assert page.locator(".q-table tbody tr").first.locator("td").nth(1).inner_text() == "12:00"
                 assert page.locator(".q-table tbody tr").first.locator("td").nth(5).inner_text() == "0.4000"
                 assert page.locator(".q-table tbody tr").first.locator("td").nth(2).inner_text() == "0.92"
                 assert page.locator(".q-table tbody tr").last.locator("td").nth(2).inner_text() == "5.00"

@@ -226,7 +226,7 @@ def test_dp_aligns_first_hour_and_preserves_elapsed_horizon_through_dst(inputs):
     assert len(intervals) == 97
     assert intervals[0][0] == start
     assert intervals[-1][1] == start + timedelta(hours=24)
-    assert [(end - begin).total_seconds() / 60 for begin, end in intervals] == [15] * 3 + [10] + [15] * 92 + [5]
+    assert [(end - begin).total_seconds() / 60 for begin, end in intervals] == [15, 10] + [15] * 94 + [5]
 
 
 def test_real_default_pipeline_returns_best_completed_stage(inputs, monkeypatch):
@@ -448,8 +448,8 @@ def test_nine_scenario_result_replays_the_same_first_command_as_lp(inputs):
         actual, expected = frame.iloc[0], replay.results[name].iloc[0]
         for column in ("battery_end_kwh", "grid_import_kwh", "grid_export_kwh", "solar_clipped_kwh"):
             assert actual[column] == pytest.approx(expected[column], abs=1e-6)
-        assert len(frame) == 2
-        assert len(result.lookahead_results[name]) == 6
+        assert len(frame) == 3
+        assert len(result.lookahead_results[name]) == 7
         assert result.lookahead_results[name].battery_start_kwh.iloc[0] == pytest.approx(frame.battery_end_kwh.iloc[-1])
 
 
@@ -464,7 +464,7 @@ def test_forced_first_command_is_shared_and_selected_using_all_nine_scenarios(in
     scenarios = create_scenarios(forecast, config.energy_plan.scenarios)
     tariff = config.tariffs.periods[0]
     rule = tariff.import_[0]
-    tariff = replace(tariff, import_=(replace(rule, end_time="00:30", rate=.01), replace(rule, start_time="00:30", rate=.4)))
+    tariff = replace(tariff, import_=(replace(rule, end_time="00:15", rate=.01), replace(rule, start_time="00:15", rate=.4)))
     config = replace(config, timezone="UTC", tariffs=replace(config.tariffs, periods=(tariff,)))
     config = replace(config, energy_plan=replace(config.energy_plan, optimiser=replace(config.energy_plan.optimiser, dynamic_programming=replace(config.energy_plan.optimiser.dynamic_programming, projection_resolution_mins=(30, 30) + (240,) * 6))))
     original = dp.forward_projection

@@ -10,8 +10,54 @@ from solar_model.planning.plan_optimisation_milp import _projection_intervals
 from solar_model.storage.queries.planning import _forecast_bounds
 
 
-@pytest.mark.parametrize("intervals,visible_count,hidden_count,hidden_hours", [(dp.projection_intervals, 97, 25, 1), (_projection_intervals, 28, 6, 4)])
-def test_configured_48_hours_includes_configured_lookahead_steps(intervals, visible_count, hidden_count, hidden_hours):
+@pytest.mark.parametrize("intervals", [dp.projection_intervals, _projection_intervals])
+@pytest.mark.parametrize("minute,second,expected_second_end", [
+    (5, 0, (10, 30)),
+    (45, 0, (11, 15)),
+    (50, 0, (11, 15)),
+    (55, 30, (11, 15)),
+])
+def test_first_action_is_15_minutes_and_second_aligns(intervals, minute, second, expected_second_end):
+    start = datetime(2026, 10, 27, 10, minute, second, tzinfo=timezone.utc)
+    periods = intervals(load_config(), start)
+    assert periods[0] == (start, start + timedelta(minutes=15))
+    assert periods[1][1] == start.replace(hour=expected_second_end[0], minute=expected_second_end[1], second=0)
+    assert periods[-1][1] == start + timedelta(hours=48)
+    assert any(end == start + timedelta(hours=24) for _, end in periods)
+    assert all(left[1] == right[0] for left, right in zip(periods, periods[1:]))
+
+
+@pytest.mark.parametrize("intervals,expected_hidden", [
+    (dp.projection_intervals, [5] + [60] * 23 + [55]),
+    (_projection_intervals, [185] + [240] * 5 + [55]),
+])
+def test_alignment_preserves_visible_and_lookahead_horizons(intervals, expected_hidden):
+    start = datetime(2026, 10, 27, 10, 55, tzinfo=timezone.utc)
+    periods = intervals(load_config(), start)
+    visible_end = start + timedelta(hours=24)
+    hidden = [(a, b) for a, b in periods if a >= visible_end]
+    assert [(b - a).total_seconds() / 60 for a, b in hidden] == expected_hidden
+    assert hidden[0][0] == visible_end
+    assert hidden[-1][1] == start + timedelta(hours=48)
+
+
+@pytest.mark.parametrize("intervals", [dp.projection_intervals, _projection_intervals])
+def test_first_action_is_15_minutes_even_with_longer_configured_step(intervals):
+    config = load_config()
+    optimiser = config.energy_plan.optimiser
+    optimiser = replace(optimiser,
+        dynamic_programming=replace(optimiser.dynamic_programming, projection_resolution_mins=(60,) * 48),
+        mix_integer_linear_prog=replace(optimiser.mix_integer_linear_prog, projection_resolution_mins=(60,) * 48))
+    config = replace(config, energy_plan=replace(config.energy_plan, optimiser=optimiser))
+    start = datetime(2026, 10, 27, 10, 50, tzinfo=timezone.utc)
+    periods = intervals(config, start)
+    assert periods[0] == (start, start + timedelta(minutes=15))
+    assert periods[1][1] == datetime(2026, 10, 27, 12, tzinfo=timezone.utc)
+    assert periods[-1][1] == start + timedelta(hours=48)
+
+
+@pytest.mark.parametrize("intervals,visible_count,hidden_count", [(dp.projection_intervals, 97, 25), (_projection_intervals, 28, 7)])
+def test_configured_48_hours_includes_configured_lookahead_steps(intervals, visible_count, hidden_count):
     config = load_config()
     start = datetime(2026, 10, 27, 10, 5, tzinfo=timezone.utc)
     periods = intervals(config, start)
@@ -20,7 +66,7 @@ def test_configured_48_hours_includes_configured_lookahead_steps(intervals, visi
     assert periods[visible_count - 1][1] == periods[visible_count][0] == visible_end
     assert periods[-1][1] == start + timedelta(hours=48)
     hidden_minutes = [(end - begin).total_seconds() / 60 for begin, end in periods[visible_count:]]
-    assert hidden_minutes == ([55] + [60] * 23 + [5] if intervals is dp.projection_intervals else [hidden_hours * 60] * hidden_count)
+    assert hidden_minutes == ([55] + [60] * 23 + [5] if intervals is dp.projection_intervals else [235] + [240] * 5 + [5])
     assert all(left[1] == right[0] for left, right in zip(periods, periods[1:]))
     forecast_start, forecast_end = _forecast_bounds(start, config)
     assert forecast_start <= start and forecast_end == (start + timedelta(hours=49)).replace(minute=0)
@@ -37,7 +83,7 @@ def test_nonstandard_total_and_visible_horizon_are_not_hard_coded(intervals):
     periods = intervals(config, start)
     hidden = [(begin, end) for begin, end in periods if begin >= start + timedelta(hours=12)]
     hidden_minutes = [(end - begin).total_seconds() / 60 for begin, end in hidden]
-    assert hidden_minutes == ([115] + [120] * 8 + [5] if intervals is dp.projection_intervals else [120] * 9)
+    assert hidden_minutes == [115] + [120] * 8 + [5]
     assert periods[-1][1] == start + timedelta(hours=30)
 
 
@@ -68,15 +114,15 @@ def test_dp_scales_flows_and_costs_by_each_period_duration(hours, mode):
 
 
 @pytest.mark.parametrize("minute,steps,hours,expected", [
-    (5, (15,) * 8, 2, [15, 15, 15, 10, 15, 15, 15, 15, 5]),
+    (5, (15,) * 8, 2, [15, 10, 15, 15, 15, 15, 15, 15, 5]),
     (45, (15,) * 8, 2, [15] * 8),
-    (55, (15,) * 8, 2, [5] + [15] * 7 + [10]),
+    (55, (15,) * 8, 2, [15, 5] + [15] * 6 + [10]),
     (0, (15,) * 8, 2, [15] * 8),
-    (5, (40, 40, 40, 60), 3, [40, 15, 40, 60, 25]),
-    (5, (55, 30, 95), 3, [55, 30, 95]),
-    (5, (15,) * 12, 2, [15, 15, 15, 10, 15, 15, 15, 15, 5]),
+    (5, (40, 40, 40, 60), 3, [15, 40, 40, 20, 60, 5]),
+    (5, (55, 30, 95), 3, [15, 10, 95, 60]),
+    (5, (15,) * 12, 2, [15, 10, 15, 15, 15, 15, 15, 15, 5]),
 ])
-def test_dp_truncates_only_first_hour_crossing_and_defers_balance(minute, steps, hours, expected):
+def test_dp_keeps_first_15_minutes_and_aligns_later_steps(minute, steps, hours, expected):
     config = load_config()
     optimiser = config.energy_plan.optimiser
     config = replace(config, energy_plan=replace(config.energy_plan, num_projection_hours=hours, num_visible_projection_hours=hours,
@@ -85,18 +131,19 @@ def test_dp_truncates_only_first_hour_crossing_and_defers_balance(minute, steps,
     periods = dp.projection_intervals(config, start)
     assert [(end - begin).total_seconds() / 60 for begin, end in periods] == expected
     assert periods[0][0] == start
+    assert periods[0][1] == start + timedelta(minutes=15)
     assert periods[-1][1] == start + timedelta(hours=hours)
     assert all(begin < end for begin, end in periods)
     assert all(left[1] == right[0] for left, right in zip(periods, periods[1:]))
 
 
-def test_dp_defers_fractional_seconds_without_losing_time():
+def test_dp_aligns_fractional_seconds_without_losing_time():
     config = load_config()
     start = datetime(2026, 10, 24, 23, 55, 30, 123456, tzinfo=timezone.utc)
     periods = dp.projection_intervals(config, start)
-    midnight = datetime(2026, 10, 25, tzinfo=timezone.utc)
-    assert periods[0] == (start, midnight)
-    assert periods[-1][1] - periods[-1][0] == timedelta(minutes=10, seconds=30, microseconds=123456)
+    assert periods[0] == (start, start + timedelta(minutes=15))
+    assert periods[1][1] == datetime(2026, 10, 25, 0, 15, tzinfo=timezone.utc)
+    assert periods[-1][1] - periods[-1][0] == timedelta(minutes=55, seconds=30, microseconds=123456)
     assert sum((end - begin for begin, end in periods), timedelta()) == timedelta(hours=config.energy_plan.num_projection_hours)
 
 

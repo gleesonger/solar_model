@@ -10,7 +10,7 @@ from solar_model.planning.scenarios import create_scenarios
 from solar_model.planning.types import DeviceInfo, DeviceState, ForecastData, ForecastInterval, ScenarioData
 
 
-@pytest.mark.parametrize("resolution,expected_durations", [(15, [.25] * 8), (120, [2.])])
+@pytest.mark.parametrize("resolution,expected_durations", [(15, [.25] * 8), (120, [.25, 1.75])])
 def test_in_memory_plan_preserves_scenario_energy_and_cost(resolution, expected_durations):
     start = datetime(2026, 10, 24, tzinfo=timezone.utc)
     end = start + timedelta(hours=2)
@@ -120,12 +120,13 @@ def test_hidden_four_hour_slots_preserve_energy_for_future_demand(monkeypatch, h
     monkeypatch.setattr(cp.Problem, "solve", capped_solve)
     result = simulate_energy_plan(device, DeviceState(4.), [ScenarioData("base", forecast, 1.)], config, start)
     visible, hidden = result.results["base"], result.lookahead_results["base"]
-    assert len(visible) == 1
+    assert (visible.ends_at.iloc[0] - visible.starts_at.iloc[0]).total_seconds() == 15 * 60
     assert visible.ends_at.iloc[-1] == end
     assert visible.grid_export_kwh.sum() == pytest.approx(0., abs=1e-6)
     assert visible.battery_end_kwh.iloc[-1] == pytest.approx(4.)
-    assert hidden.starts_at.tolist() == [end + timedelta(hours=4 * h) for h in range(6)]
-    assert [(b - a).total_seconds() / 60 for a, b in zip(hidden.starts_at, hidden.ends_at)] == [240.] * 6
+    assert hidden.starts_at.iloc[0] == end
+    assert hidden.ends_at.iloc[-1] == end + timedelta(hours=24)
+    assert all(left == right for left, right in zip(hidden.ends_at.iloc[:-1], hidden.starts_at.iloc[1:]))
     assert hidden.battery_start_kwh.iloc[0] == pytest.approx(visible.battery_end_kwh.iloc[-1])
     delivered = min(3.8, hidden_load)
     assert hidden.battery_to_load_kwh.sum() == pytest.approx(delivered)
@@ -254,8 +255,8 @@ def test_mixed_projection_grid_ignores_tariff_and_battery_schedule_boundaries():
 @pytest.mark.parametrize("minute,expected", [
     (0, [15] * 24 + [60] * 18),
     (5, [15, 10] + [15] * 22 + [60] * 18 + [5]),
-    (15, [15] * 23 + [60] * 18 + [15]),
-    (50, [15, 10] + [15] * 19 + [60] * 18 + [50]),
+    (15, [15] * 24 + [45] + [60] * 17 + [15]),
+    (50, [15, 10] + [15] * 23 + [60] * 17 + [50]),
 ])
 def test_projection_keeps_first_action_and_aligns_following_periods(minute, expected):
     config = load_config()

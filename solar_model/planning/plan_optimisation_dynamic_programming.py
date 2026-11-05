@@ -1,7 +1,6 @@
 """Experimental discrete-action planner with an interpolated battery value grid."""
 from __future__ import annotations
 
-from collections.abc import Iterable
 from contextlib import nullcontext
 from datetime import datetime, timedelta, timezone
 from functools import lru_cache
@@ -14,18 +13,10 @@ import pandas as pd
 
 from solar_model.config import Config, DPRefinementConfig, EnergyPlanConfig
 from solar_model.logging_setup import LOGGER
-from solar_model.planning.types import DeviceInfo, DeviceState, NextAction, NoFeasiblePlanError, OperatingMode, PlanCommand, ScenarioData, SimulationResult
+from solar_model.planning.types import DeviceInfo, DeviceState, NextAction, NoFeasiblePlanError, OperatingMode, ScenarioData, SimulationResult
+from solar_model.planning.system import allocate_energy_routes, system_limits
 from solar_model.tariffs import tariff_rule, tariff_rule_rate, tariff_rules_for_timestamp
 from solar_model.time_utils import utc_instant
-
-
-class SystemLimits(NamedTuple):
-    capacity_kwh: float
-    max_charge_kwh: float
-    max_discharge_kwh: float
-    charge_loss_factor: float
-    discharge_loss_factor: float
-    max_grid_import_kwh: float = float("inf")
 
 
 class Period(NamedTuple):
@@ -46,8 +37,10 @@ class Period(NamedTuple):
 
 
 class DeviceParameters(NamedTuple):
-    charge_efficiency: float
-    discharge_efficiency: float
+    inverter_ac_to_dc_efficiency: float
+    inverter_dc_to_ac_efficiency: float
+    battery_charge_efficiency: float
+    battery_discharge_efficiency: float
     inverter_max_active_power_kw: float
     inverter_max_absorption_power_kw: float
     inverter_battery_charge_power_kw: float
@@ -58,6 +51,7 @@ class DeviceParameters(NamedTuple):
 class Step(NamedTuple):
     solar_used: float
     charge: float
+    grid_charge_ac: float
     discharge: float
     battery_end: float
     grid_import: float
@@ -65,7 +59,7 @@ class Step(NamedTuple):
     net_cost: float
     protection_score: float
     limit_score: float
-    command_type: PlanCommand
+    mode: OperatingMode
 
     @property
     def score(self) -> float:
@@ -73,7 +67,7 @@ class Step(NamedTuple):
 
 
 class Action(NamedTuple):
-    command_type: PlanCommand
+    mode: OperatingMode
     rate_kw: float
 
 
@@ -166,7 +160,7 @@ def solve_pass(device_info: DeviceInfo, device_state: DeviceState, scenarios: li
 
     total_hours = sum((end - begin).total_seconds() / 3600 for begin, end in intervals)
     protection_reward_value = protection_value(config, start, total_hours)
-    terminal_credit_rate = terminal_rate(config, intervals[-1][1]) * device_info.discharge_efficiency
+    terminal_credit_rate = terminal_rate(config, intervals[-1][1]) * device_info.battery_discharge_efficiency * device_info.inverter_dc_to_ac_efficiency
     
     zone = ZoneInfo(config.timezone)
     setup_at = perf_counter()
@@ -263,8 +257,14 @@ def solve_pass(device_info: DeviceInfo, device_state: DeviceState, scenarios: li
     forward_at = perf_counter()
 
     frames = {s.name: result_frame(device_info, periods, path, initial, terminal_credit_rate) for s, periods, path in zip(scenarios, scenario_periods, best_paths)}
+    first_ends = [path[0].battery_end for path in best_paths]
+    target = None
+    if best_action.mode == OperatingMode.CHARGE_PV_FIRST and best_action.rate_kw > 0:
+        target = max(first_ends) / capacity * 100
+    elif best_action.mode == OperatingMode.DISCHARGE_PV_FIRST and best_action.rate_kw > 0:
+        target = min(first_ends) / capacity * 100
     result = SimulationResult(
-        next_action=command(best_action, device_info),
+        next_action=command(best_action, device_info, target),
         results={name: frame.iloc[:num_visible_periods].copy() for name, frame in frames.items()},
         lookahead_results={name: frame.iloc[num_visible_periods:].reset_index(drop=True) for name, frame in frames.items()},
     )
@@ -346,30 +346,25 @@ def terminal_rate(config: Config, ends_at: datetime) -> float:
 
 
 def actions(device: DeviceInfo, settings: EnergyPlanConfig, power_divisions: int = 5) -> list[Action]:
-    """Passive command profiles, then evenly spaced positive forced power rates."""
+    """Three policies, including zero and positive forced power variations."""
     if type(power_divisions) is not int or power_divisions <= 0:
         raise ValueError("power divisions must be a positive integer")
-    choices = [
-        Action(PlanCommand.SELF_CONSUMPTION, 0.),
-        Action(PlanCommand.SOLAR_CHARGE_ONLY, 0.),
-        Action(PlanCommand.SOLAR_EXPORT_FIRST, 0.),
-        Action(PlanCommand.HOLD_BATTERY, 0.),
-    ]
+    choices = [Action(OperatingMode.SELF_CONSUMPTION, 0.), Action(OperatingMode.CHARGE_PV_FIRST, 0.), Action(OperatingMode.DISCHARGE_PV_FIRST, 0.)]
     limits = system_limits(device, 1.)
-    for command_type, minimum, maximum in (
-        (PlanCommand.FORCE_CHARGE, settings.min_forced_charge_power_kw, min(settings.max_forced_charge_power_kw, limits.max_charge_kwh)),
-        (PlanCommand.FORCE_DISCHARGE, settings.min_forced_discharge_power_kw, min(settings.max_forced_discharge_power_kw, limits.max_discharge_kwh)),
+    for mode, minimum, maximum in (
+        (OperatingMode.CHARGE_PV_FIRST, settings.min_forced_charge_power_kw, min(settings.max_forced_charge_power_kw, limits.max_charge_kwh)),
+        (OperatingMode.DISCHARGE_PV_FIRST, settings.min_forced_discharge_power_kw, min(settings.max_forced_discharge_power_kw, limits.max_discharge_kwh)),
     ):
         if maximum >= minimum:
             for i in range(1, power_divisions + 1):
-                choice = Action(command_type, minimum + (maximum - minimum) * (i / power_divisions))
+                choice = Action(mode, minimum + (maximum - minimum) * (i / power_divisions))
                 if choice not in choices:
                     choices.append(choice)
     return choices
 
 
 def bounded_grids(grid: list[float], capacity: float, bounds: list[tuple[float, float]]) -> list[list[float]]:
-    """Restrict period-end search nodes without changing executable SOC stops."""
+    """Restrict period-end search nodes without changing action profiles."""
     grids = [grid]
     for lower, upper in bounds:
         if not math.isfinite(lower) or not math.isfinite(upper) or not 0 <= lower <= upper <= 1:
@@ -406,15 +401,15 @@ def backward_values(device: DeviceParameters, capacity: float, periods: list[Per
             best = -math.inf
             charge_skip_from = discharge_skip_from = math.inf
             for action in choices:
-                command_type, rate_kw = action
-                if (command_type == PlanCommand.FORCE_CHARGE and rate_kw >= charge_skip_from) or (command_type == PlanCommand.FORCE_DISCHARGE and rate_kw >= discharge_skip_from):
+                mode, rate_kw = action
+                if (mode == OperatingMode.CHARGE_PV_FIRST and rate_kw >= charge_skip_from) or (mode == OperatingMode.DISCHARGE_PV_FIRST and rate_kw >= discharge_skip_from):
                     continue
                 step = simulate_system_single_time_period(device, capacity, period, battery, action)
                 if step is not None:
                     # Higher rates cannot improve a capped flow or return to the search corridor.
-                    if command_type == PlanCommand.FORCE_CHARGE and (step.charge < rate_kw * period.hours or step.battery_end > next_grid[-1] + 1e-9):
+                    if mode == OperatingMode.CHARGE_PV_FIRST and (step.charge < rate_kw * period.hours or step.battery_end > next_grid[-1] + 1e-9):
                         charge_skip_from = min(charge_skip_from, rate_kw)
-                    elif command_type == PlanCommand.FORCE_DISCHARGE and (step.discharge < rate_kw * period.hours or step.battery_end < next_grid[0] - 1e-9):
+                    elif mode == OperatingMode.DISCHARGE_PV_FIRST and (step.discharge < rate_kw * period.hours or step.battery_end < next_grid[0] - 1e-9):
                         discharge_skip_from = min(discharge_skip_from, rate_kw)
                     best = max(best, step_score(step) + interpolate(next_grid, next_values, step.battery_end))
             current.append(best)
@@ -432,15 +427,15 @@ def forward_projection(device: DeviceParameters, capacity: float, periods: list[
         charge_skip_from = discharge_skip_from = math.inf
         for i in range(1 if t == 0 else len(choices)):
             action = first_action if t == 0 else choices[i]
-            command_type, rate_kw = action
-            if (command_type == PlanCommand.FORCE_CHARGE and rate_kw >= charge_skip_from) or (command_type == PlanCommand.FORCE_DISCHARGE and rate_kw >= discharge_skip_from):
+            mode, rate_kw = action
+            if (mode == OperatingMode.CHARGE_PV_FIRST and rate_kw >= charge_skip_from) or (mode == OperatingMode.DISCHARGE_PV_FIRST and rate_kw >= discharge_skip_from):
                 continue
             step = simulate_system_single_time_period(device, capacity, period, battery, action)
             if step is not None:
                 # Keep the same pruning rule as the backward pass, at the actual battery level.
-                if command_type == PlanCommand.FORCE_CHARGE and (step.charge < rate_kw * period.hours or step.battery_end > next_grid[-1] + 1e-9):
+                if mode == OperatingMode.CHARGE_PV_FIRST and (step.charge < rate_kw * period.hours or step.battery_end > next_grid[-1] + 1e-9):
                     charge_skip_from = min(charge_skip_from, rate_kw)
-                elif command_type == PlanCommand.FORCE_DISCHARGE and (step.discharge < rate_kw * period.hours or step.battery_end < next_grid[0] - 1e-9):
+                elif mode == OperatingMode.DISCHARGE_PV_FIRST and (step.discharge < rate_kw * period.hours or step.battery_end < next_grid[0] - 1e-9):
                     discharge_skip_from = min(discharge_skip_from, rate_kw)
                 value = step_score(step) + interpolate(next_grid, next_values, step.battery_end)
                 if value > best_value:
@@ -466,7 +461,7 @@ def result_frame(device: DeviceInfo, periods: list[Period], path: list[Step], in
             "solar_kwh": p.solar,
             "load_kwh": p.load,
             "battery_end_kwh": step.battery_end,
-            "plan_action": PlanCommand(step.command_type).label,
+            "plan_action": OperatingMode(step.mode).label,
             "grid_import_kwh": step.grid_import,
             "grid_export_kwh": step.grid_export,
             "battery_charging": float(step.charge > 0),
@@ -481,97 +476,93 @@ def result_frame(device: DeviceInfo, periods: list[Period], path: list[Step], in
     ])
     frame["battery_start_kwh"] = [initial, *[step.battery_end for step in path[:-1]]]
     
-    routes = allocate_energy_routes(frame.solar_kwh, frame.load_kwh, [s.solar_used for s in path], [s.charge for s in path], [s.discharge for s in path], device)
+    routes = allocate_energy_routes(frame.solar_kwh, frame.load_kwh, [s.solar_used for s in path], [s.charge for s in path], [s.grid_charge_ac for s in path], [s.discharge for s in path], device, [p.hours for p in periods])
     
     for name, amounts in routes.items():
         frame[f"{name}_kwh"] = amounts
 
-    frame["solar_to_inverter_kwh"] = frame.solar_to_load_kwh + frame.solar_to_battery_kwh + frame.solar_to_battery_loss_kwh + frame.solar_to_grid_kwh
-    frame["battery_to_inverter_kwh"] = frame.battery_to_load_kwh + frame.battery_to_grid_kwh
+    frame["solar_to_inverter_kwh"] = [s.solar_used for s in path]
+    frame["battery_to_inverter_kwh"] = [s.discharge for s in path]
     frame["inverter_dc_to_ac_kwh"] = frame.solar_to_load_kwh + frame.solar_to_grid_kwh + frame.battery_to_inverter_kwh
-    frame["inverter_ac_to_dc_kwh"] = frame.grid_to_battery_kwh + frame.grid_to_battery_loss_kwh
+    frame["inverter_ac_to_dc_kwh"] = [s.grid_charge_ac * device.inverter_ac_to_dc_efficiency for s in path]
     frame["terminal_score"] = 0.
     frame.loc[frame.index[-1], "terminal_score"] = terminal_rate * path[-1].battery_end
     frame["total_score"] = frame.terminal_score + [step_score(step) for step in path]
     return frame
 
 
-def command(action: Action, device: DeviceInfo) -> NextAction:
-    """Map a program command to a complete V2.9 mode/power-limit profile."""
-    command_type, rate = action
-    mode = OperatingMode.SELF_CONSUMPTION
+def command(action: Action, device: DeviceInfo, target_soc_percent: float | None = None) -> NextAction:
+    """Map a policy variation to a Sigenergy mode and both power ceilings."""
+    mode, rate = action
     charge_limit = device.inverter_battery_charge_power_kw
     discharge_limit = device.inverter_battery_discharge_power_kw
-    if command_type == PlanCommand.FORCE_CHARGE:
-        mode, charge_limit, discharge_limit = OperatingMode.CHARGE_PV_FIRST, rate, 0.
-    elif command_type == PlanCommand.FORCE_DISCHARGE:
-        mode, charge_limit, discharge_limit = OperatingMode.DISCHARGE_PV_FIRST, 0., rate
-    elif command_type == PlanCommand.SOLAR_CHARGE_ONLY:
-        discharge_limit = 0.
-    elif command_type == PlanCommand.SOLAR_EXPORT_FIRST:
-        mode, discharge_limit = OperatingMode.DISCHARGE_PV_FIRST, 0.
-    elif command_type == PlanCommand.HOLD_BATTERY:
-        charge_limit = discharge_limit = 0.
-    elif command_type != PlanCommand.SELF_CONSUMPTION:
+    if mode == OperatingMode.CHARGE_PV_FIRST:
+        charge_limit, discharge_limit = rate, 0.
+    elif mode == OperatingMode.DISCHARGE_PV_FIRST:
+        discharge_limit = rate
+    elif mode != OperatingMode.SELF_CONSUMPTION:
         raise ValueError("unsupported DP command")
     return NextAction(
         mode=mode,
-        force_battery_charge_rate=rate if command_type == PlanCommand.FORCE_CHARGE else 0.,
-        force_battery_discharge_rate=rate if command_type == PlanCommand.FORCE_DISCHARGE else 0.,
-        charge_cut_off_soc_percent=100.,
-        discharge_cut_off_soc_percent=0.,
-        command_type=command_type,
         charge_power_limit_kw=charge_limit,
         discharge_power_limit_kw=discharge_limit,
+        target_soc_percent=target_soc_percent,
     )
 
 
 def simulate_system_single_time_period(device: DeviceParameters, capacity: float, period: Period, battery: float, action: Action) -> Step | None:
     """Simulate physical command response and score the ending battery state."""
-    command_type, rate = action
+    mode, rate = action
     pv, load, hours = period.solar, period.load, period.hours
-    output = device.inverter_max_active_power_kw * hours
-    absorption = min(output, device.inverter_max_absorption_power_kw * hours)
+    eta_ac_dc = device.inverter_ac_to_dc_efficiency
+    eta_dc_ac = device.inverter_dc_to_ac_efficiency
+    eta_charge = device.battery_charge_efficiency
+    eta_discharge = device.battery_discharge_efficiency
+    output_ac = device.inverter_max_active_power_kw * hours
+    output_dc = output_ac / eta_dc_ac
+    absorption_ac = min(output_ac, device.inverter_max_absorption_power_kw * hours)
     charge_limit = device.inverter_battery_charge_power_kw * hours
-    discharge_limit = min(device.inverter_battery_discharge_power_kw * hours, output)
-    charge = discharge = 0.
+    discharge_limit = min(device.inverter_battery_discharge_power_kw * hours, output_dc)
+    charge = discharge = grid_charge_ac = 0.
+    pv_load_dc = min(pv, load / eta_dc_ac, output_dc)
+    charge_room = max(0., capacity - battery) / eta_charge
 
-    if command_type == PlanCommand.SELF_CONSUMPTION or command_type == PlanCommand.SOLAR_CHARGE_ONLY:
-        pv_load = min(pv, load, output)
-        charge = min(pv - pv_load, charge_limit, max(0., capacity - battery) / device.charge_efficiency)
-        if command_type == PlanCommand.SELF_CONSUMPTION:
-            discharge = min(load - pv_load, discharge_limit, output - pv_load, battery * device.discharge_efficiency)
-        used = min(pv, charge + output - discharge)
-    elif command_type == PlanCommand.FORCE_CHARGE:
-        charge = min(rate * hours, max(0., capacity - battery) / device.charge_efficiency, charge_limit, pv + absorption, max(0., pv + device.grid_max_import_power_kw * hours - load))
-        used = min(pv, charge + output)
-    elif command_type == PlanCommand.HOLD_BATTERY:
-        used = min(pv, output)
-    elif command_type == PlanCommand.SOLAR_EXPORT_FIRST:
-        # Model assumption: mode 5 with discharge blocked permits PV overflow charging.
-        charge = min(max(0., pv - output), charge_limit, max(0., capacity - battery) / device.charge_efficiency)
-        used = min(pv, output) + charge
-    elif command_type == PlanCommand.FORCE_DISCHARGE:
-        used = min(pv, output)
-        ceiling = min(discharge_limit, output - used)
-        allowance = max(0., load - used) + period.export_limit * hours
-        if ceiling > allowance + 1e-9 and rate * hours > allowance + 1e-9:
-            return None
-        discharge = min(rate * hours, battery * device.discharge_efficiency, ceiling)
+    if mode == OperatingMode.SELF_CONSUMPTION:
+        charge = min(pv - pv_load_dc, charge_limit, charge_room)
+        discharge = min(load / eta_dc_ac - pv_load_dc, discharge_limit, output_dc - pv_load_dc, battery * eta_discharge)
+        used = min(pv, charge + output_dc - discharge)
+    elif mode == OperatingMode.CHARGE_PV_FIRST:
+        pv_surplus = pv - pv_load_dc
+        grid_headroom = max(0., device.grid_max_import_power_kw * hours - max(0., load - pv_load_dc * eta_dc_ac))
+        charge = min(rate * hours, charge_room, charge_limit, pv_surplus + absorption_ac * eta_ac_dc, pv_surplus + grid_headroom * eta_ac_dc)
+        grid_charge_ac = max(0., charge - pv_surplus) / eta_ac_dc
+        used = min(pv, charge - grid_charge_ac * eta_ac_dc + output_dc)
+    elif mode == OperatingMode.DISCHARGE_PV_FIRST:
+        if rate == 0:
+            charge = min(pv - pv_load_dc, charge_limit, charge_room)
+            used = min(pv, charge + output_dc)
+        else:
+            used = min(pv, output_dc)
+            ceiling = min(discharge_limit, output_dc - used)
+            allowance_ac = max(0., load - used * eta_dc_ac) + period.export_limit * hours
+            if ceiling * eta_dc_ac > allowance_ac + 1e-9 and rate * hours * eta_dc_ac > allowance_ac + 1e-9:
+                return None
+            discharge = min(rate * hours, battery * eta_discharge, ceiling)
     else:
         raise ValueError("unsupported DP command")
 
-    battery_end = min(capacity, max(0., battery + device.charge_efficiency * charge - discharge / device.discharge_efficiency))
-    exchange = used - charge + discharge - load
+    battery_end = min(capacity, max(0., battery + eta_charge * charge - discharge / eta_discharge))
+    solar_charge_dc = charge - grid_charge_ac * eta_ac_dc
+    exchange = (used - solar_charge_dc + discharge) * eta_dc_ac - grid_charge_ac - load
     grid_export, grid_import = max(0., exchange), max(0., -exchange)
     if grid_import > device.grid_max_import_power_kw * hours + 1e-9:
         return None
-    if min(discharge, grid_export) > period.export_limit * hours + 1e-9:
+    if min(discharge * eta_dc_ac, grid_export) > period.export_limit * hours + 1e-9:
         return None
     protection = battery_protection_score(battery_end, period.preferred_reserve_kwh)
     net_cost = grid_import * period.import_rate - grid_export * period.export_rate
     limit_score = battery_limit_score(battery_end, period.minimum, period.maximum, capacity, hours)
-    return Step(used, charge, discharge, battery_end, grid_import, grid_export, net_cost, period.protection_weight * min(100., max(0., protection)), limit_score, command_type)
+    return Step(used, charge, grid_charge_ac, discharge, battery_end, grid_import, grid_export, net_cost, period.protection_weight * min(100., max(0., protection)), limit_score, mode)
 
 
 def step_score(step: Step) -> float:
@@ -622,66 +613,6 @@ def battery_protection_score(energy: float, reserve: float) -> float:
     if energy <= reserve:
         return 100 * (1 - 0.3 ** (energy / reserve))
     return 70 + 30 * (energy - reserve) / (energy + reserve)
-
-
-def system_limits(device: DeviceInfo, interval_hours: float) -> SystemLimits:
-    """Convert nameplate limits and efficiencies into one interval's limits."""
-    if not (0 < device.charge_efficiency <= 1) or not (0 < device.discharge_efficiency <= 1):
-        raise ValueError("battery efficiencies must be between 0 and 1 (inclusive)")
-    if math.isnan(device.grid_max_import_power_kw) or device.grid_max_import_power_kw < 0:
-        raise ValueError("grid import limit must be non-negative")
-    capacity = device.system_battery_capacity_kwh * device.battery_state_of_health_percent / 100
-    max_charge_kwh = device.inverter_battery_charge_power_kw * interval_hours
-    max_discharge_kwh = min(device.inverter_battery_discharge_power_kw, device.inverter_max_active_power_kw) * interval_hours
-    if capacity <= 0 or max_charge_kwh < 0 or max_discharge_kwh < 0:
-        raise ValueError("battery capacity and charge/discharge limits must be non-negative")
-    return SystemLimits(
-        capacity,
-        max_charge_kwh,
-        max_discharge_kwh,
-        1 / device.charge_efficiency - 1,
-        1 / device.discharge_efficiency - 1,
-        device.grid_max_import_power_kw * interval_hours,
-    )
-
-
-def allocate_energy_routes(solar: Iterable[float], load: Iterable[float], solar_used: Iterable[float],
-                           charge_input: Iterable[float], discharge_output: Iterable[float],
-                           device: DeviceInfo) -> dict[str, list[float]]:
-    """Allocate solved port totals for reporting; these are not solver choices.
-
-    Charging uses PV before grid energy. Remaining PV supplies the household
-    before battery discharge; surplus output is exported. With exclusive
-    battery directions this reproduces the signed inverter/grid balances.
-    Input series must have matching lengths; each output column is a Python list.
-    """
-    routes: dict[str, list[float]] = {
-        name: [] for name in ("solar_to_load", "solar_to_battery", "solar_to_battery_loss",
-            "grid_to_battery", "grid_to_battery_loss", "solar_to_grid", "solar_clipped",
-            "battery_to_load", "battery_to_grid", "battery_to_ac_loss", "grid_to_load")
-    }
-    for available, demand, used, charge, discharge in zip(solar, load, solar_used, charge_input, discharge_output, strict=True):
-        solar_charge = min(used, charge)
-        grid_charge = charge - solar_charge
-        solar_output = used - solar_charge
-        solar_load = min(solar_output, demand)
-        battery_load = min(discharge, max(0., demand - solar_load))
-        values = {
-            "solar_to_load": solar_load,
-            "solar_to_battery": solar_charge * device.charge_efficiency,
-            "solar_to_battery_loss": solar_charge * (1 - device.charge_efficiency),
-            "grid_to_battery": grid_charge * device.charge_efficiency,
-            "grid_to_battery_loss": grid_charge * (1 - device.charge_efficiency),
-            "solar_to_grid": solar_output - solar_load,
-            "solar_clipped": available - used,
-            "battery_to_load": battery_load,
-            "battery_to_grid": discharge - battery_load,
-            "battery_to_ac_loss": discharge * (1 / device.discharge_efficiency - 1),
-            "grid_to_load": demand - solar_load - battery_load,
-        }
-        for name, value in values.items():
-            routes[name].append(value)
-    return routes
 
 
 def reference_import_rate(config: Config, starts_at: datetime, ends_at: datetime) -> float:

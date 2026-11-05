@@ -13,29 +13,30 @@ from tests.planning.test_next_action import inputs, make_action, simulate
 
 
 def test_report_allocations_preserve_port_energy_and_net_meter_exchange(inputs):
-    device = replace(inputs[0], charge_efficiency=.8, discharge_efficiency=.9)
-    solar = np.array([3., 5., 1., 0.])
-    used = np.array([3., 3., 1., 0.])
-    load = np.array([2., 1., 2., 2.])
-    charge = np.array([2., 0., 3., 0.])
-    discharge = np.array([0., 2., 0., 1.])
-    flows = allocate_energy_routes(solar, load, used, charge, discharge, device)
+    device = replace(inputs[0], inverter_ac_to_dc_efficiency=.9, inverter_dc_to_ac_efficiency=.8,
+                     battery_charge_efficiency=.7, battery_discharge_efficiency=.6)
+    solar = np.array([3., 3., 0.])
+    used = np.array([3., 2., 0.])
+    load = np.array([1., 2., 1.])
+    charge = np.array([1., 0., .9])
+    grid_charge = np.array([0., 0., 1.])
+    discharge = np.array([0., 1., 0.])
+    flows = allocate_energy_routes(solar, load, used, charge, grid_charge, discharge, device, [1.] * len(solar))
     # Lists are the reporting contract; arrays here independently check balances.
     assert all(isinstance(values, list) for values in flows.values())
     flows = {name: np.asarray(values) for name, values in flows.items()}
     assert all((value >= 0.).all() for value in flows.values())
-    np.testing.assert_allclose(solar, sum(flows[name] for name in (
-        "solar_to_load", "solar_to_battery", "solar_to_battery_loss", "solar_to_grid", "solar_clipped")))
+    np.testing.assert_allclose(solar, (flows["solar_to_load"] + flows["solar_to_grid"]) / .8
+                               + flows["solar_to_battery"] / .7 + flows["solar_clipped"])
     np.testing.assert_allclose(load, flows["solar_to_load"] + flows["battery_to_load"] + flows["grid_to_load"])
-    np.testing.assert_allclose(.8 * charge - discharge / .9,
+    np.testing.assert_allclose(.7 * charge - discharge / .6,
         flows["solar_to_battery"] + flows["grid_to_battery"]
-        - flows["battery_to_load"] - flows["battery_to_grid"] - flows["battery_to_ac_loss"])
-    imports = flows["grid_to_load"] + flows["grid_to_battery"] + flows["grid_to_battery_loss"]
+        - (flows["battery_to_load"] + flows["battery_to_grid"]) / (.8 * .6))
+    imports = flows["grid_to_load"] + grid_charge
     exports = flows["solar_to_grid"] + flows["battery_to_grid"]
-    np.testing.assert_allclose(imports, [1., 0., 4., 1.])
-    np.testing.assert_allclose(exports, [0., 4., 0., 0.])
-    np.testing.assert_allclose(exports - imports, used - charge + discharge - load)
-    np.testing.assert_allclose(flows["battery_to_grid"], np.minimum(discharge, exports))
+    np.testing.assert_allclose(exports - imports, .8 * (used - charge + .9 * grid_charge + discharge) - grid_charge - load)
+    total_loss = sum(flows[name] for name in ("battery_charge_loss", "battery_discharge_loss", "inverter_ac_to_dc_loss", "inverter_dc_to_ac_loss"))
+    np.testing.assert_allclose(solar + imports + discharge / .6 - load - exports - charge * .7 - flows["solar_clipped"], total_loss)
 
 
 def test_one_solve_keeps_nine_scenarios_and_the_same_weighted_objective(inputs, monkeypatch):

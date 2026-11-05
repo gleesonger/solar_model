@@ -54,7 +54,7 @@ def test_dp_mixes_15_and_30_minute_visible_steps_then_four_hour_steps():
 @pytest.mark.parametrize("hours", [.25, .5, 4.])
 @pytest.mark.parametrize("mode", [dp.OperatingMode.CHARGE_PV_FIRST, dp.OperatingMode.DISCHARGE_PV_FIRST])
 def test_dp_scales_flows_and_costs_by_each_period_duration(hours, mode):
-    device = dp.DeviceParameters(.95, .9, 5., 5., 5., 5.)
+    device = dp.DeviceParameters(1., 1., .95, .9, 5., 5., 5., 5.)
     period = dp.Period(0., hours * 3600, 0., 0., .1, .2, "flat", 0., 18., 999., hours, 0., 3.)
     step = dp.simulate_system_single_time_period(device, 18., period, 8., dp.Action(mode, 1.))
     if mode == dp.OperatingMode.CHARGE_PV_FIRST:

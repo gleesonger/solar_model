@@ -20,16 +20,16 @@ All functions below live in `solar_model/planning/plan_optimisation_dynamic_prog
 
 | Layer | Records/functions | Responsibility |
 | --- | --- | --- |
-| Numerical data | `DeviceParameters`, `Period`, `Action`, `Step`, `PlanCommand` | Equipment inputs, scenario-period inputs, candidate commands and calculated period outcomes; shared by Python and Numba |
+| Numerical data | `DeviceParameters`, `Period`, `Action`, `Step`, `OperatingMode` | Equipment inputs, scenario-period inputs, candidate commands and calculated period outcomes; shared by Python and Numba |
 | Stage orchestration | `simulate_energy_plan`, `result_score` | Run the full-range pass and refinements, retain the best realised probability-weighted full-horizon result, log progress/failure |
 | Pass assembly | `solve_pass` | Validate inputs, assemble each scenario's periods/grids, select backend, build backward tables, compare exact forward paths under every shared first command, assemble results |
 | Time and value inputs | `projection_intervals`, `protection_value`, `terminal_rate`, `reference_import_rate` | Elapsed UTC intervals, tariff/preference protection scale and terminal battery credit |
-| Search space | `actions`, `bounded_grids` | Four passive command profiles, candidate forced rates and per-period-end refinement corridors |
+| Search space | `actions`, `bounded_grids` | Three modes with zero and positive rate variations, plus per-period-end refinement corridors |
 | Numerical search | `backward_values`, `forward_projection`, `interpolate` | Backward future-value tables and exact-state forward policy selection; physical-cap and corridor pruning live in both passes |
 | Period calculation | `simulate_system_single_time_period`, `battery_protection_score`, `battery_limit_score`, `step_score` | Physical command response and the shared period objective: economics, protection reward and soft-limit penalty |
 | Backend | `get_numba_functions` | Locally import Numba, register shared helpers and lazily compile the same backward/forward functions |
 | Report boundary | `result_frame`, `command`, `allocate_energy_routes` | Reconstruct routes, expose score components, split visible/lookahead frames and describe the shared next command |
-| Physical inputs | `system_limits`, `SystemLimits` | Health-adjusted capacity, interval equipment/grid-import limits and loss factors |
+| Physical inputs | shared `planning.system.system_limits`, `SystemLimits` | Health-adjusted capacity and interval equipment/grid-import limits |
 
 `services.planning.plan_as_of` calls the public planner. Dashboard column metadata in `dashboard/tabs/plan.py` controls score display, aggregation and Excel export. MILP owns a separate simulator/objective and is unaffected by DP-only changes.
 
@@ -62,7 +62,7 @@ The implementation owns its interval generation, exact protection curve, tariff-
 
 The original backward pass, forward pass, single-period simulator and scoring formulas remain in one module. `get_numba_functions()` imports Numba locally and creates cached `njit(cache=True)` versions of `backward_values()` and `forward_projection()`, registering their existing helpers for compilation. An explicit `if use_numba` / `else` selects the functions and inputs for each path. Python calls those same ordinary functions directly. The compiled dispatchers are reused across scenarios, stages and calls. Execution is single-threaded, without relaxed floating-point arithmetic or object-mode fallback. Python execution does not import Numba.
 
-`DeviceParameters`, `Period`, `Action`, `Step`, `PlanCommand` and `SystemLimits` are named tuples with descriptive fields. Python and Numba use the same `Period` records directly, including their tariff names and `starts_at`/`ends_at` as UTC Unix epoch seconds. Epoch values are floats to preserve fractional seconds. Reports convert those two fields back to timezone-aware UTC datetimes using `datetime.fromtimestamp(..., timezone.utc)`. There is no `PeriodInputs` type or separate metadata collection. Both backends receive the same `DeviceParameters` named tuple, constructed once per stage before backend selection. `backward_values()`, `forward_projection()` and `simulate_system_single_time_period()` declare that argument type. Only the Numba path converts the existing lists to `numba.typed.List` once per stage; periods need no field-copy conversion. Ragged grids and value tables retain their original lists-of-rows structure. Completed paths contain the same `Step` named tuples used in Python. Forecast values and list lengths can change without new signatures when element types stay the same.
+`DeviceParameters`, `Period`, `Action` and `Step` are named tuples with descriptive fields; `OperatingMode` is the shared remote EMS enum. Python and Numba use the same `Period` records directly, including their tariff names and `starts_at`/`ends_at` as UTC Unix epoch seconds. Epoch values are floats to preserve fractional seconds. Reports convert those two fields back to timezone-aware UTC datetimes using `datetime.fromtimestamp(..., timezone.utc)`. There is no `PeriodInputs` type or separate metadata collection. Both backends receive the same `DeviceParameters` named tuple, constructed once per stage before backend selection. `backward_values()`, `forward_projection()` and `simulate_system_single_time_period()` declare that argument type. Only the Numba path converts the existing lists to `numba.typed.List` once per stage; periods need no field-copy conversion. Ragged grids and value tables retain their original lists-of-rows structure. Completed paths contain the same `Step` named tuples used in Python. Forecast values and list lengths can change without new signatures when element types stay the same.
 
 There is no warm-up or synthetic compilation call. Numba imports, loads its disk cache or compiles lazily on the first real numerical call. The overall DP and benchmark timers include that work on first use. INFO stage summaries separate actual compilation from the remaining projection work using Numba compile-event timing; nested compilation events count only once. Loading native code from disk cache and importing Numba remain projection time, with zero compilation time when no new compilation occurs. Detailed DEBUG phase timers still include compilation within whichever phase triggers it. Timed work includes typed-list preparation, every refinement stage, rollouts and report creation. The few compatibility edits to the original functions are list slicing to reverse the table, an indexed candidate loop, explicit score arithmetic in compiled loops and an equivalent binary search replacing `bisect_left`. Physics and scoring formulas are unchanged.
 
@@ -89,20 +89,19 @@ For every time point in every scenario, create a value-table entry for each batt
 
 By default, use the same full battery-energy grid across all time points and scenarios. Add the exact current battery energy and all scheduled battery-energy bounds clipped to physical capacity to that grid. These extra entries can sit between the regular 2% levels. Optional search bounds produce separate grids at each period end and scenario. Nodes without a feasible continuation are marked infeasible rather than assigned a finite score.
 
-Define up to fourteen commands:
+Define up to thirteen action variations across three policies:
 
 - Self-consumption.
-- Solar charge only: PV supplies household demand first, surplus charges the battery and the grid supplies shortfalls. Battery discharge and grid charging are disabled.
-- Solar export first: model PV output to the house/grid up to inverter AC capacity, then charge from otherwise-clipped PV, with no discharge. This mode-5 overflow response is an unverified hardware assumption.
-- Hold battery: both battery directions are disabled; PV supplies the house or exports/clips, and the grid supplies shortfalls.
+- Force Charge at 0 kW: hold both battery directions; PV serves load and any export while the grid covers shortfalls.
+- Force Discharge at 0 kW: prevent battery discharge while allowing surplus PV to charge before export; installed firmware response is unverified.
 - Charge at five rates: `minimum + (maximum - minimum) * fraction`, for fractions 1/5, 2/5, 3/5, 4/5 and 1.
 - Discharge at five rates using the same formula and its own hardware maximum.
 
-A single `solve_pass()` accepts `grid_step_percent` and `power_divisions`, defaulting to 2 and 5. The public `simulate_energy_plan()` runs the configured coarse-to-fine sequence by default. Supplying an explicit resolution or `battery_bounds` to that entry point selects a single pass instead. For a 1% grid with tenths for all forced commands, pass `grid_step_percent=1., power_divisions=10`; this gives 101 regular battery nodes and up to 24 commands. The benchmark accepts the same single-pass overrides as `--soc-grid-step-percent 1 --power-divisions 10`. Without resolution/refinement overrides, `--model dp` uses the configured staged default and its configured grid.
+A single `solve_pass()` accepts `grid_step_percent` and `power_divisions`, defaulting to 2 and 5. The public `simulate_energy_plan()` runs the configured coarse-to-fine sequence by default. Supplying an explicit resolution or `battery_bounds` to that entry point selects a single pass instead. For a 1% grid with tenths for both forced policies, pass `grid_step_percent=1., power_divisions=10`; this gives 101 regular battery nodes and up to 23 action variations. The benchmark accepts the same single-pass overrides as `--soc-grid-step-percent 1 --power-divisions 10`. Without resolution/refinement overrides, `--model dp` uses the configured staged default and its configured grid.
 
 ### Restricting the battery search by period
 
-`battery_bounds` accepts one `(lower, upper)` pair per period, in SOC fractions from 0 to 1. Each pair constrains the battery energy at that period's end. The initial energy still comes from the measured device state. These are search bounds; they do not change soft battery preferences or physical SOC stops.
+`battery_bounds` accepts one (lower, upper) pair per period, in SOC fractions from 0 to 1. These are search bounds on interval-end energy, independent of soft battery preferences and optional controller targets.
 
 Pass a list to share bounds across scenarios, or a dictionary mapping every scenario name to its own list. Bounds need one pair per actual period returned by projection_intervals, including any alignment tail and visible-cutoff split. For an hour-aligned start, `[(0., 1.)] * 96` covers the visible period ends and 120 pairs cover the whole configured horizon; at 10:05 these counts become 97 and 122. If only visible bounds are supplied, hidden period ends retain full-range bounds. Values must be finite, with `0 <= lower <= upper <= 1`.
 
@@ -122,26 +121,23 @@ The code represents each command as an immutable `Action` named tuple with `mode
 
 `energy_plan.min_forced_charge_power_kw` and `energy_plan.min_forced_discharge_power_kw` define separate minimum requested powers, both defaulting to 0.1 kW. These are planning preferences shared by DP and MILP, not verified hardware minimums or minimum achieved flows. Values must be finite and positive, and do not scale with period duration. The power fractions remain defined directly in `actions()`; hardware maximums still come from `SystemLimits`. The numeric `energy_plan.max_forced_charge_power_kw` and `max_forced_discharge_power_kw` settings both default to 999 kW. Both planners cap each configured maximum by hardware capability. DP uses this effective maximum in its five-rate formula.
 
-Omit forced modes whose effective maximum is below the minimum forced power. Remove duplicate choices when the minimum equals the maximum. Each simulated command accounts for efficiencies, inverter limits and battery limits. Its SOC stops use physical 0% and 100%; scheduled Min/Max values affect the score only.
+Omit positive forced rates when the effective maximum is below the configured minimum. Remove duplicate choices when minimum equals maximum. Zero-rate variants remain candidates. Each simulated action accounts for efficiency, inverter limits and physical battery limits. Scheduled Min/Max values affect the DP score only.
 
 ## Program commands and Modbus profiles
 
-`planning.types.PlanCommand` identifies program behaviour independently of `OperatingMode`, whose values remain the Sigenergy remote EMS codes 2/4/5. DP `Action(command_type, rate_kw)` and each simulated `Step.command_type` use this shared integer enum in both Python and Numba. Reports convert the recorded type to its human-readable `plan_action`; they do not infer a command from flow magnitudes. The first command remains shared across all scenarios and later commands are selected independently. Compact hourly reports and grouped CLI reports join distinct labels in encounter order; Advanced and ungrouped reports preserve original periods.
+`OperatingMode` is the single policy identity and uses Sigenergy remote EMS values 2, 4 and 5. DP `Action(mode, rate_kw)` and each simulated `Step.mode` carry it in Python and Numba. Reports use the mode's label for `plan_action`; they do not infer a mode from flow magnitudes. The first action remains shared across scenarios and later actions are selected independently. Compact hourly reports and grouped CLI reports join distinct labels in encounter order; Advanced and ungrouped reports preserve original periods.
 
-The four passive candidates are evaluated first: Self-consumption, Solar charge only, Solar export first, Hold battery. The passive commands use a zero rate because they have no forced-power request. On exact ties, the earlier candidate wins; Solar charge only therefore wins over Hold when their outcomes are identical, including at night. Solar export first precedes Hold on ties as well; Self-consumption retains priority when it also ties. The passive commands are not subject to forced minimum/maximum requested-power preferences. Physical flow limits and every existing score component still apply. Physical-cap/corridor pruning remains restricted to forced charge/discharge candidates.
+The candidates are Self-consumption, Force Charge and Force Discharge. The latter two each include a zero-power variant as well as positive rates between their configured minimum and equipment-limited maximum. At zero charge, mode 4 holds both battery directions; at zero discharge, mode 5 prevents discharge while allowing surplus PV to charge. On exact ties, the earlier candidate wins. Physical flow limits and every score component apply. Physical-cap/corridor pruning remains restricted to positive forced rates.
 
-`command(action, device)` returns a complete `NextAction` profile. The original forced-rate fields still describe only forced requests. DP additionally fills `command_type`, `charge_power_limit_kw` and `discharge_power_limit_kw` explicitly. Passive allowances use hardware battery power ratings; forced rates are already constrained by equipment and configured forced-power settings.
+`command(action, device, target_soc_percent)` returns a complete `NextAction` profile: remote mode, both ESS power ceilings and an optional controller SOC trigger. The target is derived from the first interval's scenario end states and is not an inverter SOC cut-off setting. The rate properties expose the relevant ceiling for report compatibility.
 
 | Program command | Remote EMS mode (`40031`) | Charge ceiling (`40032`) | Discharge ceiling (`40034`) |
 | --- | --- | --- | --- |
 | Self-consumption | 2 | Hardware allowance | Hardware allowance |
-| Solar charge only | 2 | Hardware allowance | 0 kW |
-| Solar export first | 5 | Hardware allowance | 0 kW |
-| Hold battery | 2 | 0 kW | 0 kW |
-| Force charge | 4 | Selected rate | 0 kW |
-| Force discharge | 5 | 0 kW | Selected rate |
+| Force charge | 4 | Selected rate, including 0 kW | 0 kW |
+| Force discharge | 5 | Hardware allowance | Selected rate, including 0 kW |
 
-This mapping follows the repository's [Sigenergy V2.9 protocol](../reference/Sigenergy%20Modbus%20Protocol%20EN_V2.9.pdf), Table 5-2-1 (printed pages 15-17): both ESS ceilings apply globally regardless of EMS mode and accept zero. Standby mode 1 is not used. The simulator composes these restrictions with its declared PV/household priorities; installed-firmware behaviour remains unverified. In particular, the protocol establishes mode 5 and independent power ceilings but does not establish automatic overflow charging in that mode. `SOLAR_EXPORT_FIRST` is an explicit simulation assumption: charge input is `min(max(0, PV - inverter_AC_capacity), battery_charge_limit, remaining_storage / charge_efficiency)` in interval kWh. PV up to inverter AC capacity supplies the house and then exports; demand beyond that imports from the grid. Charge losses and energy conservation use the existing route allocation. A full/power-limited battery leaves remaining overflow clipped. This responds to inverter capacity only; a separate site export cap is not modelled. Profiles are report data, not executed writes. A future controller must explicitly restore both ceilings when changing profiles; omitted MILP profile fields must not be interpreted as zero.
+This mapping follows the repository's [Sigenergy V2.9 protocol](../reference/Sigenergy%20Modbus%20Protocol%20EN_V2.9.pdf), Table 5-2-1 (printed pages 15-17): both ESS ceilings apply globally regardless of EMS mode and accept zero. Standby mode 1 is not used. The simulator assumes PV serves load before charging the battery and then exporting; household shortfall uses PV, battery when discharge is enabled, then grid. Installed-firmware behaviour, especially the zero-power variants and PV charging in mode 5, remains unverified. Profiles are report data, not executed writes. A future controller must explicitly restore both ceilings when changing profiles.
 
 ## Soft battery limits and period scoring
 
@@ -157,7 +153,7 @@ limit_score = -100 * error**2 / (error**2 + 5**2) * period_hours
 
 For a positive breach, the implementation uses the reciprocal ratio `ratio = capacity * 0.05 / breach_kwh` and `-100 / (1 + ratio * ratio) * period_hours`, avoiding squaring a potentially large breach. Zero breach returns zero directly. There is no discontinuity at the boundary. A one-percentage-point breach scores approximately -3.85 per hour; five points score -50 and ten points score -80 per hour. The penalty accelerates initially, then gradually saturates. The penalty approaches -100 per hour. It uses the ending state, rather than an integral of the within-period breach.
 
-`Step` carries `limit_score` alongside `net_cost`, `protection_score` and the selected `command_type`. `step_score()` is the single period objective used by both numerical passes and realised path scoring via `Step.score`:
+`Step` carries `limit_score` alongside `net_cost`, `protection_score` and the selected `mode`. `step_score()` is the single period objective used by both numerical passes and realised path scoring via `Step.score`:
 
 ```text
 period_score = -net_cost + protection_score + limit_score
@@ -274,7 +270,7 @@ Later commands can differ between scenarios; only the first command must be shar
 
 Return:
 
-- The selected first command, including its program command, Sigenergy mode, both global power ceilings and SOC stops.
+- The selected first action, including its policy, Sigenergy mode, both global power ceilings and optional controller SOC target.
 - The simulated visible-day results for every scenario.
 - The additional lookahead results.
 

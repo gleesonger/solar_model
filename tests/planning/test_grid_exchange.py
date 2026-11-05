@@ -24,7 +24,7 @@ def run_plan(monkeypatch):
     device = replace(device, system_battery_capacity_kwh=18.08, battery_state_of_health_percent=100.,
         inverter_max_active_power_kw=5.5, inverter_max_absorption_power_kw=5.5,
         inverter_battery_charge_power_kw=8.8, inverter_battery_discharge_power_kw=9.6,
-        charge_efficiency=.95, discharge_efficiency=.95)
+        battery_charge_efficiency=.95, battery_discharge_efficiency=.95, grid_max_import_power_kw=float("inf"))
     original_score = optimisation.score_simulation
     original_solve = cp.Problem.solve
     monkeypatch.setattr(cp.Problem, "solve", lambda problem, *args, **kwargs:
@@ -36,8 +36,7 @@ def run_plan(monkeypatch):
             constraints.extend([
                 variables["next_force_battery_charge_rate"] == charge,
                 variables["next_force_battery_discharge_rate"] == discharge,
-                variables["next_charge_cut_off_soc_percent"] == 100.,
-                variables["next_discharge_cut_off_soc_percent"] == 0.,
+                variables["next_mode"] == ([0, 1, 0, 0, 0] if charge else [0, 0, 0, 1, 0] if discharge else [1, 0, 0, 0, 0]),
             ])
             if later_export is not None:
                 constraints.append(variables["grid_export"][1, 0] == later_export)

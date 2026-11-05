@@ -62,29 +62,26 @@ def _simulate_energy_plan(device_info: DeviceInfo, device_state: DeviceState, sc
     shape = (num_time_periods, scenario_count)
     solar_used = cp.Variable(shape, nonneg=True, name="solar_used")
     battery_charge_input = cp.Variable(shape, nonneg=True, name="battery_charge_input")
+    grid_charge_ac = cp.Variable(shape, nonneg=True, name="grid_charge_ac")
     battery_discharge_output = cp.Variable(shape, nonneg=True, name="battery_discharge_output")
     grid_import = cp.Variable(shape, nonneg=True, name="grid_import")
     grid_export = cp.Variable(shape, nonneg=True, name="grid_export")
     battery_charging = cp.Variable(shape, boolean=True, name="battery_charging")
     grid_importing = cp.Variable(shape, boolean=True, name="grid_importing")
 
-    # Exactly one shared mode. Each entry acts as the mask for that response.
-    mode = cp.Variable(3, boolean=True, name="next_mode")
-    self_consumption, charge_mode, discharge_mode = [mode[i] for i in range(3)]
+    # Three policies; charging and discharging each have a zero-rate variation.
+    mode = cp.Variable(5, boolean=True, name="next_mode")
+    self_consumption, charge_active, charge_hold, discharge_active, discharge_hold = [mode[i] for i in range(5)]
+    charge_mode = charge_active + charge_hold
 
     next_action_force_battery_charge_rate = cp.Variable(nonneg=True, name="next_force_battery_charge_rate")
     next_action_force_battery_discharge_rate = cp.Variable(nonneg=True, name="next_force_battery_discharge_rate")
-    next_action_charge_cut_off_soc_percent = cp.Variable(nonneg=True, name="next_charge_cut_off_soc_percent")
-    next_action_discharge_cut_off_soc_percent = cp.Variable(nonneg=True, name="next_discharge_cut_off_soc_percent")
-
     constraints = [
         cp.sum(mode) == 1,
-        next_action_force_battery_charge_rate >= config.energy_plan.min_forced_charge_power_kw * charge_mode,
-        next_action_force_battery_discharge_rate >= config.energy_plan.min_forced_discharge_power_kw * discharge_mode,
-        next_action_force_battery_charge_rate <= min(config.energy_plan.max_forced_charge_power_kw, limits.max_charge_kwh / theta_hrs) * charge_mode,
-        next_action_force_battery_discharge_rate <= min(config.energy_plan.max_forced_discharge_power_kw, limits.max_discharge_kwh / theta_hrs) * discharge_mode,
-        next_action_discharge_cut_off_soc_percent <= 100,
-        next_action_charge_cut_off_soc_percent <= 100,
+        next_action_force_battery_charge_rate >= config.energy_plan.min_forced_charge_power_kw * charge_active,
+        next_action_force_battery_discharge_rate >= config.energy_plan.min_forced_discharge_power_kw * discharge_active,
+        next_action_force_battery_charge_rate <= min(config.energy_plan.max_forced_charge_power_kw, limits.max_charge_kwh / theta_hrs) * charge_active,
+        next_action_force_battery_discharge_rate <= min(config.energy_plan.max_forced_discharge_power_kw, limits.max_discharge_kwh / theta_hrs) * discharge_active,
     ]
     battery_level_eop = cp.Variable((num_time_periods, scenario_count), nonneg=True, name="battery_level_eop")
 
@@ -138,22 +135,34 @@ def _simulate_energy_plan(device_info: DeviceInfo, device_state: DeviceState, sc
 
     solar = inputs["solar_kwh"]
     demand = inputs["load_kwh"]
+    eta_ac_dc = device_info.inverter_ac_to_dc_efficiency
+    eta_dc_ac = device_info.inverter_dc_to_ac_efficiency
+    eta_charge = device_info.battery_charge_efficiency
+    eta_discharge = device_info.battery_discharge_efficiency
 
     # Work one period at a time: CVXPY accepts ordinary one-dimensional lists.
     for t, (duration, limit) in enumerate(zip(durations, period_limits)):
         output = device_info.inverter_max_active_power_kw * duration
         absorption = min(output, device_info.inverter_max_absorption_power_kw * duration)
-        import_limit = [load + min(limit.max_charge_kwh, absorption) for load in demand[t]]
+        site_import_limit = device_info.grid_max_import_power_kw * duration
+        import_limit = [min(load + absorption, site_import_limit) for load in demand[t]]
 
-        inverter_output = solar_used[t, :] - battery_charge_input[t, :] + battery_discharge_output[t, :]
+        solar_charge_dc = battery_charge_input[t, :] - eta_ac_dc * grid_charge_ac[t, :]
+        gross_output_ac = (solar_used[t, :] - solar_charge_dc + battery_discharge_output[t, :]) * eta_dc_ac
+        inverter_output = gross_output_ac - grid_charge_ac[t, :]
         battery_start = initial_battery if t == 0 else battery_level_eop[t - 1, :]
 
         constraints += [
             # PV availability and battery/inverter power limits.
             solar_used[t, :] <= solar[t],
+            solar_charge_dc >= 0,
+            solar_charge_dc <= solar_used[t, :],
+            grid_charge_ac[t, :] <= absorption,
+            grid_charge_ac[t, :] <= absorption * grid_importing[t, :],
+            (solar_used[t, :] - solar_charge_dc) * eta_dc_ac <= demand[t] + output * (1 - grid_importing[t, :]),
             battery_charge_input[t, :] <= limit.max_charge_kwh * battery_charging[t, :],
             battery_discharge_output[t, :] <= limit.max_discharge_kwh * (1 - battery_charging[t, :]),
-            inverter_output <= output,
+            gross_output_ac <= output,
             inverter_output >= -absorption,
 
             # Grid balance and mutually exclusive import/export.
@@ -164,7 +173,7 @@ def _simulate_energy_plan(device_info: DeviceInfo, device_state: DeviceState, sc
             # Stored-energy bounds and charging/discharging losses.
             battery_level_eop[t, :] >= inputs["minimum_battery_kwh"][t],
             battery_level_eop[t, :] <= inputs["maximum_battery_kwh"][t],
-            battery_level_eop[t, :] == battery_start + device_info.charge_efficiency * battery_charge_input[t, :] - battery_discharge_output[t, :] / device_info.discharge_efficiency,
+            battery_level_eop[t, :] == battery_start + eta_charge * battery_charge_input[t, :] - battery_discharge_output[t, :] / eta_discharge,
         ]
 
         # Battery export is min(discharge, grid export). Cap either quantity;
@@ -174,73 +183,74 @@ def _simulate_energy_plan(device_info: DeviceInfo, device_state: DeviceState, sc
             if cap < limit.max_discharge_kwh:
                 discharge_limited = cp.Variable(boolean=True)
                 constraints += [
-                    battery_discharge_output[t, s] <= cap + (limit.max_discharge_kwh - cap) * (1 - discharge_limited),
+                    eta_dc_ac * battery_discharge_output[t, s] <= cap + (eta_dc_ac * limit.max_discharge_kwh - cap) * (1 - discharge_limited),
                     grid_export[t, s] <= cap + (output - cap) * discharge_limited,
                 ]
 
-    # First action: one shared command, scenario-specific achieved power.
-    # Encode user energy bounds in the active command's actual SOC stop.
-    minimum_soc = max(0., max(inputs["minimum_battery_kwh"][0])) / limits.capacity_kwh * 100
-    maximum_soc = min(inputs["maximum_battery_kwh"][0]) / limits.capacity_kwh * 100
-    constraints += [
-        next_action_discharge_cut_off_soc_percent >= minimum_soc * discharge_mode,
-        next_action_charge_cut_off_soc_percent <= maximum_soc + (100 - maximum_soc) * (1 - charge_mode),
-    ]
+    # First action is an executable mode and power profile. SOC targets are
+    # controller triggers derived after solving, not inverter cut-off settings.
+    requested_charge = next_action_force_battery_charge_rate * theta_hrs
+    requested_discharge = next_action_force_battery_discharge_rate * theta_hrs
+    constraints += [battery_charging[0, :] >= charge_mode + discharge_hold, battery_charging[0, :] <= 1 - discharge_active]
 
-    # Only equipment saturation and the commanded SOC stop reduce forced energy.
-    big_m = (limits.capacity_kwh + initial_battery) / min(device_info.charge_efficiency, device_info.discharge_efficiency) + max(limits.max_charge_kwh, limits.max_discharge_kwh)
-    requested_charge = _energy_until_soc(
-        next_action_force_battery_charge_rate * theta_hrs,
-        (limits.capacity_kwh * next_action_charge_cut_off_soc_percent / 100 - initial_battery) / device_info.charge_efficiency,
-        big_m,
-        constraints,
-    )
-    requested_discharge = _energy_until_soc(
-        next_action_force_battery_discharge_rate * theta_hrs,
-        (initial_battery - limits.capacity_kwh * next_action_discharge_cut_off_soc_percent / 100) * device_info.discharge_efficiency,
-        big_m,
-        constraints,
-    )
-    constraints += [battery_charging[0, :] >= charge_mode, battery_charging[0, :] <= 1 - discharge_mode]
-
-    output = device_info.inverter_max_active_power_kw * theta_hrs
-    absorption = min(output, device_info.inverter_max_absorption_power_kw * theta_hrs)
+    output_ac = device_info.inverter_max_active_power_kw * theta_hrs
+    output_dc = output_ac / eta_dc_ac
+    absorption = min(output_ac, device_info.inverter_max_absorption_power_kw * theta_hrs)
     charge_limit, discharge_limit = limits.max_charge_kwh, limits.max_discharge_kwh
-    charge_room = max(0., limits.capacity_kwh - initial_battery) / device_info.charge_efficiency
-    discharge_room = initial_battery * device_info.discharge_efficiency
+    charge_room = max(0., limits.capacity_kwh - initial_battery) / eta_charge
+    discharge_room = initial_battery * eta_discharge
     for s in range(scenario_count):
         pv, load = solar[0][s], demand[0][s]
-        charge, discharge, used = battery_charge_input[0, s], battery_discharge_output[0, s], solar_used[0, s]
+        charge, discharge, used, grid_charge = battery_charge_input[0, s], battery_discharge_output[0, s], solar_used[0, s], grid_charge_ac[0, s]
 
         # Self-consumption: PV serves load, surplus charges, battery covers demand.
-        pv_load = min(pv, load, output)
+        pv_load = min(pv, load / eta_dc_ac, output_dc)
         passive_charge = min(pv - pv_load, charge_limit, charge_room)
-        passive_discharge = min(load - pv_load, discharge_limit, output - pv_load, discharge_room)
-        passive_solar = min(pv, passive_charge + output - passive_discharge)
+        passive_discharge = min(load / eta_dc_ac - pv_load, discharge_limit, output_dc - pv_load, discharge_room)
+        passive_solar = min(pv, passive_charge + output_dc - passive_discharge)
         _when(self_consumption, charge, passive_charge, charge_limit, constraints)
         _when(self_consumption, discharge, passive_discharge, discharge_limit, constraints)
         _when(self_consumption, used, passive_solar, pv, constraints)
+        _when(self_consumption, grid_charge, 0., absorption, constraints)
 
-        # Charge, PV first: charging can use both PV and available AC absorption.
-        charge_ceiling = min(charge_limit, charge_room, pv + absorption)
+        # Charge: PV serves the household first; remaining PV and grid can charge.
+        pv_surplus = pv - pv_load
+        grid_headroom = max(0., device_info.grid_max_import_power_kw * theta_hrs - max(0., load - pv_load * eta_dc_ac))
+        charge_ceiling = min(charge_limit, charge_room, pv_surplus + absorption * eta_ac_dc, pv_surplus + grid_headroom * eta_ac_dc)
         forced_charge = _minimum(requested_charge, charge_ceiling, charge_limit, constraints)
-        charge_solar = _minimum(forced_charge + output, pv, charge_limit + output, constraints, lower=output)
-        _when(charge_mode, charge, forced_charge, charge_limit, constraints)
-        _when(charge_mode, discharge, 0., discharge_limit, constraints)
-        _when(charge_mode, used, charge_solar, pv, constraints)
+        solar_charge = _minimum(forced_charge, pv_surplus, charge_limit, constraints)
+        forced_grid_charge = (forced_charge - solar_charge) / eta_ac_dc
+        charge_solar = _minimum(solar_charge + output_dc, pv, charge_limit + output_dc, constraints)
+        _when(charge_active, charge, forced_charge, charge_limit, constraints)
+        _when(charge_active, discharge, 0., discharge_limit, constraints)
+        _when(charge_active, used, charge_solar, pv, constraints)
+        _when(charge_active, grid_charge, forced_grid_charge, absorption, constraints)
+
+        # Zero charging rate holds both battery directions while PV serves load.
+        _when(charge_hold, charge, 0., charge_limit, constraints)
+        _when(charge_hold, discharge, 0., discharge_limit, constraints)
+        _when(charge_hold, used, min(pv, output_dc), pv, constraints)
+        _when(charge_hold, grid_charge, 0., absorption, constraints)
 
         # Discharge, PV first: PV gets AC capacity before battery output.
-        discharge_solar = min(pv, output)
-        discharge_ceiling = min(discharge_limit, output - discharge_solar)
+        discharge_solar = min(pv, output_dc)
+        discharge_ceiling = min(discharge_limit, output_dc - discharge_solar, discharge_room)
         forced_discharge = _minimum(requested_discharge, discharge_ceiling, discharge_limit, constraints)
-        _when(discharge_mode, charge, 0., charge_limit, constraints)
-        _when(discharge_mode, discharge, forced_discharge, discharge_limit, constraints)
-        _when(discharge_mode, used, discharge_solar, pv, constraints)
+        _when(discharge_active, charge, 0., charge_limit, constraints)
+        _when(discharge_active, discharge, forced_discharge, discharge_limit, constraints)
+        _when(discharge_active, used, discharge_solar, pv, constraints)
+        _when(discharge_active, grid_charge, 0., absorption, constraints)
 
-        # An early SOC stop cannot make a faster, export-breaching rate safe.
-        export_allowance = max(0., load - discharge_solar) + inputs["limit_battery_export_rate_to_grid_kw"][0][s] * theta_hrs
-        if discharge_ceiling > export_allowance:
-            constraints.append(next_action_force_battery_discharge_rate * theta_hrs <= export_allowance)
+        # At zero discharge, PV serves load, charges battery, then exports.
+        _when(discharge_hold, charge, passive_charge, charge_limit, constraints)
+        _when(discharge_hold, discharge, 0., discharge_limit, constraints)
+        _when(discharge_hold, used, min(pv, passive_charge + output_dc), pv, constraints)
+        _when(discharge_hold, grid_charge, 0., absorption, constraints)
+
+        # The shared discharge ceiling must respect the export allowance.
+        export_allowance = max(0., load - discharge_solar * eta_dc_ac) + inputs["limit_battery_export_rate_to_grid_kw"][0][s] * theta_hrs
+        if discharge_ceiling * eta_dc_ac > export_allowance:
+            constraints.append(next_action_force_battery_discharge_rate * theta_hrs * eta_dc_ac <= export_allowance)
 
     net_cost_flows = [
         cp.multiply([row[s] for row in inputs["import_rate"]], grid_import[:, s]) - cp.multiply([row[s] for row in inputs["export_rate"]], grid_export[:, s])
@@ -281,17 +291,24 @@ def _simulate_energy_plan(device_info: DeviceInfo, device_state: DeviceState, sc
 
     # #### Model to Results
 
-    selected_mode = list(OperatingMode)[max(range(3), key=lambda i: mode.value[i])]
+    selected = max(range(5), key=lambda i: mode.value[i])
+    selected_mode = (OperatingMode.SELF_CONSUMPTION, OperatingMode.CHARGE_PV_FIRST, OperatingMode.CHARGE_PV_FIRST, OperatingMode.DISCHARGE_PV_FIRST, OperatingMode.DISCHARGE_PV_FIRST)[selected]
+    charge_rate = max(0., float(next_action_force_battery_charge_rate.value)) if selected == 1 else 0.
+    discharge_rate = max(0., float(next_action_force_battery_discharge_rate.value)) if selected == 3 else 0.
+    target = None
+    if selected == 1:
+        target = min(100., max(0., max(float(battery_level_eop.value[0, s]) for s in range(scenario_count)) / limits.capacity_kwh * 100))
+    elif selected == 3:
+        target = min(100., max(0., min(float(battery_level_eop.value[0, s]) for s in range(scenario_count)) / limits.capacity_kwh * 100))
     next_action = NextAction(
-        mode = selected_mode,
-        force_battery_charge_rate=float(next_action_force_battery_charge_rate.value),
-        force_battery_discharge_rate=float(next_action_force_battery_discharge_rate.value),
-        charge_cut_off_soc_percent=float(next_action_charge_cut_off_soc_percent.value),
-        discharge_cut_off_soc_percent=float(next_action_discharge_cut_off_soc_percent.value),
+        mode=selected_mode,
+        charge_power_limit_kw=charge_rate if selected_mode == OperatingMode.CHARGE_PV_FIRST else device_info.inverter_battery_charge_power_kw,
+        discharge_power_limit_kw=discharge_rate if selected_mode == OperatingMode.DISCHARGE_PV_FIRST else (0. if selected_mode == OperatingMode.CHARGE_PV_FIRST else device_info.inverter_battery_discharge_power_kw),
+        target_soc_percent=target,
     )
 
     protection_value = _protection_value(config, projection_starts_at, sum(durations))
-    terminal_rate = _terminal_rate(config, periods[-1][1]) * device_info.discharge_efficiency
+    terminal_rate = _terminal_rate(config, periods[-1][1]) * eta_discharge * eta_dc_ac
     score_segments = _protection_segments(limits.capacity_kwh, config.energy_plan.preferred_reserve_kwh)
     for s, (scenario_name, df) in enumerate(dict_df_results.items()):
 
@@ -302,15 +319,16 @@ def _simulate_energy_plan(device_info: DeviceInfo, device_state: DeviceState, sc
         used = [min(pv, max(0., value)) for pv, value in zip(solar_values, solar_used.value[:, s].tolist())]
         charge = [max(0., value) for value in battery_charge_input.value[:, s].tolist()]
         discharge = [max(0., value) for value in battery_discharge_output.value[:, s].tolist()]
-        flows = allocate_energy_routes(solar_values, load_values, used, charge, discharge, device_info)
+        grid_charging = [max(0., value) for value in grid_charge_ac.value[:, s].tolist()]
+        flows = allocate_energy_routes(solar_values, load_values, used, charge, grid_charging, discharge, device_info, durations)
         for name, value in flows.items():
             df[f"{name}_kwh"] = value
 
-        df["solar_to_inverter_kwh"] = df["solar_to_load_kwh"] + df["solar_to_battery_kwh"] + df["solar_to_battery_loss_kwh"] + df["solar_to_grid_kwh"]
-        df["battery_to_inverter_kwh"] = df["battery_to_load_kwh"] + df["battery_to_grid_kwh"]
+        df["solar_to_inverter_kwh"] = used
+        df["battery_to_inverter_kwh"] = discharge
         df["inverter_dc_to_ac_kwh"] = df["solar_to_load_kwh"] + df["solar_to_grid_kwh"] + df["battery_to_load_kwh"] + df["battery_to_grid_kwh"]
-        df["inverter_ac_to_dc_kwh"] = df["grid_to_battery_kwh"] + df["grid_to_battery_loss_kwh"]
-        df["grid_import_kwh"] = df["grid_to_load_kwh"] + df["grid_to_battery_kwh"] + df["grid_to_battery_loss_kwh"]
+        df["inverter_ac_to_dc_kwh"] = [value * eta_ac_dc for value in grid_charging]
+        df["grid_import_kwh"] = df["grid_to_load_kwh"] + grid_charging
         df["grid_export_kwh"] = df["solar_to_grid_kwh"] + df["battery_to_grid_kwh"]
         df["battery_end_kwh"] = battery_end_values
         df["battery_charging"] = battery_charging.value[:, s]
@@ -326,9 +344,9 @@ def _simulate_energy_plan(device_info: DeviceInfo, device_state: DeviceState, sc
 
         # Independently check reconstructed routes against every solved boundary.
         errors = {
-            "solar": df["solar_kwh"] - sum(df[f"{name}_kwh"] for name in ("solar_to_load", "solar_to_battery", "solar_to_battery_loss", "solar_to_grid", "solar_clipped")),
+            "solar": df["solar_kwh"] - (df["solar_to_load_kwh"] + df["solar_to_grid_kwh"]) / eta_dc_ac - df["solar_to_battery_kwh"] / eta_charge - df["solar_clipped_kwh"],
             "load": df["load_kwh"] - df["solar_to_load_kwh"] - df["battery_to_load_kwh"] - df["grid_to_load_kwh"],
-            "battery": df["battery_end_kwh"] - df["battery_start_kwh"] - df["solar_to_battery_kwh"] - df["grid_to_battery_kwh"] + df["battery_to_load_kwh"] + df["battery_to_grid_kwh"] + df["battery_to_ac_loss_kwh"],
+            "battery": df["battery_end_kwh"] - df["battery_start_kwh"] - df["solar_to_battery_kwh"] - df["grid_to_battery_kwh"] + (df["battery_to_load_kwh"] + df["battery_to_grid_kwh"]) / (eta_dc_ac * eta_discharge),
             "grid import": df["grid_import_kwh"] - grid_import.value[:, s],
             "grid export": df["grid_export_kwh"] - grid_export.value[:, s],
         }
@@ -431,7 +449,7 @@ def score_simulation(
     settings = config.energy_plan
     projection_hours = sum(durations) if durations is not None else settings.num_projection_hours
     protection_value = _protection_value(config, projection_starts_at, projection_hours)
-    terminal_rate = _terminal_rate(config, projection_starts_at + timedelta(hours=projection_hours)) * device.discharge_efficiency
+    terminal_rate = _terminal_rate(config, projection_starts_at + timedelta(hours=projection_hours)) * device.battery_discharge_efficiency * device.inverter_dc_to_ac_efficiency
     scores = []
     for scenario, costs, levels in zip(scenarios, net_cost_flows, battery_levels):
         cost, protection = score_scenario(costs, levels, device, config, constraints, durations)
@@ -537,21 +555,3 @@ def _protection_segments(capacity: float, reserve: float) -> list[tuple[float, f
         else:
             segments.append((slope, intercept))
     return segments
-
-
-def _energy_until_soc(requested: cp.Expression, headroom: cp.Expression, big_m: float | cp.Expression, constraints: list[cp.Constraint]) -> cp.Variable:
-    """Exact min(requested, max(0, headroom)): stop at or beyond the SOC cut-off."""
-
-    energy = cp.Variable(nonneg=True)
-    stopped, at_soc, full_rate = cp.Variable(3, boolean=True)
-    constraints += [
-        stopped + at_soc + full_rate == 1,
-        energy <= requested,
-        energy <= big_m * (1 - stopped),
-        headroom <= big_m * (1 - stopped),
-        energy >= headroom - big_m * (1 - at_soc),
-        energy <= headroom + big_m * (1 - at_soc),
-        energy >= requested - big_m * (1 - full_rate),
-        headroom >= requested - big_m * (1 - full_rate),
-    ]
-    return energy

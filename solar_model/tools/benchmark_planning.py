@@ -101,7 +101,8 @@ def _worker(connection, case: str, config_path: str, grid: str = "historical", m
             device, system_battery_capacity_kwh=18., battery_state_of_health_percent=100.,
             inverter_max_active_power_kw=5., inverter_max_absorption_power_kw=5.,
             inverter_battery_charge_power_kw=5., inverter_battery_discharge_power_kw=5.,
-            charge_efficiency=.95, discharge_efficiency=.95, grid_max_import_power_kw=float("inf"),
+            inverter_ac_to_dc_efficiency=1., inverter_dc_to_ac_efficiency=1.,
+            battery_charge_efficiency=.95, battery_discharge_efficiency=.95, grid_max_import_power_kw=float("inf"),
             battery_discharge_cut_off_soc_percent=10., battery_charge_cut_off_soc_percent=100.,
         )
 
@@ -199,12 +200,12 @@ def _worker(connection, case: str, config_path: str, grid: str = "historical", m
             np.testing.assert_allclose(
                 f.battery_end_kwh,
                 f.battery_start_kwh + f.solar_to_battery_kwh + f.grid_to_battery_kwh
-                - f.battery_to_load_kwh - f.battery_to_grid_kwh - f.battery_to_ac_loss_kwh,
+                - (f.battery_to_load_kwh + f.battery_to_grid_kwh) / (device.inverter_dc_to_ac_efficiency * device.battery_discharge_efficiency),
                 atol=1e-5,
             )
             np.testing.assert_allclose(
-                f.solar_kwh, f.solar_to_load_kwh + f.solar_to_battery_kwh
-                + f.solar_to_battery_loss_kwh + f.solar_to_grid_kwh + f.solar_clipped_kwh,
+                f.solar_kwh, (f.solar_to_load_kwh + f.solar_to_grid_kwh) / device.inverter_dc_to_ac_efficiency
+                + f.solar_to_battery_kwh / device.battery_charge_efficiency + f.solar_clipped_kwh,
                 atol=1e-5,
             )
             np.testing.assert_allclose(
@@ -242,8 +243,8 @@ def _worker(connection, case: str, config_path: str, grid: str = "historical", m
             for frame in (visible, hidden):
                 f = frame.drop(columns=["starts_at", "ends_at", "tariff_name"]).astype(float)
                 hours = np.array([(b-a).total_seconds()/3600 for a,b in zip(frame.starts_at,frame.ends_at)])
-                charge = (f.solar_to_battery_kwh + f.grid_to_battery_kwh) / device.charge_efficiency
-                discharge = f.battery_to_load_kwh + f.battery_to_grid_kwh
+                charge = (f.solar_to_battery_kwh + f.grid_to_battery_kwh) / device.battery_charge_efficiency
+                discharge = (f.battery_to_load_kwh + f.battery_to_grid_kwh) / device.inverter_dc_to_ac_efficiency
                 ac = f.grid_export_kwh - f.grid_import_kwh + f.load_kwh
                 assert (charge <= device.inverter_battery_charge_power_kw * hours + 1e-5).all()
                 assert (discharge <= min(device.inverter_battery_discharge_power_kw,device.inverter_max_active_power_kw) * hours + 1e-5).all()

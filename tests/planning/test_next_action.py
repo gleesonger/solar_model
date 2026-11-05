@@ -15,7 +15,7 @@ from solar_model.planning.types import DeviceInfo, DeviceState, ForecastData, Fo
 def make_action(charge, discharge, charge_soc, discharge_soc):
     mode = (OperatingMode.CHARGE_PV_FIRST if charge > 0 else
             OperatingMode.DISCHARGE_PV_FIRST if discharge > 0 else OperatingMode.SELF_CONSUMPTION)
-    return NextAction(mode, charge, discharge, charge_soc, discharge_soc)
+    return NextAction(mode, charge, discharge)
 
 
 @pytest.fixture
@@ -26,7 +26,7 @@ def inputs():
     device = replace(device, system_battery_capacity_kwh=10., battery_state_of_health_percent=100.,
         inverter_max_active_power_kw=4., inverter_max_absorption_power_kw=4.,
         inverter_battery_charge_power_kw=4., inverter_battery_discharge_power_kw=4.,
-        charge_efficiency=1., discharge_efficiency=1., grid_max_import_power_kw=float("inf"))
+        battery_charge_efficiency=1., battery_discharge_efficiency=1., grid_max_import_power_kw=float("inf"))
     rule = TariffRule(("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"), "00:00", "24:00", 0., "flat")
     config = load_config()
     config = replace(config, tariffs=TariffsConfig((TariffPeriod("2000-01-01",
@@ -48,8 +48,14 @@ def simulate(inputs, action=None, extra_constraints=None, *, return_result=False
         variables = {variable.name(): variable for constraint in constraints
                      for variable in constraint.variables()}
         if action is not None:
-            constraints.extend(variables["next_" + field.name] == getattr(action, field.name)
-                               for field in fields(action) if field.name != "mode" and "next_" + field.name in variables)
+            index = (0 if action.mode == OperatingMode.SELF_CONSUMPTION else
+                     (1 if action.charge_power_limit_kw > 0 else 2) if action.mode == OperatingMode.CHARGE_PV_FIRST else
+                     (3 if action.discharge_power_limit_kw > 0 else 4))
+            constraints.extend([
+                variables["next_mode"][index] == 1,
+                variables["next_force_battery_charge_rate"] == action.force_battery_charge_rate,
+                variables["next_force_battery_discharge_rate"] == action.force_battery_discharge_rate,
+            ])
         if extra_constraints is not None:
             constraints.extend(extra_constraints(variables))
         return original_score(costs, levels, scenarios, device, config, constraints,
@@ -66,7 +72,7 @@ def solve(inputs, action=None):
 
 @pytest.mark.parametrize("mode_index,field,minimum", [
     (1, "force_battery_charge_rate", .7),
-    (2, "force_battery_discharge_rate", 1.2),
+    (3, "force_battery_discharge_rate", 1.2),
 ])
 def test_forced_modes_respect_configured_minimum_power(inputs, mode_index, field, minimum):
     device, state, scenarios, config, start = inputs
@@ -92,25 +98,23 @@ def test_rates_define_first_step_behaviour(inputs, charge_rate, discharge_rate, 
 
 
 
-@pytest.mark.parametrize("action,expected_energy", [
-    (make_action(4., 0., 25., 90.), 2.5),
-    (make_action(0., 4., 10., 15.), 1.5),
-    (make_action(4., 0., 10., 0.), 2.),
-    (make_action(0., 4., 100., 30.), 2.),
-])
-def test_forcing_stops_at_soc_including_starting_beyond_cutoff(inputs, action, expected_energy):
-    frame = solve(inputs, action)
-    assert frame.iloc[0].battery_end_kwh == pytest.approx(expected_energy)
+@pytest.mark.parametrize("charge,discharge,expected_energy", [(4., 0., 4.), (0., 4., 0.)])
+def test_controller_target_does_not_clip_first_command(inputs, charge, discharge, expected_energy):
+    result = simulate(inputs, make_action(charge, discharge, 10., 90.), return_result=True)
+    assert result.results["base"].iloc[0].battery_end_kwh == pytest.approx(expected_energy)
+    assert result.next_action.target_soc_percent == pytest.approx(expected_energy * 10)
 
 
-@pytest.mark.parametrize("action", [make_action(4., 0., 10., 0.), make_action(0., 4., 100., 30.)])
-def test_selected_mode_is_preserved_when_soc_stop_prevents_battery_transfer(inputs, action):
-    result = simulate(inputs, action, return_result=True)
+@pytest.mark.parametrize("mode,expected_charge", [(OperatingMode.CHARGE_PV_FIRST, 0.), (OperatingMode.DISCHARGE_PV_FIRST, .5)])
+def test_zero_rate_variations_have_distinct_solar_response(inputs, mode, expected_charge):
+    device, state, scenarios, config, start = inputs
+    base = scenarios[0].forecast_data
+    sunny = ForecastData([replace(base.solar[0], kwh=2.), *base.solar[1:]], base.load)
+    result = simulate((device, state, [ScenarioData("base", sunny, 1.)], config, start), NextAction(mode, 0., 0.), return_result=True)
     first = result.results["base"].iloc[0]
-    assert result.next_action.mode == action.mode
-    assert first.battery_start_kwh == pytest.approx(first.battery_end_kwh)
+    assert result.next_action.mode == mode
+    assert first.battery_end_kwh == pytest.approx(2. + expected_charge)
     assert first.battery_to_inverter_kwh == pytest.approx(0.)
-    assert first.solar_to_battery_kwh + first.grid_to_battery_kwh == pytest.approx(0.)
 
 
 def test_zero_rates_ignore_both_soc_cutoffs(inputs):
@@ -130,7 +134,10 @@ def test_zero_rates_allow_passive_solar_charge_above_soc_cutoff(inputs):
 @pytest.mark.parametrize("charge_rate,discharge_rate", [(1., 1.), (5., 0.)])
 def test_opposite_forcing_or_excessive_rate_is_infeasible(inputs, charge_rate, discharge_rate):
     with pytest.raises(ValueError, match="feasible energy plan"):
-        solve(inputs, make_action(charge_rate, discharge_rate, 100., 0.))
+        simulate(inputs, extra_constraints=lambda variables: [
+            variables["next_force_battery_charge_rate"] == charge_rate,
+            variables["next_force_battery_discharge_rate"] == discharge_rate,
+        ])
 
 
 @pytest.mark.parametrize("time_step", [0, 1])
@@ -151,7 +158,7 @@ def test_shared_forcing_is_only_used_at_first_step(inputs, time_step):
 @pytest.mark.parametrize("charge_rate,discharge_rate,expected_energy", [(2., 0., 2.8), (0., 1., 2. - .5 / .9)])
 def test_forced_rates_include_efficiency_losses(inputs, charge_rate, discharge_rate, expected_energy):
     device, state, scenarios, config, start = inputs
-    device = replace(device, charge_efficiency=.8, discharge_efficiency=.9)
+    device = replace(device, battery_charge_efficiency=.8, battery_discharge_efficiency=.9)
     frame = solve((device, state, scenarios, config, start), make_action(charge_rate, discharge_rate, 100., 0.))
     assert frame.iloc[0].battery_end_kwh == pytest.approx(expected_energy)
 
@@ -168,12 +175,15 @@ def test_shared_charge_target_allows_scenario_specific_grid_import(inputs):
     assert frames["sunny"].iloc[0].grid_import_kwh == pytest.approx(1.)
 
 
-def test_soc_stopping_accounts_for_charge_efficiency(inputs):
+def test_forced_charge_allocates_solar_to_house_before_battery(inputs):
     device, state, scenarios, config, start = inputs
-    device = replace(device, charge_efficiency=.8)
-    frame = solve((device, state, scenarios, config, start), make_action(4., 0., 25., 0.))
-    assert frame.iloc[0].battery_end_kwh == pytest.approx(2.5)
-    assert frame.iloc[0].grid_to_battery_kwh + frame.iloc[0].grid_to_battery_loss_kwh == pytest.approx(.5 / .8)
+    base = scenarios[0].forecast_data
+    sunny = ForecastData([replace(base.solar[0], kwh=1.) , *base.solar[1:]], base.load)
+    frame = solve((device, state, [ScenarioData("base", sunny, 1.)], config, start), make_action(2., 0., 100., 0.))
+    first = frame.iloc[0]
+    assert first.solar_to_load_kwh == pytest.approx(.5)
+    assert first.solar_to_battery_kwh == pytest.approx(0.)
+    assert first.grid_to_battery_kwh == pytest.approx(1.)
 
 
 @pytest.mark.parametrize("solar_kw", [8.8, 4.])
@@ -181,7 +191,7 @@ def test_solar_and_mixed_charging_can_exceed_ac_absorption(inputs, solar_kw):
     device, state, scenarios, config, start = inputs
     device = replace(device, inverter_battery_charge_power_kw=8.8,
                      inverter_max_active_power_kw=5.5, inverter_max_absorption_power_kw=5.5,
-                     charge_efficiency=.95)
+                     battery_charge_efficiency=.95)
     forecast = scenarios[0].forecast_data
     forecast = ForecastData(
         [replace(forecast.solar[0], kwh=solar_kw), *forecast.solar[1:]],
@@ -201,7 +211,7 @@ def test_grid_only_charging_still_observes_ac_absorption(inputs, charge_rate):
     device, state, scenarios, config, start = inputs
     device = replace(device, inverter_battery_charge_power_kw=8.8,
                      inverter_max_active_power_kw=5.5, inverter_max_absorption_power_kw=5.5,
-                     charge_efficiency=.95)
+                     battery_charge_efficiency=.95)
     inputs = (device, state, scenarios, config, start)
     action = make_action(charge_rate, 0., 100., 0.)
     first = solve(inputs, action).iloc[0]
@@ -264,7 +274,7 @@ def test_self_consumption_cannot_export_pv_by_discharging_battery_to_load(inputs
 @pytest.mark.parametrize("solar,expected_energy", [(2., 2.4), (0., 2. - .5 / .9)])
 def test_self_consumption_accounts_for_conversion_losses(inputs, solar, expected_energy):
     device, state, scenarios, config, start = inputs
-    device = replace(device, charge_efficiency=.8, discharge_efficiency=.9)
+    device = replace(device, battery_charge_efficiency=.8, battery_discharge_efficiency=.9)
     base = scenarios[0].forecast_data
     forecast = ForecastData([replace(base.solar[0], kwh=solar), *base.solar[1:]], base.load)
     first = solve((device, state, [ScenarioData("base", forecast, 1.)], config, start),
@@ -287,7 +297,7 @@ def test_shared_self_consumption_can_charge_and_discharge_in_different_scenarios
 @pytest.mark.parametrize("solar", [0., 2.])
 def test_self_consumption_is_rejected_when_user_bounds_require_extra_control(inputs, solar):
     device, state, scenarios, config, start = inputs
-    device = replace(device, charge_efficiency=.8, discharge_efficiency=.9)
+    device = replace(device, battery_charge_efficiency=.8, battery_discharge_efficiency=.9)
     base = scenarios[0].forecast_data
     forecast = ForecastData([replace(base.solar[0], kwh=solar), *base.solar[1:]], base.load)
     settings = config.energy_plan
@@ -338,7 +348,7 @@ def test_forced_discharge_preserves_pv_before_battery_at_inverter_limit(inputs, 
     device, state, scenarios, config, start = inputs
     state = DeviceState(5.)
     device = replace(device, inverter_max_active_power_kw=5.5,
-                     inverter_battery_discharge_power_kw=9.6, discharge_efficiency=.95)
+                     inverter_battery_discharge_power_kw=9.6, battery_discharge_efficiency=.95)
     base = scenarios[0].forecast_data
     forecast = ForecastData([replace(base.solar[0], kwh=solar_kw), *base.solar[1:]], base.load)
     first = solve((device, state, [ScenarioData("base", forecast, 1.)], config, start),
@@ -354,7 +364,7 @@ def test_one_charge_command_saturates_differently_across_nine_scenarios(inputs):
 
     device, state, scenarios, config, start = inputs
     device = replace(device, inverter_max_active_power_kw=5.5, inverter_max_absorption_power_kw=5.5,
-                     inverter_battery_charge_power_kw=8.8, charge_efficiency=.95)
+                     inverter_battery_charge_power_kw=8.8, battery_charge_efficiency=.95)
     base = scenarios[0].forecast_data
     forecast = ForecastData([replace(base.solar[0], kwh=4.), *base.solar[1:]], base.load)
     scenarios = create_scenarios(forecast, config.energy_plan.scenarios)
@@ -362,14 +372,14 @@ def test_one_charge_command_saturates_differently_across_nine_scenarios(inputs):
     result = simulate((device, state, scenarios, config, start), action, return_result=True)
     assert result.next_action.mode == action.mode
     assert result.next_action.force_battery_charge_rate == pytest.approx(8.8)
-    assert result.next_action.charge_cut_off_soc_percent == pytest.approx(100.)
+    assert result.next_action.target_soc_percent is not None
     assert len(result.results) == 9
     starts = [frame.battery_start_kwh.iloc[0] for frame in result.results.values()]
     assert starts == pytest.approx([2.] * 9)
     for scenario in scenarios:
         first = result.results[scenario.name].iloc[0]
         pv = scenario.forecast_data.sum(first.starts_at, first.ends_at).solar_kwh
-        achieved = min(8.8 * .5, pv + 5.5 * .5)
+        achieved = min(8.8 * .5, max(0., pv - first.load_kwh) + 5.5 * .5)
         assert first.battery_end_kwh == pytest.approx(2. + achieved * .95)
         assert first.inverter_ac_to_dc_kwh <= 5.5 * .5 + 1e-6
     assert result.results["low_low"].battery_end_kwh.iloc[0] < result.results["med"].battery_end_kwh.iloc[0]
@@ -397,10 +407,10 @@ def test_zero_battery_export_cap_allows_solar_export_when_pv_fills_inverter(inpu
     assert first.solar_to_grid_kwh == pytest.approx(1.5)
 
 
-@pytest.mark.parametrize("charge,discharge,ceiling,floor,expected", [
-    (4., 0., 2.5, 0., 2.5), (0., 4., 10., 1.5, 1.5),
+@pytest.mark.parametrize("charge,discharge,ceiling,floor,limited_charge,limited_discharge,expected", [
+    (4., 0., 2.5, 0., 1., 0., 2.5), (0., 4., 10., 1.5, 0., 1., 1.5),
 ])
-def test_user_energy_bounds_must_be_encoded_in_the_command_soc_stop(inputs, charge, discharge, ceiling, floor, expected):
+def test_user_energy_bounds_require_an_executable_rate(inputs, charge, discharge, ceiling, floor, limited_charge, limited_discharge, expected):
     device, state, scenarios, config, start = inputs
     rule = config.energy_plan.minimum_battery_kwh[0]
     config = replace(config, energy_plan=replace(config.energy_plan,
@@ -408,11 +418,10 @@ def test_user_energy_bounds_must_be_encoded_in_the_command_soc_stop(inputs, char
     inputs = (device, state, scenarios, config, start)
     with pytest.raises(ValueError, match="feasible energy plan"):
         solve(inputs, make_action(charge, discharge, 100., 0.))
-    result = simulate(inputs, make_action(charge, discharge, ceiling * 10, floor * 10), return_result=True)
+    result = simulate(inputs, make_action(limited_charge, limited_discharge, 0., 0.), return_result=True)
     first = result.results["base"].iloc[0]
     assert first.battery_end_kwh == pytest.approx(expected)
-    assert result.next_action.charge_cut_off_soc_percent == pytest.approx(ceiling * 10)
-    assert result.next_action.discharge_cut_off_soc_percent == pytest.approx(floor * 10)
+    assert result.next_action.target_soc_percent == pytest.approx(expected * 10)
 
 
 @pytest.mark.parametrize("solar,expected_battery_export,expected_solar_export", [(0., .5, 0.), (2., .5, .5)])
@@ -448,7 +457,7 @@ def test_solver_chooses_one_export_safe_discharge_rate_across_nine_scenarios(inp
     ]
     result = simulate(
         (device, state, scenarios, config, start),
-        extra_constraints=lambda variables: [variables["next_mode"][2] == 1],
+        extra_constraints=lambda variables: [variables["next_mode"][3] == 1],
         return_result=True,
     )
     assert result.next_action.mode == OperatingMode.DISCHARGE_PV_FIRST

@@ -7,7 +7,7 @@ import pytest
 
 from solar_model.config import load_config
 from solar_model.dashboard.tabs.plan import detail_frame, detail_rows, detail_totals, hourly_detail_frame, plan_chart_options, scenario_summary, table_detail_frame
-from solar_model.planning.types import NextAction, OperatingMode, PlanCommand, SimulationResult
+from solar_model.planning.types import NextAction, OperatingMode, SimulationResult
 
 
 def sample_result():
@@ -20,12 +20,12 @@ def sample_result():
         "net_cost": [1., -.25], "grid_import_kwh": [.3, .8], "grid_export_kwh": [0., .1],
         "tariff_name": ["day", "day"],
         "import_rate": [.4, .4], "export_rate": [.2, .2],
-        "solar_to_battery_loss_kwh": [.01, .02], "grid_to_battery_loss_kwh": [.02, .03],
-        "battery_to_ac_loss_kwh": [.03, .04], "solar_clipped_kwh": [0., .1],
+        "battery_charge_loss_kwh": [.01, .02], "inverter_ac_to_dc_loss_kwh": [.02, .03],
+        "battery_discharge_loss_kwh": [.03, .04], "inverter_dc_to_ac_loss_kwh": [.01, .02], "solar_clipped_kwh": [0., .1],
         "import_cost": [.12, .32], "export_revenue": [0., .02],
         "cost_score": [-1., .25], "protection_score": [.01, .02], "total_score": [-.99, .27],
     })
-    action = NextAction(OperatingMode.SELF_CONSUMPTION, 0., 0., 100., 0.)
+    action = NextAction(OperatingMode.SELF_CONSUMPTION, 0., 0.)
     return SimulationResult(action, {"med": frame, "low_high": frame.assign(net_cost=2.)})
 
 
@@ -50,13 +50,13 @@ def test_excel_filename_uses_applied_model_adjustment_scenario_and_plan_date(mon
 
     monkeypatch.setattr(plan, "excel_bytes", capture_workbook)
     monkeypatch.setattr(plan.ui, "download", lambda content, **kwargs: downloads.append(kwargs))
-    frame = tab.result.results[tab.scenario_name].assign(limit_score=[-2., -3.], plan_action=["Solar charge only", "Hold battery"])
+    frame = tab.result.results[tab.scenario_name].assign(limit_score=[-2., -3.], plan_action=["Force discharge", "Force charge"])
     tab._download_detail(frame, plan.detail_columns(frame, compact=view == "Compact"))
     assert downloads[0]["filename"] == f"plan-{model}-{abbreviation}-protection-{adjustment:g}-solar-{solar}-load-{load}-20261027-1005.xlsx"
     assert exported_frames[0].Start.iloc[0] == "2026-10-27 10:05:00"
     assert exported_frames[0].End.iloc[0] == "2026-10-27 10:20:00"
     action_column = "Action" if view == "Compact" else "Plan action"
-    assert exported_frames[0][action_column].tolist() == ["Solar charge only", "Hold battery", None]
+    assert exported_frames[0][action_column].tolist() == ["Force discharge", "Force charge", None]
     if view == "Advanced":
         assert exported_frames[0]["Limit Score"].tolist() == [-2., -3., -5.]
     else:
@@ -446,8 +446,8 @@ def test_advanced_plan_details_use_period_power_and_projected_battery_targets():
     frame = detail_frame(original, 20.)
     advanced = advanced_plan_frame(frame, "Europe/Dublin", OperatingMode.DISCHARGE_PV_FIRST)
     assert advanced.plan_action.tolist() == [
-        "Force discharge: 2.00kW to 4.20kWh/21.0%",
-        "Force discharge: 0.10kW to 3.00kWh/15.0%",
+        "Force discharge: grid export 2.00 kW to 4.20kWh/21.0%",
+        "Force discharge: grid export 0.10 kW to 3.00kWh/15.0%",
     ]
     assert detail_rows(advanced, "Europe/Dublin")[0]["plan_action"] == advanced.plan_action.iloc[0]
     assert detail_totals(advanced)["plan_action"] is None
@@ -463,8 +463,8 @@ def test_advanced_charge_details_use_import_power_for_shared_and_inferred_action
     original = sample_result().results["med"].assign(grid_export_kwh=0., grid_to_battery_kwh=[0., .6])
     advanced = advanced_plan_frame(detail_frame(original, 20.), "Europe/Dublin", OperatingMode.CHARGE_PV_FIRST)
     assert advanced.plan_action.tolist() == [
-        "Force charge: 1.20kW to 4.20kWh/21.0%",
-        "Force charge: 0.80kW to 3.00kWh/15.0%",
+        "Force charge: grid import 1.20 kW to 4.20kWh/21.0%",
+        "Force charge: grid import 0.80 kW to 3.00kWh/15.0%",
     ]
     assert detail_rows(advanced, "Europe/Dublin")[0]["plan_action"] == advanced.plan_action.iloc[0]
     assert "plan_action" not in original
@@ -509,16 +509,15 @@ def test_infeasible_refresh_reports_message_without_traceback(monkeypatch, caplo
     assert all(record.exc_info is None for record in caplog.records)
 
 
-@pytest.mark.parametrize("kind,soc,capacity,expected", [
-    (PlanCommand.SOLAR_CHARGE_ONLY, 0., 18., "Solar charge only"),
-    (PlanCommand.HOLD_BATTERY, 0., 18., "Hold battery"),
-    (PlanCommand.SOLAR_EXPORT_FIRST, 0., 18., "Solar export first"),
-    (PlanCommand.FORCE_DISCHARGE, 0., 18., "Force discharge at 2.85 kW until 0.00 kWh (0.0%)"),
-    (PlanCommand.FORCE_DISCHARGE, 20., 18., "Force discharge at 2.85 kW until 3.60 kWh (20.0%)"),
-    (PlanCommand.FORCE_CHARGE, 80., 18., "Force charge at 2.85 kW until 14.40 kWh (80.0%)"),
-    (PlanCommand.FORCE_DISCHARGE, 20., None, "Force discharge at 2.85 kW until 20.0%"),
+@pytest.mark.parametrize("mode,soc,capacity,expected", [
+    (OperatingMode.SELF_CONSUMPTION, None, 18., "Self-consumption"),
+    (OperatingMode.DISCHARGE_PV_FIRST, None, 18., "Force discharge at 2.85 kW"),
+    (OperatingMode.DISCHARGE_PV_FIRST, 0., 18., "Force discharge at 2.85 kW; target 0.00 kWh (0.0%)"),
+    (OperatingMode.DISCHARGE_PV_FIRST, 20., 18., "Force discharge at 2.85 kW; target 3.60 kWh (20.0%)"),
+    (OperatingMode.CHARGE_PV_FIRST, 80., 18., "Force charge at 2.85 kW; target 14.40 kWh (80.0%)"),
+    (OperatingMode.DISCHARGE_PV_FIRST, 20., None, "Force discharge at 2.85 kW; target 20.0%"),
 ])
-def test_next_action_summary_uses_program_command_label(kind, soc, capacity, expected):
+def test_next_action_summary_uses_operating_mode_label(mode, soc, capacity, expected):
     from solar_model.dashboard.tabs import plan
     from solar_model.services.planning import PlanReport
 
@@ -526,11 +525,10 @@ def test_next_action_summary_uses_program_command_label(kind, soc, capacity, exp
     tab.result = sample_result()
     action = replace(
         tab.result.next_action,
-        command_type=kind,
-        force_battery_charge_rate=2.85,
-        force_battery_discharge_rate=2.85,
-        charge_cut_off_soc_percent=soc,
-        discharge_cut_off_soc_percent=soc,
+        mode=mode,
+        charge_power_limit_kw=2.85,
+        discharge_power_limit_kw=2.85,
+        target_soc_percent=soc,
     )
     tab.result = replace(tab.result, next_action=action)
     tab.report = PlanReport(tab.result, pd.DataFrame(), battery_capacity_kwh=20., command_battery_capacity_kwh=capacity)
@@ -544,13 +542,13 @@ def test_next_action_summary_uses_program_command_label(kind, soc, capacity, exp
     assert labels == [expected]
 
 
-def test_passive_command_labels_survive_detail_grouping_and_advanced_formatting():
+def test_policy_labels_survive_detail_grouping_and_advanced_formatting():
     from solar_model.dashboard.tabs.plan import advanced_plan_frame
 
-    frame = detail_frame(sample_result().results["med"], 20.).assign(plan_action=["Solar charge only", "Hold battery"])
-    assert [row["plan_action"] for row in detail_rows(frame, "Europe/Dublin", OperatingMode.CHARGE_PV_FIRST)] == ["Solar charge only", "Hold battery"]
+    frame = detail_frame(sample_result().results["med"], 20.).assign(plan_action=["Force discharge", "Force charge"])
+    assert [row["plan_action"] for row in detail_rows(frame, "Europe/Dublin", OperatingMode.CHARGE_PV_FIRST)] == ["Force discharge", "Force charge"]
     hourly = hourly_detail_frame(frame, "Europe/Dublin", OperatingMode.SELF_CONSUMPTION)
-    assert hourly.plan_action.tolist() == ["Solar charge only / Hold battery", "Hold battery"]
+    assert hourly.plan_action.tolist() == ["Force discharge / Force charge", "Force charge"]
     advanced = advanced_plan_frame(frame, "Europe/Dublin")
-    assert advanced.plan_action.tolist() == ["Solar charge only: 4.20kWh/21.0%", "Hold battery: 3.00kWh/15.0%"]
+    assert advanced.plan_action.tolist() == ["Force discharge: grid export 0.00 kW to 4.20kWh/21.0%", "Force charge: grid import 0.80 kW to 3.00kWh/15.0%"]
     assert detail_totals(frame)["plan_action"] is None

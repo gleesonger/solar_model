@@ -211,7 +211,7 @@ forecast:
     endpoint: https://api.forecast.solar/estimate
     arrays: [{panel_id: 1, name: East, latitude: 0, longitude: 0, declination: 0, azimuth: 0, peak_kw: 1}]
 dashboard: {host: 127.0.0.1, port: 8090, actuals_to_forecast: {pv1: East}}
-additional_device_info: {charge_efficiency: 0.95, discharge_efficiency: 0.95}
+additional_device_info: {inverter_ac_to_dc_efficiency: 0.97, inverter_dc_to_ac_efficiency: 0.974, battery_charge_efficiency: 0.95, battery_discharge_efficiency: 0.95}
 energy_plan:
   scenarios:
     solar:

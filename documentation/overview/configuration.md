@@ -17,7 +17,7 @@ Source: [config.yaml](../../config.yaml), [solar_model/config.py](../../solar_mo
 | `dashboard` | Host `0.0.0.0`, port 8090, PV-string-to-panel mapping |
 | `tariffs.periods` | Effective-dated import/export schedules |
 | `energy_plan` | 24-hour projection, intact 15-minute action, six hours of UTC-clock-aligned fine intervals, then hourly intervals, reserve/protection preference, scheduled battery limits |
-| `additional_device_info` | Charge/discharge efficiencies, both shipped as 0.95 |
+| `additional_device_info` | Inverter AC-to-DC 0.970, inverter DC-to-AC 0.974, battery charge 0.970, battery discharge 0.970; modelling assumptions, not measured device efficiencies |
 | `energy_plan.scenarios` | Required solar/house-load low, med, high entries, each with multiplier and probability |
 
 These are current file values, not universal defaults. Preserve exact configuration spellings, including `data_retrival_schedule` and `full_updated_interval_seconds`.
@@ -125,6 +125,6 @@ Rename former energy_plan.optimiser_specific to energy_plan.optimiser; the old s
 
 In DP, `minimum_battery_kwh` and `maximum_battery_kwh` are preferred interval-end levels, with a bounded score penalty for breaches rather than hard SOC stops. The penalty is `-100 * error**2 / (error**2 + 5**2) * period_hours`, where error is the breach in SOC percentage points of health-adjusted capacity. It remains active at zero protection preference and has no additional configuration fields. MILP retains hard scheduled Min/Max limits. Physical capacity and equipment/export restrictions remain enforced in both models.
 
-DP always considers Solar charge only and Hold battery alongside self-consumption and forced commands. These passive profiles add no configuration keys and ignore the forced-power preference settings; Solar charge only permits charging up to physical battery/equipment capability, while Hold disables both directions.
+DP always considers Grid supply and Hold battery alongside self-consumption and forced commands. These passive profiles add no configuration keys and ignore the forced-power preference settings; Grid supply permits charging up to physical battery/equipment capability, while Hold disables both directions.
 
 Solar export first is another always-considered DP candidate with no configuration key or forced rate. Its modelled overflow charging uses physical charge limits and the same soft Min/Max penalty; the mode-5 hardware overflow behaviour remains unverified.

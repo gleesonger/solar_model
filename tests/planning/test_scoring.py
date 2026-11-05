@@ -210,7 +210,7 @@ def test_terminal_rate_samples_both_tariffs_after_end_across_dst(monkeypatch):
 @pytest.mark.parametrize("vector", [False, True])
 def test_terminal_credit_uses_only_final_energy_full_horizon_and_probabilities(vector):
     scenarios, device, config, start = scoring_inputs((.25, .75), preference=0.)
-    device = replace(device, discharge_efficiency=.9)
+    device = replace(device, battery_discharge_efficiency=.9)
     period = config.tariffs.periods[0]
     config = replace(config, tariffs=TariffsConfig((period, TariffPeriod(
         (start + timedelta(hours=48)).date().isoformat(),

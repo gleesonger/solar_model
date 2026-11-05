@@ -20,7 +20,7 @@ def test_in_memory_plan_preserves_scenario_energy_and_cost(resolution, expected_
     device = replace(device, system_battery_capacity_kwh=10., battery_state_of_health_percent=100.,
                      inverter_max_active_power_kw=5., inverter_max_absorption_power_kw=5.,
                      inverter_battery_charge_power_kw=5., inverter_battery_discharge_power_kw=5.,
-                     charge_efficiency=.9, discharge_efficiency=.9)
+                     battery_charge_efficiency=.9, battery_discharge_efficiency=.9)
     config = load_config()
     days = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
     minimum = TariffRule(days, "00:00", "24:00", 0., "minimum")
@@ -106,7 +106,7 @@ def test_hidden_four_hour_slots_preserve_energy_for_future_demand(monkeypatch, h
         ForecastInterval(end + timedelta(hours=4), end + timedelta(hours=24), 0.)])
     device = DeviceInfo(**{f.name: 1. for f in fields(DeviceInfo)})
     device = replace(device, system_battery_capacity_kwh=10., battery_state_of_health_percent=100.,
-                     charge_efficiency=.95, discharge_efficiency=.95)
+                     battery_charge_efficiency=.95, battery_discharge_efficiency=.95)
     config = load_config()
     rule = TariffRule(("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"), "00:00", "24:00", .4, "flat")
     config = replace(config, tariffs=TariffsConfig((TariffPeriod("2000-01-01", (rule,), (replace(rule, rate=.1),)),)),
@@ -157,7 +157,7 @@ def test_each_call_builds_a_fresh_model_with_current_inputs(monkeypatch, caplog,
     device = replace(device, system_battery_capacity_kwh=10., battery_state_of_health_percent=100.,
                      inverter_max_active_power_kw=5., inverter_max_absorption_power_kw=5.,
                      inverter_battery_charge_power_kw=5., inverter_battery_discharge_power_kw=5.,
-                     charge_efficiency=.95, discharge_efficiency=.95)
+                     battery_charge_efficiency=.95, battery_discharge_efficiency=.95)
     problems = []
     original_solve = cp.Problem.solve
 
@@ -204,7 +204,7 @@ def test_discharge_power_limit_scales_with_each_mixed_interval():
     device = replace(device, system_battery_capacity_kwh=10., battery_state_of_health_percent=100.,
                      inverter_max_active_power_kw=5., inverter_max_absorption_power_kw=5.,
                      inverter_battery_charge_power_kw=5., inverter_battery_discharge_power_kw=2.,
-                     charge_efficiency=.9, discharge_efficiency=.9)
+                     battery_charge_efficiency=.9, battery_discharge_efficiency=.9)
     config = load_config()
     flat = TariffRule(("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"), "00:00", "24:00", .4, "flat")
     config = replace(config, tariffs=TariffsConfig((TariffPeriod("2000-01-01", (flat,), (replace(flat, rate=0.),)),)),

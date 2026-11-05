@@ -201,8 +201,10 @@ class EnergyPlanConfig:
 
 @dataclass(frozen=True)
 class AdditionalDeviceInfoConfig:
-    charge_efficiency: float
-    discharge_efficiency: float
+    inverter_ac_to_dc_efficiency: float
+    inverter_dc_to_ac_efficiency: float
+    battery_charge_efficiency: float
+    battery_discharge_efficiency: float
 
 
 @dataclass(frozen=True)
@@ -546,8 +548,10 @@ def validate_config(config: Config) -> None:
     if not math.isfinite(energy_plan.protection_preference) or energy_plan.protection_preference < 0:
         raise ValueError("energy_plan.protection_preference must be finite and non-negative")
     additional_device_info = config.additional_device_info
-    if not 0 < additional_device_info.charge_efficiency <= 1 or not 0 < additional_device_info.discharge_efficiency <= 1:
-        raise ValueError("additional_device_info battery efficiencies must be greater than zero and at most one")
+    for name in ("inverter_ac_to_dc_efficiency", "inverter_dc_to_ac_efficiency", "battery_charge_efficiency", "battery_discharge_efficiency"):
+        efficiency = getattr(additional_device_info, name)
+        if not math.isfinite(efficiency) or not 0 < efficiency <= 1:
+            raise ValueError(f"additional_device_info.{name} must be finite, greater than zero and at most one")
     if energy_plan.minimum_battery_kwh:
         validate_tariff_rules(
             "energy_plan.minimum_battery_kwh",

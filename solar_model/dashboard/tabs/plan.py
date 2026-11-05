@@ -21,7 +21,7 @@ from solar_model.dashboard.components.download_dialog import excel_bytes
 from solar_model.logging_setup import LOGGER
 from solar_model.planning.plan_optimisation_milp import battery_protection_score
 from solar_model.planning.scenarios import scenario_probabilities
-from solar_model.planning.types import NoFeasiblePlanError, OperatingMode, PlanCommand, SimulationResult
+from solar_model.planning.types import NoFeasiblePlanError, OperatingMode, SimulationResult
 from solar_model.services.planning import generate_plan_report
 from solar_model.utils import table_to_object_list
 
@@ -65,17 +65,18 @@ PLAN_COLUMNS = {column.name: column for column in table_to_object_list(PlanColum
     ("solar_kwh",                            "Solar kWh",                            "Solar (kWh)",   9,            "number", 2,       Aggregation.QUANTITY,      False,   True),
     ("solar_to_load_kwh",                    "Solar To Load kWh",                    None,            None,         "number", 2,       Aggregation.QUANTITY,      False,   True),
     ("solar_to_battery_kwh",                 "Solar To Battery kWh",                 None,            None,         "number", 2,       Aggregation.QUANTITY,      False,   True),
-    ("solar_to_battery_loss_kwh",            "Solar To Battery Loss kWh",            None,            None,         "number", 2,       Aggregation.QUANTITY,      False,   True),
+    ("battery_charge_loss_kwh",              "Battery Charge Loss kWh",              None,            None,         "number", 2,       Aggregation.QUANTITY,      False,   True),
     ("solar_to_grid_kwh",                    "Solar To Grid kWh",                    None,            None,         "number", 2,       Aggregation.QUANTITY,      False,   True),
     ("solar_clipped_kwh",                    "Solar Clipped kWh",                    None,            None,         "number", 2,       Aggregation.QUANTITY,      False,   True),
     ("solar_to_inverter_kwh",                "Solar To Inverter kWh",                None,            None,         "number", 2,       Aggregation.QUANTITY,      False,   True),
     ("grid_to_load_kwh",                     "Grid To Load kWh",                     None,            None,         "number", 2,       Aggregation.QUANTITY,      False,   True),
     ("grid_to_battery_kwh",                  "Grid To Battery kWh",                  None,            None,         "number", 2,       Aggregation.QUANTITY,      False,   True),
-    ("grid_to_battery_loss_kwh",             "Grid To Battery Loss kWh",             None,            None,         "number", 2,       Aggregation.QUANTITY,      False,   True),
+    ("inverter_ac_to_dc_loss_kwh",           "Inverter AC To DC Loss kWh",           None,            None,         "number", 2,       Aggregation.QUANTITY,      False,   True),
     ("inverter_ac_to_dc_kwh",                "Inverter Ac To Dc kWh",                None,            None,         "number", 2,       Aggregation.QUANTITY,      False,   True),
     ("battery_to_load_kwh",                  "Battery To Load kWh",                  None,            None,         "number", 2,       Aggregation.QUANTITY,      False,   True),
     ("battery_to_grid_kwh",                  "Battery To Grid kWh",                  None,            None,         "number", 2,       Aggregation.QUANTITY,      False,   True),
-    ("battery_to_ac_loss_kwh",               "Battery To Ac Loss kWh",               None,            None,         "number", 2,       Aggregation.QUANTITY,      False,   True),
+    ("battery_discharge_loss_kwh",           "Battery Discharge Loss kWh",           None,            None,         "number", 2,       Aggregation.QUANTITY,      False,   True),
+    ("inverter_dc_to_ac_loss_kwh",           "Inverter DC To AC Loss kWh",           None,            None,         "number", 2,       Aggregation.QUANTITY,      False,   True),
     ("battery_to_inverter_kwh",              "Battery To Inverter kWh",              None,            None,         "number", 2,       Aggregation.QUANTITY,      False,   True),
     ("inverter_dc_to_ac_kwh",                "Inverter Dc To Ac kWh",                None,            None,         "number", 2,       Aggregation.QUANTITY,      False,   True),
     ("losses_kwh",                           "Losses kWh",                           "Losses (kWh)",  10,           "number", 2,       Aggregation.QUANTITY,      False,   True),
@@ -217,9 +218,10 @@ def advanced_plan_frame(frame: pd.DataFrame, timezone_name: str, first_mode: Ope
     for row, formatted in zip(frame.to_dict("records"), detail_rows(frame, timezone_name, first_mode)):
         parts = []
         hours = (row["ends_at"] - row["starts_at"]).total_seconds() / 3600
-        energy = row.get("grid_import_kwh" if formatted["plan_action"] == "Force charge" else "grid_export_kwh")
-        if formatted["plan_action"] not in ("Hold battery", "Solar charge only") and hours > 0 and pd.notna(energy):
-            parts.append(f"{energy / hours:.2f}kW")
+        grid_direction = "import" if formatted["plan_action"] == "Force charge" else "export"
+        energy = row.get(f"grid_{grid_direction}_kwh")
+        if hours > 0 and pd.notna(energy):
+            parts.append(f"grid {grid_direction} {energy / hours:.2f} kW")
         target = row.get("battery_end_kwh")
         if pd.notna(target):
             text = f"{target:.2f}kWh"
@@ -485,15 +487,17 @@ class PlanTab:
         first = next(iter(result.results.values()))
         action = result.next_action
         minutes = (first.ends_at.iloc[0] - first.starts_at.iloc[0]).total_seconds() / 60
-        if action.command in (PlanCommand.FORCE_CHARGE, PlanCommand.FORCE_DISCHARGE):
-            charging = action.command == PlanCommand.FORCE_CHARGE
+        if action.mode in (OperatingMode.CHARGE_PV_FIRST, OperatingMode.DISCHARGE_PV_FIRST):
+            charging = action.mode == OperatingMode.CHARGE_PV_FIRST
             rate = action.force_battery_charge_rate if charging else action.force_battery_discharge_rate
-            soc = action.charge_cut_off_soc_percent if charging else action.discharge_cut_off_soc_percent
-            capacity = self.report.command_battery_capacity_kwh if self.report is not None else None
-            target = f"{capacity * soc / 100:.2f} kWh ({soc:.1f}%)" if capacity is not None and capacity > 0 else f"{soc:.1f}%"
-            description = f"{action.command.label} at {rate:.2f} kW until {target}"
+            description = f"{action.mode.label} at {rate:.2f} kW"
+            if action.target_soc_percent is not None:
+                soc = action.target_soc_percent
+                capacity = self.report.command_battery_capacity_kwh if self.report is not None else None
+                target = f"{capacity * soc / 100:.2f} kWh ({soc:.1f}%)" if capacity is not None and capacity > 0 else f"{soc:.1f}%"
+                description += f"; target {target}"
         else:
-            description = action.command.label
+            description = action.mode.label
         action_period = f"Next {minutes:g} mins"
         scenarios = self.report.scenarios if self.report is not None and self.report.scenarios is not None else self.config.energy_plan.scenarios
         if self.chart is not None:

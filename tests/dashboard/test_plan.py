@@ -201,8 +201,8 @@ def test_detail_soc_uses_nameplate_capacity_and_stays_beside_energy():
     assert frame.battery_end_soc_percent.tolist() == pytest.approx([21., 15.])
     assert frame.columns.get_loc("battery_end_soc_percent") == frame.columns.get_loc("battery_end_kwh") + 1
     assert detail_totals(frame)["battery_end_soc_percent"] is None
-    assert frame.losses_kwh.tolist() == pytest.approx([.06, .09])
-    assert detail_totals(frame)["losses_kwh"] == .15
+    assert frame.losses_kwh.tolist() == pytest.approx([.07, .11])
+    assert detail_totals(frame)["losses_kwh"] == .18
     assert detail_frame(original, None).battery_end_soc_percent.isna().all()
     assert "battery_end_soc_percent" not in original.columns
 
@@ -552,3 +552,28 @@ def test_policy_labels_survive_detail_grouping_and_advanced_formatting():
     advanced = advanced_plan_frame(frame, "Europe/Dublin")
     assert advanced.plan_action.tolist() == ["Force discharge: grid export 0.00 kW to 4.20kWh/21.0%", "Force charge: grid import 0.80 kW to 3.00kWh/15.0%"]
     assert detail_totals(frame)["plan_action"] is None
+
+
+@pytest.mark.parametrize("mode,label", [
+    (OperatingMode.CHARGE_PV_FIRST, "Force charge"),
+    (OperatingMode.DISCHARGE_PV_FIRST, "Force discharge"),
+])
+def test_zero_rate_solar_export_uses_display_only_label(mode, label):
+    from solar_model.dashboard.tabs.plan import advanced_plan_frame, next_action_description
+
+    original = sample_result().results["med"].iloc[:1].copy().assign(
+        plan_action=label, solar_to_grid_kwh=.2, solar_to_battery_kwh=0.,
+        grid_to_battery_kwh=0., battery_to_inverter_kwh=0., grid_export_kwh=.2,
+    )
+    frame = detail_frame(original, 20.)
+    zero = NextAction(mode, 0., 0.)
+    assert detail_rows(frame, "Europe/Dublin", zero)[0]["plan_action"] == "Export Solar Excess"
+    assert hourly_detail_frame(frame, "Europe/Dublin", zero).plan_action.iloc[0] == "Export Solar Excess"
+    assert advanced_plan_frame(frame, "Europe/Dublin", zero).plan_action.iloc[0].startswith("Export Solar Excess: grid export")
+    assert frame.plan_action.iloc[0] == label
+    positive = NextAction(mode, 1., 1.)
+    assert detail_rows(frame, "Europe/Dublin", positive)[0]["plan_action"] == label
+    assert detail_rows(frame.assign(solar_to_grid_kwh=0.), "Europe/Dublin", zero)[0]["plan_action"] == label
+    assert next_action_description(zero, .2, 20.) == "Export Solar Excess"
+    assert next_action_description(zero, 0., 20.) == f"{label} at 0.00 kW"
+    assert next_action_description(positive, .2, 20.) == f"{label} at 1.00 kW"

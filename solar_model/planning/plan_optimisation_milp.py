@@ -180,7 +180,7 @@ def _simulate_energy_plan(device_info: DeviceInfo, device_state: DeviceState, sc
         # the other branch must still allow PV exports above the battery cap.
         for s, rate in enumerate(inputs["limit_battery_export_rate_to_grid_kw"][t]):
             cap = rate * duration
-            if cap < limit.max_discharge_kwh:
+            if cap < eta_dc_ac * limit.max_discharge_kwh:
                 discharge_limited = cp.Variable(boolean=True)
                 constraints += [
                     eta_dc_ac * battery_discharge_output[t, s] <= cap + (eta_dc_ac * limit.max_discharge_kwh - cap) * (1 - discharge_limited),

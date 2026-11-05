@@ -21,7 +21,7 @@ from solar_model.dashboard.components.download_dialog import excel_bytes
 from solar_model.logging_setup import LOGGER
 from solar_model.planning.plan_optimisation_milp import battery_protection_score
 from solar_model.planning.scenarios import scenario_probabilities
-from solar_model.planning.types import NoFeasiblePlanError, OperatingMode, SimulationResult
+from solar_model.planning.types import NextAction, NoFeasiblePlanError, OperatingMode, SimulationResult
 from solar_model.services.planning import generate_plan_report
 from solar_model.utils import table_to_object_list
 
@@ -185,7 +185,7 @@ def detail_frame(frame: pd.DataFrame, capacity: float | None) -> pd.DataFrame:
     return frame
 
 
-def detail_rows(frame: pd.DataFrame, timezone_name: str, first_mode: OperatingMode | None = None, *, time_format: str = "%H:%M") -> list[dict]:
+def detail_rows(frame: pd.DataFrame, timezone_name: str, first_mode: OperatingMode | NextAction | None = None, *, time_format: str = "%H:%M") -> list[dict]:
     """Keep numeric cells and format local times for the table or Excel export."""
     display = frame.copy()
     if "plan_action" not in display:
@@ -194,12 +194,26 @@ def detail_rows(frame: pd.DataFrame, timezone_name: str, first_mode: OperatingMo
             "Force discharge" if row.get("battery_to_grid_kwh", 0) > 1e-6 else "Self-consumption"
             for row in frame.to_dict("records")
         ]
-    if first_mode is not None and not display.empty and "plan_action" not in frame:
+    mode = first_mode.mode if isinstance(first_mode, NextAction) else first_mode
+    if mode is not None and not display.empty and "plan_action" not in frame:
         display.iloc[0, display.columns.get_loc("plan_action")] = {
             OperatingMode.CHARGE_PV_FIRST: "Force charge",
             OperatingMode.DISCHARGE_PV_FIRST: "Force discharge",
             OperatingMode.SELF_CONSUMPTION: "Self-consumption",
-        }[first_mode]
+        }[mode]
+    for index, row in enumerate(frame.to_dict("records")):
+        label = display.iloc[index]["plan_action"]
+        solar_export = row.get("solar_to_grid_kwh", 0.)
+        if label not in ("Force charge", "Force discharge") or pd.isna(solar_export) or solar_export <= 1e-6:
+            continue
+        if index == 0 and isinstance(first_mode, NextAction):
+            rate = first_mode.charge_power_limit_kw if label == "Force charge" else first_mode.discharge_power_limit_kw
+        elif label == "Force charge":
+            rate = row.get("solar_to_battery_kwh", 0.) + row.get("grid_to_battery_kwh", 0.)
+        else:
+            rate = row.get("battery_to_inverter_kwh", row.get("battery_to_load_kwh", 0.) + row.get("battery_to_grid_kwh", 0.))
+        if pd.notna(rate) and abs(rate) <= 1e-6:
+            display.iloc[index, display.columns.get_loc("plan_action")] = "Export Solar Excess"
     for column in display:
         definition = detail_column(column)
         if definition.format == "time":
@@ -211,7 +225,7 @@ def detail_rows(frame: pd.DataFrame, timezone_name: str, first_mode: OperatingMo
     return [{"period": index + 1, **row} for index, row in enumerate(display.to_dict("records"))]
 
 
-def advanced_plan_frame(frame: pd.DataFrame, timezone_name: str, first_mode: OperatingMode | None = None) -> pd.DataFrame:
+def advanced_plan_frame(frame: pd.DataFrame, timezone_name: str, first_mode: OperatingMode | NextAction | None = None) -> pd.DataFrame:
     """Describe projected grid power in the action's direction and battery targets."""
     display = frame.copy()
     actions = []
@@ -234,6 +248,21 @@ def advanced_plan_frame(frame: pd.DataFrame, timezone_name: str, first_mode: Ope
     return display
 
 
+def next_action_description(action: NextAction, solar_export_kwh: float, capacity: float | None) -> str:
+    """Describe the command for the displayed scenario without altering its mode."""
+    if action.mode in (OperatingMode.CHARGE_PV_FIRST, OperatingMode.DISCHARGE_PV_FIRST):
+        rate = action.force_battery_charge_rate if action.mode == OperatingMode.CHARGE_PV_FIRST else action.force_battery_discharge_rate
+        if rate <= 1e-6 and pd.notna(solar_export_kwh) and solar_export_kwh > 1e-6:
+            return "Export Solar Excess"
+        description = f"{action.mode.label} at {rate:.2f} kW"
+        if action.target_soc_percent is not None:
+            soc = action.target_soc_percent
+            target = f"{capacity * soc / 100:.2f} kWh ({soc:.1f}%)" if capacity is not None and capacity > 0 else f"{soc:.1f}%"
+            description += f"; target {target}"
+        return description
+    return action.mode.label
+
+
 def detail_totals(frame: pd.DataFrame) -> dict:
     """Sum interval energy/costs; leave state levels, limits and rates blank."""
     totals = {column: None for column in frame.columns}
@@ -247,7 +276,7 @@ def detail_totals(frame: pd.DataFrame) -> dict:
     return totals
 
 
-def hourly_detail_frame(frame: pd.DataFrame, timezone_name: str, first_mode: OperatingMode) -> pd.DataFrame:
+def hourly_detail_frame(frame: pd.DataFrame, timezone_name: str, first_mode: OperatingMode | NextAction) -> pd.DataFrame:
     """Split overlapping periods into local clock hours, then sum flows/costs."""
     definitions = {name: detail_column(name) for name in [*frame.columns, "plan_action"]}
     actions = detail_rows(frame, timezone_name, first_mode)
@@ -484,20 +513,12 @@ class PlanTab:
 
     def _render_result(self) -> None:
         result = self.result
-        first = next(iter(result.results.values()))
+        first = result.results.get("med", next(iter(result.results.values())))
         action = result.next_action
         minutes = (first.ends_at.iloc[0] - first.starts_at.iloc[0]).total_seconds() / 60
-        if action.mode in (OperatingMode.CHARGE_PV_FIRST, OperatingMode.DISCHARGE_PV_FIRST):
-            charging = action.mode == OperatingMode.CHARGE_PV_FIRST
-            rate = action.force_battery_charge_rate if charging else action.force_battery_discharge_rate
-            description = f"{action.mode.label} at {rate:.2f} kW"
-            if action.target_soc_percent is not None:
-                soc = action.target_soc_percent
-                capacity = self.report.command_battery_capacity_kwh if self.report is not None else None
-                target = f"{capacity * soc / 100:.2f} kWh ({soc:.1f}%)" if capacity is not None and capacity > 0 else f"{soc:.1f}%"
-                description += f"; target {target}"
-        else:
-            description = action.mode.label
+        capacity = self.report.command_battery_capacity_kwh if self.report is not None else None
+        solar_export = first.solar_to_grid_kwh.iloc[0] if "solar_to_grid_kwh" in first else 0.
+        description = next_action_description(action, solar_export, capacity)
         action_period = f"Next {minutes:g} mins"
         scenarios = self.report.scenarios if self.report is not None and self.report.scenarios is not None else self.config.energy_plan.scenarios
         if self.chart is not None:
@@ -544,6 +565,9 @@ class PlanTab:
 
     def _render_scenario(self) -> None:
         frame = self.result.results[self.scenario_name]
+        capacity = self.report.command_battery_capacity_kwh if self.report is not None else None
+        solar_export = frame.solar_to_grid_kwh.iloc[0] if "solar_to_grid_kwh" in frame else 0.
+        self.action_label.set_text(next_action_description(self.result.next_action, solar_export, capacity))
         reserve = self.report.preferred_reserve_kwh if self.report is not None and self.report.preferred_reserve_kwh is not None else self.config.energy_plan.preferred_reserve_kwh
         summary = scenario_summary(frame, reserve)
         cost_text = scenario_cost_summary(self.result.results, self.scenario_name)
@@ -574,9 +598,9 @@ class PlanTab:
         frame = detail_frame(self._scenario_frame(), self.battery_capacity_kwh)
         if self.detail_view == "Compact":
             frame["losses_kwh"] += frame["solar_clipped_kwh"]
-            frame = hourly_detail_frame(frame, self.config.timezone, self.result.next_action.mode)
+            frame = hourly_detail_frame(frame, self.config.timezone, self.result.next_action)
         else:
-            frame = advanced_plan_frame(frame, self.config.timezone, self.result.next_action.mode)
+            frame = advanced_plan_frame(frame, self.config.timezone, self.result.next_action)
         self.scenario_output.clear()
         with self.scenario_output:
             with ui.row().classes("w-full items-center justify-between flex-wrap gap-2"):

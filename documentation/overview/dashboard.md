@@ -80,7 +80,7 @@ The Plan detail table has a grey bold Total row, fixed below the period rows. It
 
 Plan compilation, solver and total simulation timings are flushed directly to the dashboard worker's stdout, visible in the launching terminal or its redirected log.
 
-Plan detail includes a **Plan action** column. DP records Self-consumption, Force charge or Force discharge for every period; the first policy is shared across scenarios and later choices are scenario-specific. MILP reports its first selected policy and later flow-based labels. Compact joins distinct actions within each hour; Advanced and Excel preserve selected-view labels.
+Plan detail includes a **Plan action** column. DP records Self-consumption, Force charge or Force discharge for every period; the first policy is shared across scenarios and later choices are scenario-specific. MILP reports its first selected policy and later flow-based labels. The UI shows `Export Solar Excess` when a zero-rate Force charge or Force discharge row exports PV; for the first row it uses the requested ceiling, and for later rows it infers zero rate from battery flow. The top action label follows PV export in the selected scenario. The underlying model mode and results remain unchanged. Compact joins distinct actions within each hour; Advanced and Excel preserve selected-view labels.
 
 **Download Excel** beside Plan detail exports the selected scenario to an `.xlsx` workbook, with the selected Compact/Advanced data columns, full configured-local Start/End timestamps (`YYYY-MM-DD HH:MM:SS`), plan actions, SOC, rounded numeric cells and Total row. The display-only t column is omitted and score columns retain original period contributions (in original chronological order). Hidden sorting fields are excluded. The filename uses the successful result's model and protection adjustment, explicit Solar/Load scenario names and configured-local plan start: `plan-MILP-protection-75-solar-high-load-low-20261031-1005.xlsx`. Pending control changes do not relabel the existing result's download; the worksheet is named Plan detail. Export reuses the shared XlsxTurbo writer and does not recalculate the plan.
 
@@ -116,6 +116,6 @@ Advanced Plan action entries explicitly label each period's average projected gr
 
 DP Advanced detail and Excel include Limit Score for scheduled battery Min/Max breaches. A negative value identifies an interval-end breach; zero means the ending level meets the preferences. Like other scores, the browser shows an hourly rate and the footer sums original duration-weighted contributions; Excel exports those original contributions. DP Total Score includes Limit Score, while Net cost remains actual model import cost minus export revenue. Compact omits score columns. MILP retains its existing score columns and hard Min/Max limits.
 
-Advanced detail shows projected ending kWh/SOC and grid flows for the selected policy. Zero-power variants retain their Force charge or Force discharge policy label.
+Advanced detail shows projected ending kWh/SOC and grid flows for the selected policy. Zero-power variants with PV export show `Export Solar Excess` in the UI.
 
 Mode 5 at zero discharge allows surplus solar to charge in the model; that installed-firmware response remains unverified.

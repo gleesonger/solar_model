@@ -69,9 +69,11 @@ Regenerate it from the repository root with `python -m solar_model.dashboard.ass
 
 Plan controls wrap on narrow screens; summary metrics share one bordered grid of inline label/value pairs, using one, two or three columns by viewport width. The full DataFrame table scrolls horizontally, shows all rows without pagination (clock hours in Compact, original periods in Advanced), and displays local start/end times as HH:MM. The mobile tab grid uses a shrinking middle column so NiceGUI tab scrolling accommodates Plan alongside the existing four tabs.
 
-The plan chart shares the existing Solar amber, House Load blue and Battery light blue. Actual lines are solid, scenario forecasts dashed; both segments share a legend name. Tooltip labels explain the distinction. Power and battery energy use separate labelled axes; timestamp formatting uses the configured timezone. A spinner replaces Refresh while calculating, and controls restore on failure; any previous successful report remains visible with an explicit failure status.
+The plan chart shares the existing Solar amber, House Load blue and Battery light blue. Actual lines are solid, scenario forecasts dashed; both segments share a legend name. Tooltip labels explain the distinction. Power and battery energy use separate labelled axes; timestamp formatting uses the configured timezone. The settings dialog closes and a spinner appears beside Plan settings during a private calculation; controls restore on failure and any previous successful report remains visible with an explicit failure status.
 
 Plan scenario changes retain chart zoom and legend selections; rendering is immediate without line-drawing animation.
+
+Private plan demonstrations append a red (`text-red-700`) bracketed explanation to the action's As of caption. The caption and explanation share a wrapping row, fitting mobile widths. A successful shared background plan hides the explanation and preserves scenario/view/chart choices. Background loading shows a spinner alongside the existing result; failure keeps that result and shows a status message.
 
 Plan Grid Import uses red and Grid Export uses green on the power axis, with solid actuals and dashed forecasts. Extra top spacing keeps the wrapped five-item mobile legend clear of axes; date/time tick labels use two lines to reduce horizontal overlap.
 
@@ -85,7 +87,7 @@ Plan numeric cells use tabular digits with fixed trailing decimal places per col
 
 Plan headers use short labels while retaining units; sorting icons/actions are disabled. Scenario-average cost/range shares a wrapping row with two compact labelled Solar/Load button groups. Each shows Low (0.5x), Base and High (1.5x); exactly one button is selected in each group. Controls use standard dense, unelevated NiceGUI toggles and wrap within the mobile viewport.
 
-After a successful plan run, Refresh uses its normal disabled/grey state until the adjustment changes; no separate changed-adjustment text occupies space. Failed attempts leave Refresh enabled for retry.
+Run Demonstration is available only in the Plan settings dialog and can be used again after success or failure, including when settings are unchanged. It creates only a private demonstration; the shared actual plan is controlled by the background scheduler.
 
 Solar/Load scenario controls use individual bordered fieldsets with centred legends above the buttons. Unselected buttons use Quasar grey-2 with dark text; the selected button retains the primary colour and white text. The groups have a 24px gap (twice the former 12px) and wrap on narrow screens. Border/legend rules are scoped to `.plan-scenario-group`.
 

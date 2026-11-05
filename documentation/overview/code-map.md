@@ -19,7 +19,7 @@ solar_model/
     schema.py, connection.py, migrations.py, measurements.py, forecasts.py
     queries/planning.py, forecasting.py, dashboard.py, recent.py, analysis.py, exports.py, types.py
   dashboard/
-    app.py, layout.py, state.py, snapshot.py, live.py, formatting.py
+    app.py, layout.py, state.py, snapshot.py, plan_store.py, live.py, formatting.py
     tabs/recent.py, analysis.py, plan.py, system_info.py, control.py
     components/charts.py, tables.py, chart_display.py, download_dialog.py, warnings.py
     assets/

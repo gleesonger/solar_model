@@ -327,11 +327,12 @@ def test_preference_is_request_local_and_database_is_closed(monkeypatch, fails, 
     monkeypatch.setattr(planning, "create_engine_for_database", lambda path: None)
     monkeypatch.setattr(planning, "load_device_info_as_of", lambda *args: SimpleNamespace(system_battery_capacity_kwh=18., battery_state_of_health_percent=90.))
     monkeypatch.setattr(planning, "load_plan_actuals", lambda *args: pd.DataFrame())
+    monkeypatch.setattr(planning, "load_latest_full_update", lambda *args: None)
     config = load_config()
     original = config.energy_plan.protection_preference
     result = sample_result()
 
-    def plan(db, configured, when):
+    def plan(db, configured, when, **kwargs):
         assert configured.energy_plan.protection_preference == preference
         assert configured.energy_plan.optimiser.model == ("mix_integer_linear_prog" if model == "MILP" else "dynamic_programming")
         if fails:
@@ -349,7 +350,8 @@ def test_preference_is_request_local_and_database_is_closed(monkeypatch, fails, 
 
 
 @pytest.mark.parametrize("model", [None, "MILP", "DP"])
-def test_planning_service_dispatches_the_selected_model_with_shared_inputs(monkeypatch, model):
+@pytest.mark.parametrize("battery_lag", [0, 60])
+def test_planning_service_dispatches_the_selected_model_with_shared_inputs(monkeypatch, model, battery_lag):
     from solar_model.services import planning
     from solar_model.planning import plan_optimisation_dynamic_programming as dp
 
@@ -357,7 +359,13 @@ def test_planning_service_dispatches_the_selected_model_with_shared_inputs(monke
     start = datetime(2026, 10, 27, tzinfo=timezone.utc)
     device, state, forecast, scenarios = object(), object(), object(), [object()]
     monkeypatch.setattr(planning, "load_device_info_as_of", lambda db, cfg, when: device)
-    monkeypatch.setattr(planning, "load_battery_state_as_of", lambda db, when, info: state)
+    battery_cutoffs = []
+
+    def battery_state(db, when, info):
+        battery_cutoffs.append(when)
+        return state
+
+    monkeypatch.setattr(planning, "load_battery_state_as_of", battery_state)
     monkeypatch.setattr(planning, "load_forecast_as_of", lambda db, when, cfg: forecast)
     monkeypatch.setattr(planning, "create_scenarios", lambda data, settings: scenarios)
     calls = []
@@ -375,7 +383,9 @@ def test_planning_service_dispatches_the_selected_model_with_shared_inputs(monke
     monkeypatch.setattr(dp, "simulate_energy_plan", dynamic_programming)
     if model is not None:
         config = replace(config, energy_plan=replace(config.energy_plan, optimiser=replace(config.energy_plan.optimiser, model="mix_integer_linear_prog" if model == "MILP" else "dynamic_programming")))
-    assert planning.plan_as_of(database, config, start) is result
+    battery_as_of = start - timedelta(seconds=battery_lag) if battery_lag else None
+    assert planning.plan_as_of(database, config, start, battery_as_of=battery_as_of) is result
+    assert battery_cutoffs == [battery_as_of or start]
     selected = "MILP" if config.energy_plan.optimiser.model == "mix_integer_linear_prog" else "DP"
     assert calls == [(selected, (device, state, scenarios, config, start))]
 
@@ -446,7 +456,6 @@ def test_ui_overlay_is_local_and_failed_save_keeps_previous_settings(monkeypatch
 
     config = load_config()
     first, other = plan.PlanTab(config, str(tmp_path / "missing.yaml")), plan.PlanTab(config)
-    first.refresh_button = SimpleNamespace(enable=lambda: None)
     initial = replace(config.energy_plan, protection_preference=75.)
     first.apply_plan_settings(energy_plan_yaml(initial))
     assert first.energy_plan_override == initial
@@ -465,8 +474,9 @@ def test_ui_report_without_override_uses_global_settings(monkeypatch):
     monkeypatch.setattr(planning, "SolarDatabase", lambda engine: SimpleNamespace(close=lambda: None))
     monkeypatch.setattr(planning, "load_device_info_as_of", lambda *args: SimpleNamespace(system_battery_capacity_kwh=18., battery_state_of_health_percent=90.))
     monkeypatch.setattr(planning, "load_plan_actuals", lambda *args: pd.DataFrame())
+    monkeypatch.setattr(planning, "load_latest_full_update", lambda *args: None)
 
-    def calculate(database, configured, as_of):
+    def calculate(database, configured, as_of, **kwargs):
         assert configured is config
         return sample_result()
 
@@ -543,14 +553,13 @@ def test_infeasible_refresh_reports_message_without_traceback(monkeypatch, caplo
     tab = plan.PlanTab(load_config())
     previous = sample_result()
     tab.result = previous
-    status, notices, refresh_visibility = [], [], []
+    status, notices = [], []
     control = SimpleNamespace(
         set_visibility=lambda value: None,
         disable=lambda: None,
         enable=lambda: None,
     )
     tab.loading = tab.settings_button = control
-    tab.refresh_button = SimpleNamespace(set_visibility=refresh_visibility.append)
     tab.status = SimpleNamespace(set_visibility=lambda value: None, set_text=status.append)
 
     def fail():
@@ -565,11 +574,10 @@ def test_infeasible_refresh_reports_message_without_traceback(monkeypatch, caplo
     monkeypatch.setattr(plan.run, "cpu_bound", calculate)
     monkeypatch.setattr(plan, "ensure_planning_worker", warm)
     monkeypatch.setattr(plan, "notify_error", notices.append)
-    asyncio.run(tab.refresh())
+    asyncio.run(tab.run_demonstration())
     assert notices == ["Unable to calculate plan: unable to find a feasible energy plan on the dynamic-programming grid"]
     assert status == ["Plan refresh failed. The previous plan is still shown."]
     assert tab.result is previous and not tab.running
-    assert refresh_visibility == [False, True]
     assert all(record.exc_info is None for record in caplog.records)
 
 

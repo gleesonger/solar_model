@@ -1,5 +1,5 @@
 """Assemble the planning model's input snapshot from stored observations."""
-from datetime import datetime
+from datetime import datetime, timezone
 from dataclasses import dataclass, replace
 import os
 from zoneinfo import ZoneInfo
@@ -16,6 +16,7 @@ from solar_model.storage.queries.planning import (
     load_device_info_as_of,
     load_forecast_as_of,
     load_plan_actuals,
+    load_latest_full_update,
 )
 
 
@@ -26,7 +27,7 @@ def warm_planning_worker() -> int:
     return os.getpid()
 
 
-def plan_as_of(database: SolarDatabase, config: Config, as_of: datetime) -> SimulationResult:
+def plan_as_of(database: SolarDatabase, config: Config, as_of: datetime, *, battery_as_of: datetime | None = None) -> SimulationResult:
     """Select only data known by the cutoff, then call the database-free model."""
     model = config.energy_plan.optimiser.model
     if model == "mix_integer_linear_prog":
@@ -36,7 +37,7 @@ def plan_as_of(database: SolarDatabase, config: Config, as_of: datetime) -> Simu
     else:
         raise ValueError("energy_plan.optimiser.model must be mix_integer_linear_prog or dynamic_programming")
     device = load_device_info_as_of(database, config, as_of)
-    state = load_battery_state_as_of(database, as_of, device)
+    state = load_battery_state_as_of(database, battery_as_of or as_of, device)
     forecast = load_forecast_as_of(database, as_of, config)
     return optimiser(device, state, create_scenarios(forecast, config.energy_plan.scenarios), config, as_of)
 
@@ -50,6 +51,16 @@ class PlanReport:
     preferred_reserve_kwh: float | None = None
     protection_preference: float | None = None
     command_battery_capacity_kwh: float | None = None
+    full_data_at: datetime | None = None
+
+
+def latest_full_update(database_path: str) -> datetime | None:
+    """Read the collection marker without opening migrations or changing data."""
+    database = SolarDatabase(create_engine_for_database(database_path))
+    try:
+        return load_latest_full_update(database, datetime.now(timezone.utc))
+    finally:
+        database.close()
 
 
 def generate_plan_report(config: Config, as_of: datetime, energy_plan_override: EnergyPlanConfig | None = None) -> PlanReport:
@@ -60,7 +71,8 @@ def generate_plan_report(config: Config, as_of: datetime, energy_plan_override: 
     configure_logging(config.logging.level)
     database = SolarDatabase(create_engine_for_database(config.database.path))
     try:
-        result = plan_as_of(database, config, as_of)
+        full_data_at = load_latest_full_update(database, as_of)
+        result = plan_as_of(database, config, as_of, battery_as_of=full_data_at)
         device = load_device_info_as_of(database, config, as_of)
         capacity = device.system_battery_capacity_kwh
         command_capacity = capacity * device.battery_state_of_health_percent / 100
@@ -73,6 +85,7 @@ def generate_plan_report(config: Config, as_of: datetime, energy_plan_override: 
             preferred_reserve_kwh=config.energy_plan.preferred_reserve_kwh,
             protection_preference=config.energy_plan.protection_preference,
             command_battery_capacity_kwh=command_capacity,
+            full_data_at=full_data_at,
         )
     finally:
         database.close()

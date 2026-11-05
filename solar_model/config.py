@@ -187,6 +187,7 @@ class EnergyPlanConfig:
     num_projection_hours: int
     scenarios: ScenariosConfig
     num_visible_projection_hours: int = 24
+    plan_rerun_frequency_mins: float = 5.
     protection_preference: float = 50.
     minimum_battery_kwh: tuple[TariffRule, ...] = ()
     maximum_battery_kwh: tuple[TariffRule, ...] = ()
@@ -386,6 +387,7 @@ def energy_plan_yaml(settings: EnergyPlanConfig) -> str:
     sections = [{
         "num_projection_hours": settings.num_projection_hours,
         "num_visible_projection_hours": settings.num_visible_projection_hours,
+        "plan_rerun_frequency_mins": settings.plan_rerun_frequency_mins,
         "preferred_reserve_kwh": settings.preferred_reserve_kwh,
         "protection_preference": settings.protection_preference,
     }]
@@ -512,6 +514,8 @@ def validate_config(config: Config) -> None:
 
     config.forecast.models  # Validate model-specific requirements across both sections.
     energy_plan = config.energy_plan
+    if not math.isfinite(energy_plan.plan_rerun_frequency_mins) or energy_plan.plan_rerun_frequency_mins <= 0:
+        raise ValueError("energy_plan.plan_rerun_frequency_mins must be finite and greater than zero")
     if energy_plan.optimiser.model not in ("mix_integer_linear_prog", "dynamic_programming"):
         raise ValueError("energy_plan.optimiser.model must be mix_integer_linear_prog or dynamic_programming")
     dp = energy_plan.optimiser.dynamic_programming

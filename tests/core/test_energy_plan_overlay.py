@@ -35,6 +35,13 @@ def test_overlay_uses_existing_scenario_and_projection_validation():
         parse_energy_plan_yaml(config, text.replace("15*96", "15*0"))
 
 
+@pytest.mark.parametrize("frequency", [0., -1., float("inf"), float("nan")])
+def test_plan_rerun_frequency_must_be_finite_and_positive(frequency):
+    config = load_config()
+    with pytest.raises(ValueError, match="plan_rerun_frequency_mins"):
+        parse_energy_plan_yaml(config, energy_plan_yaml(replace(config.energy_plan, plan_rerun_frequency_mins=frequency)))
+
+
 def test_save_replaces_only_energy_plan_and_keeps_other_text(tmp_path):
     config = load_config()
     path = tmp_path / "custom.yaml"

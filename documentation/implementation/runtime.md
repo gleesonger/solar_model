@@ -104,6 +104,7 @@ solar_model.dashboard.app.main()
   load_config(), configure_logging(), open_database()/close()
   LivePowerCollector(...)
   DashboardSnapshotStore(config, live_collector, full_interval)
+  PlanStore(config, config_path)
   register app startup/shutdown callbacks
   ui.page('/') -> render_dashboard_page()
   ui.run(..., favicon=SVG file path, reload=False)
@@ -114,6 +115,7 @@ app startup callbacks (scheduled independently)
     await run.cpu_bound(services.planning.warm_planning_worker)
     import planning dependencies, initialise highspy.Highs(), return worker PID
     log worker ready/startup seconds; log failures without aborting dashboard startup
+  start_plan_worker(): start plans.run_forever(), polling committed full readings every second
 
 each browser page
   DashboardLayout(config, live_collector)
@@ -122,11 +124,12 @@ each browser page
     RecentTab / AnalysisTab / SystemInfoTab / ControlTab
   render cached snapshot, or loading state
   subscribe apply_snapshot callback
+  subscribe plan_tab.apply_shared_plan through client.safe_invoke
   register connect/disconnect callbacks
   ui.timer(live_interval, layout.refresh_live_power)
 ```
 
-One server-wide live collector and snapshot store serve all pages. `DashboardState`, `DashboardElements`, tab instances, warnings metadata and subscriptions belong to individual pages. The persisted collector runs in another process and does not share these Python objects.
+One server-wide live collector, Recent snapshot store and in-memory plan store serve all pages. `DashboardState`, `DashboardElements`, tab instances, warnings metadata and subscriptions belong to individual pages. The persisted collector runs in another process; the plan scheduler observes its committed electrical timestamps through SQLite. Only `energy_plan` supports hot reload from the startup file; other settings retain restart semantics. Plan scheduling and browser demonstration behaviour are detailed in [dashboard ownership](dashboard-ui.md#plan-tab-ownership-and-refresh).
 
 At startup, `main_dashboard` passes the source-relative `solar_model/dashboard/assets/solar_power.svg` path to `ui.run(favicon=...)`. NiceGUI references `/favicon.ico` in the page icon link and serves the SVG file through that route. The SVG is not embedded in the page. Deploy the valid asset, restart the dashboard and reload the page; the fixed favicon URL may require browser cache refresh after image changes.
 
@@ -153,4 +156,4 @@ columns = table_to_object_list(Column,
 
 Next: [collection and ingestion](collection.md). The [dashboard state guide](dashboard-ui.md) explains the worker/thread/browser boundaries in more detail.
 
-The UI editor uses parse_energy_plan_yaml(config, text) to construct a strict replacement EnergyPlanConfig, then validate it within a copied Config. energy_plan_yaml explicitly maps the EnergyPlanConfig schema to the file layout through EnergyPlanYamlDumper: compact scalar lists, inline scenario/refinement mappings, quoted times and separated sections. collapse_projection_resolutions encodes consecutive equal timestep runs; collapse_scheduled_rules groups identical time/rate/name combinations into weekday lists without altering time windows. Rule comment metadata is discarded during shared normalisation. Round-trip checks cover file YAML to settings to formatted YAML to equivalent settings, plus stable regenerated text. save_energy_plan_yaml validates against both the running config and latest disk contents, writes a temporary sibling file and atomically replaces the target. Only the energy_plan source section is replaced. Startup config_path is passed through DashboardLayout to PlanTab; ordinary startup defaults to config.yaml.
+The UI editor uses parse_energy_plan_yaml(config, text) to construct a strict replacement EnergyPlanConfig, then validate it within a copied Config. energy_plan_yaml explicitly maps the EnergyPlanConfig schema to the file layout through EnergyPlanYamlDumper: compact scalar lists, inline scenario/refinement mappings, quoted times and separated sections. collapse_projection_resolutions encodes consecutive equal timestep runs; collapse_scheduled_rules groups identical time/rate/name combinations into weekday lists without altering time windows. Rule comment metadata is discarded during shared normalisation. Round-trip checks cover file YAML to settings to formatted YAML to equivalent settings, plus stable regenerated text. save_energy_plan_yaml validates against both the running config and latest disk contents, writes a temporary sibling file and atomically replaces the target. Only the energy_plan source section is replaced. Startup config_path is passed to the shared PlanStore and through DashboardLayout to PlanTab; ordinary startup defaults to config.yaml. Successful editor saves update the store immediately, and external file edits are detected by the background check. Only energy_plan is hot-reloaded.

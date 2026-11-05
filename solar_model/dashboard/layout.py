@@ -18,6 +18,7 @@ from solar_model.dashboard.state import DashboardElements, DashboardState
 from solar_model.dashboard.tabs.recent import RecentTab
 from solar_model.dashboard.tabs.system_info import SystemInfoTab
 from solar_model.dashboard.snapshot import DashboardSnapshot
+from solar_model.dashboard.plan_store import PlanStore
 from solar_model.dashboard.components.warnings import DashboardWarnings
 
 
@@ -27,6 +28,7 @@ class DashboardLayout:
         config: Config,
         live_collector: LivePowerCollector,
         config_path: str = "config.yaml",
+        plan_store: PlanStore | None = None,
     ) -> None:
         self.config = config
         self.elements = DashboardElements()
@@ -41,7 +43,7 @@ class DashboardLayout:
         self.historical_tab = AnalysisTab(config, self.state, self.elements)
         self.system_info_tab = SystemInfoTab(config, self.elements)
         self.control_tab = ControlTab(config)
-        self.plan_tab = PlanTab(config, config_path)
+        self.plan_tab = PlanTab(config, config_path, plan_store)
 
     def render_dashboard_layout(self, container: Column, snapshot: DashboardSnapshot) -> None:
         LOGGER.info("Dashboard page UI loading")

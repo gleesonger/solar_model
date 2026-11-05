@@ -42,6 +42,8 @@ Database observations and forecast vintages use the cutoff. Efficiencies/tariffs
 
 Both optimisers look up battery schedules at each interval's local start. An uncovered or empty schedule defaults to 0 kWh minimum, 999 kWh maximum, or 999 kW battery export limit, respectively; equipment limits still apply. Tariff import and export schedules require complete coverage.
 
+`generate_plan_report()` also retains `full_data_at`, the newest committed electrical-reading timestamp at or before the run cutoff. `storage.queries.planning.load_latest_full_update()` uses the same timestamp ordering as battery-state loading. The report passes this captured timestamp as `plan_as_of(..., battery_as_of=...)`, fixing the battery-state cutoff even if another reading commits during input assembly; forecast/device cutoffs and the projection start remain the execution-start instant. The dashboard's `PlanStore` wraps the report with execution-start and completion timestamps and captured energy-plan settings; these are in-memory run metadata. `services.planning.latest_full_update()` reads the collection marker for scheduling without migrations or writes.
+
 ## 2. DeviceInfo from text change history
 
 `load_device_info_as_of()` inspects whether `variable_name` exists, queries device rows ordered descending ID, and filters parsed UTC timestamps to ≤ cutoff in Python. It keeps the first value for each stable identifier. Missing machine names are derived from human variable text; unit suffixes are appended when needed (`kw`, `kwh`, `kva`, `v`, `hz`, `percent`). Numeric text becomes float; other text stays string.

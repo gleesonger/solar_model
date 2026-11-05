@@ -19,6 +19,18 @@ from solar_model.storage.queries.forecasting import load_hourly_house_load
 LOGGER = logging.getLogger(__name__)
 
 
+def load_latest_full_update(database: SolarDatabase, as_of: datetime) -> datetime | None:
+    """Return the newest committed full electrical reading known by the cutoff."""
+    with database.sessions() as session:
+        stamp = session.scalar(
+            select(SigenStorModbusSample.collected_at_utc)
+            .where(SigenStorModbusSample.collected_at_utc <= int(utc_instant(as_of).timestamp()))
+            .order_by(SigenStorModbusSample.collected_at_utc.desc())
+            .limit(1)
+        )
+    return utc_instant(datetime.fromisoformat(stamp)) if stamp is not None else None
+
+
 def _forecast_bounds(as_of: datetime, config: Config) -> tuple[datetime, datetime]:
     """Whole UTC hours around the configured total projection."""
     start = pd.Timestamp(utc_instant(as_of))

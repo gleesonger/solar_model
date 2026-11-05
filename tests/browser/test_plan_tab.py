@@ -129,9 +129,12 @@ if __name__ == '__main__':
                 errors = []
                 page.on("pageerror", lambda error: errors.append(str(error)))
                 page.goto(url)
-                refresh = page.get_by_role("button", name="Refresh plan", exact=True)
-                refresh.wait_for()
                 settings = page.get_by_role("button", name="Plan settings", exact=True)
+                settings.wait_for()
+                assert page.get_by_role("button", name="Run Demonstration", exact=True).count() == 0
+
+                def wait_for_idle():
+                    page.wait_for_function("!Array.from(document.querySelectorAll('button')).find(e => e.textContent.includes('Plan settings')).disabled")
 
                 def change_preference(value, model_key=None, wait=True):
                     settings.click()
@@ -140,26 +143,28 @@ if __name__ == '__main__':
                     if model_key is not None:
                         text = re.sub(r"(?m)^  model:.*$", f"  model: {model_key}", text)
                     editor.fill(text)
-                    page.get_by_role("button", name="Apply", exact=True).click()
+                    page.get_by_role("button", name="Run Demonstration", exact=True).click()
                     page.get_by_role("dialog").wait_for(state="hidden")
                     if wait:
-                        refresh.wait_for(state="visible")
-                        page.wait_for_function("!Array.from(document.querySelectorAll('button')).find(e => e.textContent.includes('Plan settings')).disabled")
+                        wait_for_idle()
                 assert page.get_by_role("combobox", name="Model", exact=True).count() == 0
                 assert page.get_by_role("spinbutton").count() == 0
                 change_preference(75, wait=False)
                 page.get_by_text("Calculating plan…", exact=True).wait_for()
-                assert not refresh.is_visible()
                 assert settings.is_disabled()
-                refresh.wait_for(state="visible")
-                page.get_by_test_id("plan-action").get_by_text("Next 15 mins - As of Tue, 16 Jun 2026 11:05", exact=True).wait_for()
+                wait_for_idle()
+                page.get_by_test_id("plan-action").get_by_text(re.compile(r"^Next 15 mins - As of .*11:05$")).wait_for()
+                demonstration = page.get_by_text("[Demonstration - not part of actual plan, save config to disk to apply change]", exact=True)
+                demonstration.wait_for()
+                assert demonstration.evaluate("element => getComputedStyle(element).color") == "rgb(185, 28, 28)"
                 page.get_by_test_id("plan-action").get_by_text("Self-consumption", exact=True).wait_for()
                 assert page.get_by_test_id("plan-action").evaluate("element => getComputedStyle(element).backgroundColor") != "rgba(0, 0, 0, 0)"
-                assert refresh.is_enabled()
-                refresh.click()
+                assert settings.is_enabled()
+                settings.click()
+                page.get_by_role("button", name="Run Demonstration", exact=True).click()
                 page.get_by_text("Calculating plan…", exact=True).wait_for()
-                refresh.wait_for(state="visible")
-                assert refresh.is_enabled()
+                wait_for_idle()
+                assert settings.is_enabled()
                 assert page.get_by_text(re.compile("^Model:")).count() == 0
                 assert page.get_by_text("UI overrides active", exact=True).count() == 0
                 assert page.get_by_text("No actual measurements available for today.", exact=True).count() == 0
@@ -292,7 +297,7 @@ if __name__ == '__main__':
                 change_preference(75, model_key="dynamic_programming")
                 assert page.get_by_text(re.compile("^Model:")).count() == 0
                 page.get_by_role("cell", name="DP", exact=True).first.wait_for()
-                assert refresh.is_enabled()
+                assert settings.is_enabled()
                 for width in (1440, 390):
                     page.set_viewport_size({"width": width, "height": 1100})
                     page.wait_for_timeout(200)
@@ -346,9 +351,9 @@ if __name__ == '__main__':
                 assert page.locator(".q-table tbody tr").count() == 7
                 change_preference(99, model_key="mix_integer_linear_prog")
                 page.get_by_text("Plan refresh failed. The previous plan is still shown.", exact=True).wait_for()
-                assert refresh.is_visible() and not settings.is_disabled()
+                assert settings.is_visible() and not settings.is_disabled()
                 assert page.get_by_text(re.compile("^Model:")).count() == 0
-                assert not refresh.is_disabled()
+                assert not settings.is_disabled()
                 assert page.get_by_test_id("plan-chart").is_visible()
                 page.get_by_role("button", name="Dismiss", exact=True).click()
                 # The dialog validates drafts, saves only the temporary config, and loads global settings into the draft.
@@ -356,13 +361,13 @@ if __name__ == '__main__':
                 editor = page.get_by_role("textbox", name="YAML", exact=True)
                 valid_text = editor.input_value()
                 editor.fill("unknown_setting: 12")
-                page.get_by_role("button", name="Apply", exact=True).click()
+                page.get_by_role("button", name="Run Demonstration", exact=True).click()
                 page.get_by_text(re.compile("invalid configuration in energy_plan editor")).wait_for()
                 assert page.get_by_role("dialog").is_visible()
                 editor.fill(valid_text.replace("protection_preference: 99", "protection_preference: 123"))
                 page.set_viewport_size({"width": 1440, "height": 1100})
                 save = page.get_by_role("button", name="Save To Disk", exact=True)
-                apply_button = page.get_by_role("button", name="Apply", exact=True)
+                apply_button = page.get_by_role("button", name="Run Demonstration", exact=True)
                 assert save.evaluate("element => element.classList.contains('q-btn--outline')")
                 assert save.bounding_box()["x"] < apply_button.bounding_box()["x"]
                 assert abs(save.bounding_box()["y"] - apply_button.bounding_box()["y"]) < 2

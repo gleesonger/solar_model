@@ -1,7 +1,7 @@
 """Per-browser energy-plan controls and presentation."""
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from dataclasses import dataclass
 from enum import StrEnum
 from html import escape
@@ -16,13 +16,14 @@ import pandas as pd
 from solar_model.config import Config, EnergyPlanConfig, ScenariosConfig, energy_plan_yaml, parse_energy_plan_yaml, save_energy_plan_yaml
 from solar_model.dashboard.components.warnings import notify_error, notify_success
 from solar_model.dashboard.planning_worker import ensure_planning_worker
+from solar_model.dashboard.plan_store import PlanRun, PlanStore
 from solar_model.dashboard.components.tables import mark_final_total_row
 from solar_model.dashboard.components.download_dialog import excel_bytes
 from solar_model.logging_setup import LOGGER
 from solar_model.planning.plan_optimisation_milp import battery_protection_score
 from solar_model.planning.scenarios import scenario_probabilities
 from solar_model.planning.types import NextAction, NoFeasiblePlanError, OperatingMode, SimulationResult
-from solar_model.services.planning import generate_plan_report
+from solar_model.services.planning import PlanReport, generate_plan_report
 from solar_model.utils import table_to_object_list
 
 
@@ -445,9 +446,13 @@ def plan_chart_options(frame: pd.DataFrame, actuals: pd.DataFrame, timezone_name
 
 
 class PlanTab:
-    def __init__(self, config: Config, config_path: str = "config.yaml") -> None:
+    def __init__(self, config: Config, config_path: str = "config.yaml", plan_store: PlanStore | None = None) -> None:
         self.config = config
         self.config_path = config_path
+        self.plan_store = plan_store
+        self.shared_version = 0
+        self.demonstration = False
+        self.run_metadata: PlanRun | None = None
         self.energy_plan_override: EnergyPlanConfig | None = None
         self.report = None
         self.timezone = ZoneInfo(config.timezone)
@@ -463,19 +468,51 @@ class PlanTab:
     def render_plan_tab(self) -> None:
         with ui.row().classes("w-full items-end gap-4 flex-wrap"):
             self.settings_button = ui.button("Plan settings", icon="settings", on_click=self.open_plan_settings)
-            self.refresh_button = ui.button("Refresh plan", icon="refresh", on_click=self.refresh)
             with ui.row().classes("items-center gap-2") as self.loading:
                 ui.spinner(size="sm")
                 ui.label("Calculating plan…").classes("text-sm text-gray-600")
             self.loading.set_visibility(False)
-        self.status = ui.label("Refresh to calculate a plan from the latest available data.").classes("text-sm text-gray-600")
+        self.status = ui.label("Waiting for a new full SigEnergy reading to calculate the plan." if self.plan_store else "Run a demonstration using the latest available data.").classes("text-sm text-gray-600")
         self.output = ui.column().classes("w-full min-w-0 gap-4")
+        self.apply_shared_plan()
+
+    @property
+    def live_config(self) -> Config:
+        return self.plan_store.config if self.plan_store else self.config
+
+    def _apply_run(self, completed: PlanRun) -> None:
+        self.run_metadata = completed
+        self._show_report(completed.report, completed.settings, completed.demonstration)
+
+    def _show_report(self, report: PlanReport, settings: EnergyPlanConfig, demonstration: bool) -> None:
+        self.report = report
+        self.result, self.actuals = report.simulation, report.actuals
+        self.battery_capacity_kwh = report.battery_capacity_kwh
+        self.applied_model = "MILP" if settings.optimiser.model == "mix_integer_linear_prog" else "DP"
+        self.applied_adjustment = report.protection_preference if report.protection_preference is not None else settings.protection_preference
+        self.demonstration = demonstration
+        self.status.set_visibility(False)
+        with self.output:
+            self._render_result()
+
+    def apply_shared_plan(self) -> None:
+        store = self.plan_store
+        if store is None or not hasattr(self, "output"):
+            return
+        if store.current is not None and store.version > self.shared_version:
+            self.shared_version = store.version
+            self._apply_run(store.current)
+        self.loading.set_visibility(store.running or self.running)
+        if store.last_error:
+            previous = " The previous plan is still shown." if self.result is not None else ""
+            self.status.set_text("Plan refresh failed: " + store.last_error + previous)
+            self.status.set_visibility(True)
 
     def open_plan_settings(self) -> None:
         with ui.dialog() as dialog, ui.card().classes("w-full").style("width: 938px; max-width: calc(100vw - 48px)"):
             ui.label("Energy plan settings").classes("text-lg font-semibold")
-            ui.label("Edit the contents of energy_plan. Apply affects only this browser's plans. Saving also updates the file for future starts.").classes("text-sm text-gray-600")
-            editor = ui.textarea("YAML", value=energy_plan_yaml(self.energy_plan_override or self.config.energy_plan)).props("outlined rows=20 input-class=font-mono").classes("w-full").style("max-height: 60vh; overflow: auto")
+            ui.label("Run Demonstration creates a demonstration for this browser. Save To Disk applies settings to the background plan after the next full SigEnergy update.").classes("text-sm text-gray-600")
+            editor = ui.textarea("YAML", value=energy_plan_yaml(self.energy_plan_override or self.live_config.energy_plan)).props("outlined rows=20 input-class=font-mono").classes("w-full").style("max-height: 60vh; overflow: auto")
             error_label = ui.label().classes("text-negative whitespace-pre-wrap")
 
             async def apply() -> None:
@@ -485,18 +522,18 @@ class PlanTab:
                     error_label.set_text(str(error))
                     return
                 dialog.close()
-                await self.refresh()
+                await self.run_demonstration()
 
             async def save() -> None:
                 text = editor.value
                 try:
-                    parse_energy_plan_yaml(self.config, text)
+                    parse_energy_plan_yaml(self.live_config, text)
                 except ValueError as error:
                     error_label.set_text(str(error))
                     return
                 with ui.dialog() as confirmation, ui.card():
                     ui.label("Save energy plan settings to disk?").classes("text-lg font-semibold")
-                    ui.label("This replaces energy_plan in the configuration file for future starts. The running global settings stay unchanged.")
+                    ui.label("This replaces energy_plan in the configuration file and updates the running background plan settings.")
                     with ui.row().classes("w-full justify-end gap-2"):
                         ui.button("Cancel", on_click=lambda: confirmation.submit(False)).props("flat")
                         ui.button("Confirm save", on_click=lambda: confirmation.submit(True))
@@ -513,7 +550,7 @@ class PlanTab:
                 notify_success("Energy plan settings saved to disk.")
 
             def load_global() -> None:
-                editor.set_value(energy_plan_yaml(self.config.energy_plan))
+                editor.set_value(energy_plan_yaml(self.live_config.energy_plan))
                 error_label.set_text("")
 
             with ui.row().classes("w-full items-center flex-wrap gap-2"):
@@ -521,42 +558,45 @@ class PlanTab:
                 ui.space()
                 ui.button("Load Global", on_click=load_global).props("flat")
                 ui.button("Cancel", on_click=dialog.close).props("flat")
-                ui.button("Apply", on_click=apply)
+                ui.button("Run Demonstration", on_click=apply)
         dialog.on("hide", dialog.delete)
         dialog.open()
 
     def save_plan_settings(self, text: str) -> None:
-        save_energy_plan_yaml(self.config_path, self.config, text)
+        if self.plan_store:
+            self.plan_store.save_settings(text)
+            self.energy_plan_override = None
+        else:
+            save_energy_plan_yaml(self.config_path, self.config, text)
 
     def apply_plan_settings(self, text: str) -> None:
-        self.energy_plan_override = parse_energy_plan_yaml(self.config, text)
+        self.energy_plan_override = parse_energy_plan_yaml(self.live_config, text)
 
-    async def refresh(self) -> None:
+    async def run_demonstration(self) -> None:
         if self.running:
             return
         override = self.energy_plan_override
-        settings = override or self.config.energy_plan
-        preference = settings.protection_preference
-        model = "MILP" if settings.optimiser.model == "mix_integer_linear_prog" else "DP"
+        settings = override or self.live_config.energy_plan
+        shared_version = self.plan_store.version if self.plan_store else 0
         self.running = True
-        self.refresh_button.set_visibility(False)
         self.loading.set_visibility(True)
         self.settings_button.disable()
         self.status.set_visibility(False)
         as_of = datetime.now(timezone.utc).replace(microsecond=0)
         try:
-            await ensure_planning_worker()
-            report = await run.cpu_bound(generate_plan_report, self.config, as_of, override)
-            if report is None:
-                raise RuntimeError("The plan calculation did not return a result")
-            self.report = report
-            self.result, self.actuals = report.simulation, report.actuals
-            self.battery_capacity_kwh = report.battery_capacity_kwh
-            self.applied_model = model
-            with self.output:
-                self._render_result()
-            self.applied_adjustment = report.protection_preference if report.protection_preference is not None else preference
+            if self.plan_store:
+                completed = await self.plan_store.demonstrate(settings)
+                if shared_version == self.plan_store.version:
+                    self._apply_run(completed)
+            else:
+                await ensure_planning_worker()
+                report = await run.cpu_bound(generate_plan_report, self.config, as_of, override)
+                if report is None:
+                    raise RuntimeError("The plan calculation did not return a result")
+                self._show_report(report, settings, True)
         except Exception as error:
+            if self.plan_store and shared_version != self.plan_store.version:
+                return
             if isinstance(error, SubprocessException) and error.original_type == NoFeasiblePlanError.__name__:
                 error = NoFeasiblePlanError(error.original_message)
             if isinstance(error, NoFeasiblePlanError):
@@ -569,8 +609,7 @@ class PlanTab:
             notify_error(f"Unable to calculate plan: {error}")
         finally:
             self.running = False
-            self.loading.set_visibility(False)
-            self.refresh_button.set_visibility(True)
+            self.loading.set_visibility(self.plan_store.running if self.plan_store else False)
             self.settings_button.enable()
 
     def _render_result(self) -> None:
@@ -581,11 +620,24 @@ class PlanTab:
         capacity = self.report.command_battery_capacity_kwh if self.report is not None else None
         solar_export = first.solar_to_grid_kwh.iloc[0] if "solar_to_grid_kwh" in first else 0.
         description = next_action_description(action, solar_export, capacity)
-        local_start = pd.Timestamp(first.starts_at.iloc[0]).tz_convert(self.timezone)
-        action_period = f"Next {minutes:g} mins - As of {local_start:%a, %H:%M}"
+        local_start = first.starts_at.iloc[0].astimezone(self.timezone)
+
+        today = datetime.now(self.timezone).date()
+        start_date = local_start.date()
+
+        if start_date == today:
+            prefix = "Today,"
+        elif start_date == today - timedelta(days=1):
+            prefix = "Yesterday,"
+        else:
+            prefix = local_start.strftime("%d/%m/%Y")
+
+        action_period = f"Next {minutes:g} mins - As of {prefix} {local_start:%H:%M}"
         scenarios = self.report.scenarios if self.report is not None and self.report.scenarios is not None else self.config.energy_plan.scenarios
         if self.chart is not None:
             self.action_period_label.set_text(action_period)
+            if hasattr(self, "demonstration_label"):
+                self.demonstration_label.set_visibility(self.demonstration)
             self.action_label.set_text(description)
             for control, dimension in ((self.solar_scenario, scenarios.solar), (self.load_scenario, scenarios.house_load)):
                 control.options = {name: f"{name.title()} ({level.multiplier:g}x)" for name, level in dimension.items()}
@@ -593,7 +645,10 @@ class PlanTab:
             self._render_scenario()
             return
         with ui.column().classes("w-full gap-1 rounded-lg border border-blue-100 bg-blue-50 px-4 py-3").props("data-testid=plan-action"):
-            self.action_period_label = ui.label(action_period).classes("text-xs text-blue-800")
+            with ui.row().classes("items-baseline gap-1 flex-wrap"):
+                self.action_period_label = ui.label(action_period).classes("text-xs text-blue-800")
+                self.demonstration_label = ui.label("[Demonstration - not part of actual plan, save config to disk to apply change]").classes("text-xs text-red-700")
+                self.demonstration_label.set_visibility(self.demonstration)
             self.action_label = ui.label(description).classes("text-base font-medium text-blue-950")
         with ui.row().classes("w-full items-center justify-end flex-wrap gap-2"):
             with ui.row().classes("items-center flex-wrap gap-6"):

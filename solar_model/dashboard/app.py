@@ -11,6 +11,7 @@ from solar_model.dashboard.snapshot import DashboardSnapshotStore
 from solar_model.logging_setup import LOGGER, configure_logging
 from solar_model.paths import package_path
 from solar_model.dashboard.planning_worker import ensure_planning_worker
+from solar_model.dashboard.plan_store import PlanStore
 
 def main(config_path: str = "config.yaml") -> None:
     config = load_config(config_path)
@@ -31,8 +32,10 @@ def main(config_path: str = "config.yaml") -> None:
         live_collector,
         config.actuals.data_retrival_schedule.full_updated_interval_seconds,
     )
+    plans = PlanStore(config, config_path)
     app.on_shutdown(live_collector.stop)
     app.on_shutdown(snapshots.stop)
+    app.on_shutdown(plans.stop)
 
     async def start_snapshot_worker() -> None:
         # Load once so browser pages can use shared cached data.
@@ -41,6 +44,11 @@ def main(config_path: str = "config.yaml") -> None:
 
     app.on_startup(ensure_planning_worker)
     app.on_startup(start_snapshot_worker)
+
+    async def start_plan_worker() -> None:
+        background_tasks.create(plans.run_forever(), name="background plan updates")
+
+    app.on_startup(start_plan_worker)
 
     @ui.page("/")
     def render_dashboard_page() -> None:
@@ -57,6 +65,7 @@ def main(config_path: str = "config.yaml") -> None:
             config,
             live_collector,
             config_path=config_path,
+            plan_store=plans,
         )
         snapshot = snapshots.current()
         layout.historical_tab.render_mobile_historical_controls()
@@ -82,16 +91,25 @@ def main(config_path: str = "config.yaml") -> None:
 
         unsubscribe = snapshots.subscribe(apply_snapshot)
 
+        def apply_plan() -> None:
+            client.safe_invoke(layout.plan_tab.apply_shared_plan)
+
+        unsubscribe_plan = plans.subscribe(apply_plan)
+
         def resume_updates() -> None:
-            nonlocal unsubscribe
+            nonlocal unsubscribe, unsubscribe_plan
             unsubscribe()
             unsubscribe = snapshots.subscribe(apply_snapshot)
+            unsubscribe_plan()
+            unsubscribe_plan = plans.subscribe(apply_plan)
             latest_snapshot = snapshots.current()
             if latest_snapshot is not None:
                 apply_snapshot(latest_snapshot)
+            apply_plan()
 
         client.on_connect(resume_updates)
         client.on_disconnect(lambda: unsubscribe())
+        client.on_disconnect(lambda: unsubscribe_plan())
         ui.timer(
             config.actuals.data_retrival_schedule.live_update_interval_seconds,
             layout.refresh_live_power,

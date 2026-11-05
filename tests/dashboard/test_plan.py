@@ -6,7 +6,7 @@ import pandas as pd
 import pytest
 
 from solar_model.config import load_config
-from solar_model.dashboard.tabs.plan import detail_frame, detail_rows, detail_totals, hourly_detail_frame, plan_chart_options, scenario_summary, table_detail_frame
+from solar_model.dashboard.tabs.plan import advanced_detail_totals, detail_frame, detail_rows, detail_totals, hourly_detail_frame, plan_chart_options, scenario_summary, table_detail_frame
 from solar_model.planning.types import NextAction, OperatingMode, SimulationResult
 
 
@@ -55,10 +55,15 @@ def test_excel_filename_uses_applied_model_adjustment_scenario_and_plan_date(mon
     assert downloads[0]["filename"] == f"plan-{model}-{abbreviation}-protection-{adjustment:g}-solar-{solar}-load-{load}-20261027-1005.xlsx"
     assert exported_frames[0].Start.iloc[0] == "2026-10-27 10:05:00"
     assert exported_frames[0].End.iloc[0] == "2026-10-27 10:20:00"
-    action_column = "Action" if view == "Compact" else "Plan action"
-    assert exported_frames[0][action_column].tolist() == ["Force discharge", "Force charge", None]
+    action_column = "Action"
+    expected_actions = ["Force discharge", "Force charge", None, None, None] if view == "Advanced" else ["Force discharge", "Force charge", None]
+    assert exported_frames[0][action_column].tolist() == expected_actions
     if view == "Advanced":
-        assert exported_frames[0]["Limit Score"].tolist() == [-2., -3., -5.]
+        assert exported_frames[0].Start.tolist()[-3:] == ["0–24h", "24–48h", "Total"]
+        assert exported_frames[0]["Limit score"].iloc[-3:].tolist()[0] == -5.
+        assert pd.isna(exported_frames[0]["Limit score"].iloc[-2])
+        assert exported_frames[0]["Limit score"].iloc[-1] == -5.
+        assert not {"Battery start (kWh)", "Battery start SOC (%)", "Solar To Inverter kWh", "Battery To Inverter kWh", "Battery Charge Loss kWh"} & set(exported_frames[0])
     else:
         assert "Limit Score" not in exported_frames[0]
     assert plan.detail_rows(frame, tab.config.timezone)[0]["starts_at"] == "10:05"
@@ -75,9 +80,25 @@ def test_column_metadata_controls_views_and_keeps_unknown_advanced_fields():
     assert "extra_power_kw" not in names
     assert next(column for column in compact if column["name"] == "load_kwh")["label"] == "House (kWh)"
     advanced = detail_columns(frame, compact=False)
-    assert next(column for column in advanced if column["name"] == "load_kwh")["label"] == "House Load (kWh)"
+    assert next(column for column in advanced if column["name"] == "load_kwh")["label"] == "Load\nkWh"
+    assert next(column for column in advanced if column["name"] == "t")["label"] == "hours"
     assert advanced[-1]["name"] == "extra_power_kw"
     assert all(column["sortable"] is False for column in advanced)
+
+
+def test_advanced_columns_show_only_summary_losses_and_short_flow_names():
+    from solar_model.dashboard.tabs.plan import ADVANCED_HIDDEN_COLUMNS, detail_columns
+
+    frame = detail_frame(sample_result().results["med"].assign(
+        solar_to_load_kwh=[.1, .2], solar_to_battery_kwh=[.2, .3],
+        solar_to_inverter_kwh=[.3, .5], battery_to_inverter_kwh=[0., .1],
+    ), 20.)
+    columns = {column["name"]: column for column in detail_columns(frame, compact=False)}
+    assert not ADVANCED_HIDDEN_COLUMNS & columns.keys()
+    assert columns["solar_to_load_kwh"]["label"] == "S→L\nkWh"
+    assert columns["solar_to_battery_kwh"]["label"] == "S→B\nkWh"
+    assert columns["losses_kwh"]["label"] == "Losses\nkWh"
+    assert frame.losses_kwh.tolist() == pytest.approx([.07, .11])
 
 
 def test_scenario_average_cost_uses_joint_probabilities():
@@ -150,17 +171,33 @@ def test_detail_rows_show_local_time_only_and_preserve_missing_values():
     assert frame.solar_kwh.isna().iloc[0]
 
 
-def test_table_scores_are_hourly_rates_whose_time_weighted_sum_matches_contributions():
-    original = sample_result().results["med"].assign(limit_score=[-2., -3.])
+def test_table_scores_keep_terminal_and_total_as_period_contributions():
+    original = sample_result().results["med"].assign(limit_score=[-2., -3.], terminal_score=[0., 4.], total_score=[-2.99, 1.27])
     display = table_detail_frame(original)
     assert display.t.tolist() == [.25, 1.]
     assert display.cost_score.tolist() == [-4., .25]
     assert display.protection_score.tolist() == [.04, .02]
     assert display.limit_score.tolist() == [-8., -3.]
-    for column in ("cost_score", "protection_score", "limit_score", "total_score"):
+    for column in ("cost_score", "protection_score", "limit_score"):
         assert (display[column] * display.t).sum() == pytest.approx(original[column].sum())
+    assert display.terminal_score.tolist() == [0., 4.]
+    assert display.total_score.tolist() == [-2.99, 1.27]
     assert "t" not in original
     assert original.protection_score.tolist() == [.01, .02]
+
+
+def test_partial_final_interval_does_not_scale_terminal_credit():
+    start = pd.Timestamp("2026-11-07T10:00:00Z")
+    frame = pd.DataFrame({
+        "starts_at": [start], "ends_at": [start + pd.Timedelta(minutes=9, seconds=39)],
+        "cost_score": [0.], "protection_score": [.0029],
+        "terminal_score": [4.6943], "total_score": [4.6972],
+    })
+    display = table_detail_frame(frame)
+    assert display.t.iloc[0] == pytest.approx(579 / 3600)
+    assert display.protection_score.iloc[0] == pytest.approx(.0029 / (579 / 3600))
+    assert display.terminal_score.iloc[0] == 4.6943
+    assert display.total_score.iloc[0] == 4.6972
 
 
 def test_detail_totals_sum_flows_and_costs_without_summing_levels_or_rates():
@@ -179,6 +216,24 @@ def test_detail_totals_sum_flows_and_costs_without_summing_levels_or_rates():
     for column in ("ends_at", "battery_start_kwh", "battery_end_kwh", "minimum_battery_kwh",
                    "maximum_battery_kwh", "import_rate", "limit_battery_export_rate_to_grid_kw", "solar_clipped_kwh"):
         assert totals[column] is None
+
+
+def test_advanced_totals_split_crossing_interval_and_keep_terminal_credit_at_end():
+    start = pd.Timestamp("2026-11-05T00:00:00Z")
+    frame = pd.DataFrame({
+        "starts_at": [start, start + pd.Timedelta(hours=23)],
+        "ends_at": [start + pd.Timedelta(hours=23), start + pd.Timedelta(hours=26)],
+        "solar_kwh": [23., 6.], "cost_score": [-23., -6.],
+        "terminal_score": [0., 4.], "total_score": [-23., -2.], "t": [23., 3.],
+        "battery_end_kwh": [4., 3.],
+    })
+    first, second, total = advanced_detail_totals(frame)
+    assert [row["starts_at"] for row in (first, second, total)] == ["0–24h", "24–48h", "Total"]
+    assert [row["t"] for row in (first, second, total)] == [24., 2., 26.]
+    assert [row["solar_kwh"] for row in (first, second, total)] == [25., 4., 29.]
+    assert [row["terminal_score"] for row in (first, second, total)] == [0., 4., 4.]
+    assert [row["total_score"] for row in (first, second, total)] == [-25., 0., -25.]
+    assert all(row["battery_end_kwh"] is None for row in (first, second, total))
 
 
 def test_detail_actions_use_shared_first_mode_and_later_grid_battery_flows():
@@ -446,14 +501,14 @@ def test_advanced_plan_details_use_period_power_and_projected_battery_targets():
     frame = detail_frame(original, 20.)
     advanced = advanced_plan_frame(frame, "Europe/Dublin", OperatingMode.DISCHARGE_PV_FIRST)
     assert advanced.plan_action.tolist() == [
-        "Force discharge: grid export 2.00 kW to 4.20kWh/21.0%",
-        "Force discharge: grid export 0.10 kW to 3.00kWh/15.0%",
+        "Force discharge: export 2.00 kW to 4kWh/21%",
+        "Force discharge: export 0.10 kW to 3kWh/15%",
     ]
     assert detail_rows(advanced, "Europe/Dublin")[0]["plan_action"] == advanced.plan_action.iloc[0]
     assert detail_totals(advanced)["plan_action"] is None
     assert "plan_action" not in frame and "plan_action" not in original
-    missing_capacity = advanced_plan_frame(detail_frame(original, None), "Europe/Dublin")
-    assert "to 4.20kWh" in missing_capacity.plan_action.iloc[0]
+    missing_capacity = advanced_plan_frame(detail_frame(original, None), "Europe/Dublin", OperatingMode.DISCHARGE_PV_FIRST)
+    assert "to 4kWh" in missing_capacity.plan_action.iloc[0]
     assert "SoC" not in missing_capacity.plan_action.iloc[0]
 
 
@@ -463,11 +518,20 @@ def test_advanced_charge_details_use_import_power_for_shared_and_inferred_action
     original = sample_result().results["med"].assign(grid_export_kwh=0., grid_to_battery_kwh=[0., .6])
     advanced = advanced_plan_frame(detail_frame(original, 20.), "Europe/Dublin", OperatingMode.CHARGE_PV_FIRST)
     assert advanced.plan_action.tolist() == [
-        "Force charge: grid import 1.20 kW to 4.20kWh/21.0%",
-        "Force charge: grid import 0.80 kW to 3.00kWh/15.0%",
+        "Force charge: import 1.20 kW to 4kWh/21%",
+        "Force charge: import 0.80 kW to 3kWh/15%",
     ]
     assert detail_rows(advanced, "Europe/Dublin")[0]["plan_action"] == advanced.plan_action.iloc[0]
     assert "plan_action" not in original
+
+
+def test_advanced_self_consumption_has_no_flow_or_battery_suffix():
+    from solar_model.dashboard.tabs.plan import advanced_plan_frame
+
+    frame = detail_frame(sample_result().results["med"], 20.)
+    advanced = advanced_plan_frame(frame, "Europe/Dublin", OperatingMode.SELF_CONSUMPTION)
+    assert advanced.plan_action.iloc[0] == "Self-consumption"
+    assert "plan_action" not in frame
 
 
 @pytest.mark.parametrize("wrapped", [False, True])
@@ -550,7 +614,7 @@ def test_policy_labels_survive_detail_grouping_and_advanced_formatting():
     hourly = hourly_detail_frame(frame, "Europe/Dublin", OperatingMode.SELF_CONSUMPTION)
     assert hourly.plan_action.tolist() == ["Force discharge / Force charge", "Force charge"]
     advanced = advanced_plan_frame(frame, "Europe/Dublin")
-    assert advanced.plan_action.tolist() == ["Force discharge: grid export 0.00 kW to 4.20kWh/21.0%", "Force charge: grid import 0.80 kW to 3.00kWh/15.0%"]
+    assert advanced.plan_action.tolist() == ["Force discharge: export 0.00 kW to 4kWh/21%", "Force charge: import 0.80 kW to 3kWh/15%"]
     assert detail_totals(frame)["plan_action"] is None
 
 
@@ -569,7 +633,7 @@ def test_zero_rate_solar_export_uses_display_only_label(mode, label):
     zero = NextAction(mode, 0., 0.)
     assert detail_rows(frame, "Europe/Dublin", zero)[0]["plan_action"] == "Export Solar Excess"
     assert hourly_detail_frame(frame, "Europe/Dublin", zero).plan_action.iloc[0] == "Export Solar Excess"
-    assert advanced_plan_frame(frame, "Europe/Dublin", zero).plan_action.iloc[0].startswith("Export Solar Excess: grid export")
+    assert advanced_plan_frame(frame, "Europe/Dublin", zero).plan_action.iloc[0].startswith("Export Solar Excess: export")
     assert frame.plan_action.iloc[0] == label
     positive = NextAction(mode, 1., 1.)
     assert detail_rows(frame, "Europe/Dublin", positive)[0]["plan_action"] == label

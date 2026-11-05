@@ -25,6 +25,7 @@ def test_plan_refresh_scenarios_loading_and_failure(tmp_path):
 import sys
 sys.path.insert(0, {str(repo)!r})
 import asyncio
+import cvxpy  # Import native solver dependencies before NiceGUI in this Windows test process.
 from dataclasses import replace
 import pandas as pd
 from nicegui import ui, run
@@ -54,6 +55,8 @@ async def calculate(callback, *args):
                 result.results[name] = result.results['med'].copy()
     as_of = as_of.replace(hour=10, minute=5, second=0, microsecond=0)
     for name, frame in result.results.items():
+        frame = frame.assign(solar_to_load_kwh=0., solar_to_battery_kwh=0., solar_to_grid_kwh=0.,
+                             grid_to_load_kwh=0., grid_to_battery_kwh=0., battery_to_load_kwh=0., battery_to_grid_kwh=0.)
         frame = pd.concat([frame] * 10, ignore_index=True)
         frame['starts_at'] = pd.date_range(as_of, periods=20, freq='15min')
         frame['ends_at'] = frame['starts_at'] + pd.Timedelta(minutes=15)
@@ -178,14 +181,14 @@ if __name__ == '__main__':
                 assert page.get_by_text("Records per page:", exact=True).count() == 0
                 assert page.locator(".q-table tbody tr").last.locator("td").first.inner_text() == "Total"
                 assert page.locator(".q-table tbody tr").last.locator("td").nth(8).inner_text() == "25.00"
-                assert page.locator(".q-table tbody tr").last.locator("td").nth(9).inner_text() == "2.50"
+                assert page.locator(".q-table tbody tr").last.locator("td").nth(9).inner_text() == "2.80"
                 assert page.locator(".q-table tbody tr").first.locator("td").nth(0).inner_text() == "10:05"
                 assert page.locator(".q-table tbody tr").first.locator("td").nth(1).inner_text() == "11:00"
                 assert page.locator(".q-table tbody tr").first.locator("td").nth(5).inner_text() == "0.4000"
                 assert page.locator(".q-table tbody tr").first.locator("td").nth(2).inner_text() == "0.92"
                 assert page.locator(".q-table tbody tr").last.locator("td").nth(2).inner_text() == "5.00"
                 page.get_by_role("columnheader", name="SOC (%)", exact=True).wait_for()
-                expected_headers = ["Start", "End", "t", "Action", "Tariff", "Import rate", "Export rate",
+                expected_headers = ["Start", "End", "hours", "Action", "Tariff", "Import rate", "Export rate",
                                     "House", "Solar", "Losses", "Import", "Export",
                                     "Battery", "SOC", "Cost", "Revenue", "Net"]
                 headers = page.get_by_role("columnheader").all_text_contents()
@@ -195,37 +198,43 @@ if __name__ == '__main__':
                 compact_count = page.get_by_role("columnheader").count()
                 compact_end = page.get_by_test_id("plan-chart").evaluate("element => echarts.getInstanceByDom(element).getOption().series[1].data.at(-1)[0]")
                 page.get_by_role("button", name="Advanced", exact=True).click()
-                page.get_by_role("columnheader", name="Battery start (kWh)", exact=True).wait_for()
-                for label in ("Cost Score", "Protection Score", "Terminal Score", "Total Score"):
+                page.get_by_role("columnheader", name="Battery end kWh", exact=True).wait_for()
+                for label in ("Cost score", "Protection score", "Terminal score", "Total score"):
                     page.get_by_role("columnheader", name=label, exact=True).wait_for()
-                advanced_headers = page.get_by_role("columnheader").all_text_contents()
+                page.get_by_text("Flow key:", exact=False).wait_for()
+                advanced_headers = [header.replace("\n", " ").strip() for header in page.get_by_role("columnheader").all_text_contents()]
                 action_text = page.locator(".q-table tbody tr").first.locator("td").nth(3).inner_text()
-                assert "Self-consumption: 0.00kW" in action_text
-                assert "to 4.20kWh/21.0%" in action_text
+                assert action_text == "Self-consumption"
                 loss_index = advanced_headers.index("Losses kWh")
-                assert page.locator(".q-table tbody tr").last.locator("td").nth(loss_index).inner_text() == "2.04"
-                assert advanced_headers[:5] == ["Start", "End", "t", "Plan action", "Tariff Name"]
-                assert advanced_headers.index("House Load (kWh)") < advanced_headers.index("Solar kWh")
-                ordered_sections = ["Solar To Battery Loss kWh", "Grid To Battery Loss kWh", "Battery To Ac Loss kWh",
-                                    "Losses kWh", "Grid Import kWh", "Grid Export kWh", "Battery start (kWh)",
-                                    "Battery end (kWh)", "Cost Score", "Protection Score", "Terminal Score", "Total Score"]
+                assert page.locator(".q-table tbody tr").last.locator("td").nth(loss_index).inner_text() == "2.46"
+                assert advanced_headers[:5] == ["Start", "End", "hours", "Action", "Tariff"]
+                assert advanced_headers.index("Load kWh") < advanced_headers.index("Solar kWh")
+                assert not any("Battery start" in header or "Loss kWh" in header for header in advanced_headers)
+                ordered_sections = ["S→B kWh", "G→B kWh", "B→G kWh", "Losses kWh", "Import kWh", "Export kWh",
+                                    "Battery end kWh", "Cost score", "Protection score", "Terminal score", "Total score"]
                 assert [advanced_headers.index(name) for name in ordered_sections] == sorted(advanced_headers.index(name) for name in ordered_sections)
-                terminal_index = advanced_headers.index("Terminal Score")
+                terminal_index = advanced_headers.index("Terminal score")
                 assert page.locator(".q-table tbody tr").first.locator("td").nth(terminal_index).inner_text() == "0.00"
-                assert page.locator(".q-table tbody tr").nth(-2).locator("td").nth(terminal_index).inner_text() == "0.13"
+                assert page.locator(".q-table tbody tr").nth(-4).locator("td").nth(terminal_index).inner_text() == "0.50"
+                assert page.locator(".q-table tbody tr").nth(-3).locator("td").first.inner_text() == "0–24h"
+                assert page.locator(".q-table tbody tr").nth(-2).locator("td").first.inner_text() == "24–48h"
+                assert page.locator(".q-table tbody tr").nth(-3).locator("td").nth(terminal_index).inner_text() == "0.00"
+                assert page.locator(".q-table tbody tr").nth(-2).locator("td").nth(terminal_index).inner_text() == "0.50"
                 assert page.locator(".q-table tbody tr").last.locator("td").nth(terminal_index).inner_text() == "0.50"
                 assert page.locator(".q-table tbody tr").first.locator("td").nth(2).inner_text() == "0.25"
-                assert page.locator(".q-table tbody tr").count() == 27
+                assert page.locator(".q-table tbody tr").count() == 29
+                assert page.locator(".q-table tbody tr").nth(-3).locator("td").nth(2).inner_text() == "24.00"
+                assert page.locator(".q-table tbody tr").nth(-2).locator("td").nth(2).inner_text() == "5.00"
                 assert page.locator(".q-table tbody tr").last.locator("td").nth(2).inner_text() == "29.00"
                 assert page.get_by_test_id("plan-chart").evaluate("element => echarts.getInstanceByDom(element).getOption().series[1].data.at(-1)[0]") == compact_end + 24 * 3600 * 1000
                 assert page.get_by_role("columnheader").count() > compact_count
-                # Both views share column sizing, typography and spacing on desktop/mobile.
+                # Advanced headers and horizontal scrolling remain usable on desktop/mobile.
                 def table_style():
                     return page.locator(".plan-detail-table").evaluate("""element => {
                         const properties = ['fontSize', 'lineHeight', 'paddingTop', 'paddingRight',
                             'paddingBottom', 'paddingLeft', 'marginTop', 'marginRight', 'marginBottom',
                             'marginLeft', 'minWidth', 'maxWidth', 'whiteSpace', 'borderSpacing'];
-                        return ['th', 'td'].map(selector => {
+                        return ['th', 'td', 'th:nth-child(6)', 'td:nth-child(6)'].map(selector => {
                             const style = getComputedStyle(element.querySelector(selector));
                             return Object.fromEntries(properties.map(key => [key, style[key]]));
                         });
@@ -234,15 +243,24 @@ if __name__ == '__main__':
                 for width in (1440, 390):
                     page.set_viewport_size({"width": width, "height": 1100})
                     advanced_style = table_style()
+                    assert advanced_style[0]["whiteSpace"] == "pre-line"
+                    assert advanced_style[0]["maxWidth"] == "144px"
+                    assert advanced_style[0]["minWidth"] == "0px"
+                    assert advanced_style[0]["paddingLeft"] == "3px"
+                    assert float(advanced_style[2]["minWidth"].removesuffix("px")) == pytest.approx(70.4, abs=.5)
+                    assert float(advanced_style[2]["maxWidth"].removesuffix("px")) == pytest.approx(153.6, abs=.5)
+                    assert float(advanced_style[2]["paddingLeft"].removesuffix("px")) == pytest.approx(3.2, abs=.1)
+                    page.screenshot(path=str(tmp_path / f"plan-advanced-{width}.png"), full_page=True)
                     page.get_by_role("button", name="Compact", exact=True).click()
-                    page.wait_for_function("!Array.from(document.querySelectorAll('th')).some(e => e.textContent.includes('Battery start'))")
-                    assert table_style() == advanced_style
+                    page.wait_for_function("!Array.from(document.querySelectorAll('th')).some(e => e.textContent.includes('S→B'))")
+                    assert table_style()[0]["maxWidth"] == advanced_style[0]["maxWidth"]
                     page.get_by_role("button", name="Advanced", exact=True).click()
-                    page.get_by_role("columnheader", name="Battery start (kWh)", exact=True).wait_for()
+                    page.get_by_role("columnheader", name="S→B kWh", exact=True).wait_for()
+                    assert table_style() == advanced_style
                     assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth + 1")
                 page.set_viewport_size({"width": 1440, "height": 1100})
                 page.get_by_role("button", name="Compact", exact=True).click()
-                page.wait_for_function("!Array.from(document.querySelectorAll('th')).some(e => e.textContent.includes('Battery start'))")
+                page.wait_for_function("!Array.from(document.querySelectorAll('th')).some(e => e.textContent.includes('S→B'))")
                 assert page.get_by_test_id("plan-chart").evaluate("element => echarts.getInstanceByDom(element).getOption().series[1].data.at(-1)[0]") == compact_end
                 with page.expect_download() as download_info:
                     page.get_by_role("button", name="Download Excel", exact=True).click()

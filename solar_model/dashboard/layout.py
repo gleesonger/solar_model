@@ -227,9 +227,33 @@ def render_dashboard_styles() -> None:
             white-space: normal;
             max-width: 9rem;
         }
+        .plan-detail-table--advanced .q-table th {
+            white-space: pre-line;
+            line-height: 1.15;
+        }
+        .plan-detail-table--advanced .q-table th:nth-child(-n+5) {
+            min-width: 0;
+            max-width: 9rem;
+        }
+        .plan-detail-table--advanced .q-table th:nth-child(-n+5),
+        .plan-detail-table--advanced .q-table td:nth-child(-n+5) {
+            padding-inline: 3px;
+        }
+        .plan-detail-table--advanced .q-table th:nth-child(n+6) {
+            min-width: 4.4rem;
+            max-width: 9.6rem;
+        }
+        .plan-detail-table--advanced .q-table th:nth-child(n+6),
+        .plan-detail-table--advanced .q-table td:nth-child(n+6) {
+            padding-inline: 3.2px;
+        }
         .plan-detail-table .q-table td {
             white-space: nowrap;
             font-variant-numeric: tabular-nums;
+        }
+        .plan-detail-table .q-table tr.plan-subtotal-row td {
+            background-color: #f8fafc;
+            font-weight: 600;
         }
         .summary-total-table tbody tr:last-child td {
             background-color: #f1f3f5 !important;

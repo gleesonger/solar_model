@@ -56,32 +56,32 @@ PLAN_COLUMNS = {column.name: column for column in table_to_object_list(PlanColum
     #name                                    label                                   compact_label    compact_order format    decimals aggregation                per_hour export
     ("starts_at",                            "Start",                                None,            1,            "time",   None,    Aggregation.START_TIME,    False,   True),
     ("ends_at",                              "End",                                  None,            2,            "time",   None,    Aggregation.END_TIME,      False,   True),
-    ("t",                                    "t",                                    None,            3,            "number", 2,       Aggregation.DURATION,      False,   False),
-    ("plan_action",                          "Plan action",                          "Action",        4,            "text",   None,    Aggregation.TEXT,          False,   True),
-    ("tariff_name",                          "Tariff Name",                          "Tariff",        5,            "text",   None,    Aggregation.TEXT,          False,   True),
+    ("t",                                    "hours",                                None,            3,            "number", 2,       Aggregation.DURATION,      False,   False),
+    ("plan_action",                          "Action",                               "Action",        4,            "text",   None,    Aggregation.TEXT,          False,   True),
+    ("tariff_name",                          "Tariff",                               "Tariff",        5,            "text",   None,    Aggregation.TEXT,          False,   True),
     ("import_rate",                          "Import rate (€/kWh)",                  None,            6,            "number", 4,       Aggregation.AVERAGE,       False,   True),
     ("export_rate",                          "Export rate (€/kWh)",                  None,            7,            "number", 4,       Aggregation.AVERAGE,       False,   True),
     ("load_kwh",                             "House Load (kWh)",                     "House (kWh)",   8,            "number", 2,       Aggregation.QUANTITY,      False,   True),
     ("solar_kwh",                            "Solar kWh",                            "Solar (kWh)",   9,            "number", 2,       Aggregation.QUANTITY,      False,   True),
-    ("solar_to_load_kwh",                    "Solar To Load kWh",                    None,            None,         "number", 2,       Aggregation.QUANTITY,      False,   True),
-    ("solar_to_battery_kwh",                 "Solar To Battery kWh",                 None,            None,         "number", 2,       Aggregation.QUANTITY,      False,   True),
+    ("solar_to_load_kwh",                    "S→L\nkWh",                            None,            None,         "number", 2,       Aggregation.QUANTITY,      False,   True),
+    ("solar_to_battery_kwh",                 "S→B\nkWh",                            None,            None,         "number", 2,       Aggregation.QUANTITY,      False,   True),
     ("battery_charge_loss_kwh",              "Battery Charge Loss kWh",              None,            None,         "number", 2,       Aggregation.QUANTITY,      False,   True),
-    ("solar_to_grid_kwh",                    "Solar To Grid kWh",                    None,            None,         "number", 2,       Aggregation.QUANTITY,      False,   True),
-    ("solar_clipped_kwh",                    "Solar Clipped kWh",                    None,            None,         "number", 2,       Aggregation.QUANTITY,      False,   True),
+    ("solar_to_grid_kwh",                    "S→G\nkWh",                            None,            None,         "number", 2,       Aggregation.QUANTITY,      False,   True),
+    ("solar_clipped_kwh",                    "Clipped\nkWh",                        None,            None,         "number", 2,       Aggregation.QUANTITY,      False,   True),
     ("solar_to_inverter_kwh",                "Solar To Inverter kWh",                None,            None,         "number", 2,       Aggregation.QUANTITY,      False,   True),
-    ("grid_to_load_kwh",                     "Grid To Load kWh",                     None,            None,         "number", 2,       Aggregation.QUANTITY,      False,   True),
-    ("grid_to_battery_kwh",                  "Grid To Battery kWh",                  None,            None,         "number", 2,       Aggregation.QUANTITY,      False,   True),
+    ("grid_to_load_kwh",                     "G→L\nkWh",                            None,            None,         "number", 2,       Aggregation.QUANTITY,      False,   True),
+    ("grid_to_battery_kwh",                  "G→B\nkWh",                            None,            None,         "number", 2,       Aggregation.QUANTITY,      False,   True),
     ("inverter_ac_to_dc_loss_kwh",           "Inverter AC To DC Loss kWh",           None,            None,         "number", 2,       Aggregation.QUANTITY,      False,   True),
-    ("inverter_ac_to_dc_kwh",                "Inverter Ac To Dc kWh",                None,            None,         "number", 2,       Aggregation.QUANTITY,      False,   True),
-    ("battery_to_load_kwh",                  "Battery To Load kWh",                  None,            None,         "number", 2,       Aggregation.QUANTITY,      False,   True),
-    ("battery_to_grid_kwh",                  "Battery To Grid kWh",                  None,            None,         "number", 2,       Aggregation.QUANTITY,      False,   True),
+    ("inverter_ac_to_dc_kwh",                "AC→DC\nkWh",                          None,            None,         "number", 2,       Aggregation.QUANTITY,      False,   True),
+    ("battery_to_load_kwh",                  "B→L\nkWh",                            None,            None,         "number", 2,       Aggregation.QUANTITY,      False,   True),
+    ("battery_to_grid_kwh",                  "B→G\nkWh",                            None,            None,         "number", 2,       Aggregation.QUANTITY,      False,   True),
     ("battery_discharge_loss_kwh",           "Battery Discharge Loss kWh",           None,            None,         "number", 2,       Aggregation.QUANTITY,      False,   True),
     ("inverter_dc_to_ac_loss_kwh",           "Inverter DC To AC Loss kWh",           None,            None,         "number", 2,       Aggregation.QUANTITY,      False,   True),
     ("battery_to_inverter_kwh",              "Battery To Inverter kWh",              None,            None,         "number", 2,       Aggregation.QUANTITY,      False,   True),
-    ("inverter_dc_to_ac_kwh",                "Inverter Dc To Ac kWh",                None,            None,         "number", 2,       Aggregation.QUANTITY,      False,   True),
-    ("losses_kwh",                           "Losses kWh",                           "Losses (kWh)",  10,           "number", 2,       Aggregation.QUANTITY,      False,   True),
-    ("grid_import_kwh",                      "Grid Import kWh",                      "Import (kWh)",  11,           "number", 2,       Aggregation.QUANTITY,      False,   True),
-    ("grid_export_kwh",                      "Grid Export kWh",                      "Export (kWh)",  12,           "number", 2,       Aggregation.QUANTITY,      False,   True),
+    ("inverter_dc_to_ac_kwh",                "DC→AC\nkWh",                          None,            None,         "number", 2,       Aggregation.QUANTITY,      False,   True),
+    ("losses_kwh",                           "Losses\nkWh",                         "Losses (kWh)",  10,           "number", 2,       Aggregation.QUANTITY,      False,   True),
+    ("grid_import_kwh",                      "Import\nkWh",                         "Import (kWh)",  11,           "number", 2,       Aggregation.QUANTITY,      False,   True),
+    ("grid_export_kwh",                      "Export\nkWh",                         "Export (kWh)",  12,           "number", 2,       Aggregation.QUANTITY,      False,   True),
     ("minimum_battery_kwh",                  "Minimum Battery kWh",                  None,            None,         "number", 2,       Aggregation.SETTING,       False,   True),
     ("maximum_battery_kwh",                  "Maximum Battery kWh",                  None,            None,         "number", 2,       Aggregation.SETTING,       False,   True),
     ("limit_battery_export_rate_to_grid_kw", "Limit Battery Export Rate To Grid kW", None,            None,         "number", 2,       Aggregation.SETTING,       False,   True),
@@ -96,9 +96,41 @@ PLAN_COLUMNS = {column.name: column for column in table_to_object_list(PlanColum
     ("cost_score",                           "Cost Score",                           None,            None,         "number", 2,       Aggregation.QUANTITY,      True,    True),
     ("protection_score",                     "Protection Score",                     None,            None,         "number", 2,       Aggregation.QUANTITY,      True,    True),
     ("limit_score",                          "Limit Score",                          None,            None,         "number", 2,       Aggregation.QUANTITY,      True,    True),
-    ("terminal_score",                       "Terminal Score",                       None,            None,         "number", 2,       Aggregation.QUANTITY,      True,    True),
-    ("total_score",                          "Total Score",                          None,            None,         "number", 2,       Aggregation.QUANTITY,      True,    True),
+    ("terminal_score",                       "Terminal Score",                       None,            None,         "number", 2,       Aggregation.QUANTITY,      False,   True),
+    ("total_score",                          "Total Score",                          None,            None,         "number", 2,       Aggregation.QUANTITY,      False,   True),
 )}
+
+ADVANCED_HIDDEN_COLUMNS = {
+    "battery_start_kwh",
+    "battery_start_soc_percent",
+    "solar_to_inverter_kwh",
+    "battery_to_inverter_kwh",
+    "battery_charge_loss_kwh",
+    "battery_discharge_loss_kwh",
+    "inverter_ac_to_dc_loss_kwh",
+    "inverter_dc_to_ac_loss_kwh",
+}
+
+ADVANCED_LABELS = {
+    "import_rate": "Import rate\n€/kWh",
+    "export_rate": "Export rate\n€/kWh",
+    "load_kwh": "Load\nkWh",
+    "solar_kwh": "Solar\nkWh",
+    "minimum_battery_kwh": "Battery min\nkWh",
+    "maximum_battery_kwh": "Battery max\nkWh",
+    "limit_battery_export_rate_to_grid_kw": "Battery export\nlimit kW",
+    "battery_charging": "Charging",
+    "battery_end_kwh": "Battery end\nkWh",
+    "battery_end_soc_percent": "Battery end\nSOC %",
+    "import_cost": "Import cost\n€",
+    "export_revenue": "Export revenue\n€",
+    "net_cost": "Net cost\n€",
+    "cost_score": "Cost\nscore",
+    "protection_score": "Protection\nscore",
+    "limit_score": "Limit\nscore",
+    "terminal_score": "Terminal\nscore",
+    "total_score": "Total\nscore",
+}
 
 
 def detail_column(name: str) -> PlanColumn:
@@ -118,11 +150,12 @@ def detail_columns(frame: pd.DataFrame, compact: bool) -> list[dict]:
         definitions = sorted((column for column in definitions if column.compact_order is not None),
                              key=lambda column: column.compact_order)
     else:
-        definitions += [detail_column(name) for name in frame if name not in PLAN_COLUMNS]
+        definitions = [column for column in definitions if column.name not in ADVANCED_HIDDEN_COLUMNS]
+        definitions += [detail_column(name) for name in frame if name not in PLAN_COLUMNS and name not in ADVANCED_HIDDEN_COLUMNS]
     columns = []
     for definition in definitions:
         column = {"name": definition.name, "field": definition.name,
-                  "label": (definition.compact_label or definition.label) if compact else definition.label,
+                  "label": (definition.compact_label or definition.label) if compact else ADVANCED_LABELS.get(definition.name, definition.label),
                   "align": "right" if definition.format == "number" else "left", "sortable": False}
         if definition.decimals is not None:
             column[":format"] = f"value => value == null ? '' : Number(value).toFixed({definition.decimals})"
@@ -163,7 +196,7 @@ def scenario_summary(frame: pd.DataFrame, reserve: float) -> dict[str, float]:
 
 
 def table_detail_frame(frame: pd.DataFrame) -> pd.DataFrame:
-    """Show hourly score rates and elapsed-hour weights without changing exports."""
+    """Show hourly rates for period scores; retain terminal and total contributions."""
     display = frame.copy()
     hours = (pd.to_datetime(frame.ends_at) - pd.to_datetime(frame.starts_at)).dt.total_seconds() / 3600
     display["t"] = hours
@@ -230,18 +263,21 @@ def advanced_plan_frame(frame: pd.DataFrame, timezone_name: str, first_mode: Ope
     display = frame.copy()
     actions = []
     for row, formatted in zip(frame.to_dict("records"), detail_rows(frame, timezone_name, first_mode)):
+        if formatted["plan_action"] == "Self-consumption":
+            actions.append("Self-consumption")
+            continue
         parts = []
         hours = (row["ends_at"] - row["starts_at"]).total_seconds() / 3600
         grid_direction = "import" if formatted["plan_action"] == "Force charge" else "export"
         energy = row.get(f"grid_{grid_direction}_kwh")
         if hours > 0 and pd.notna(energy):
-            parts.append(f"grid {grid_direction} {energy / hours:.2f} kW")
+            parts.append(f"{grid_direction} {energy / hours:.2f} kW")
         target = row.get("battery_end_kwh")
         if pd.notna(target):
-            text = f"{target:.2f}kWh"
+            text = f"{target:.0f}kWh"
             soc = row.get("battery_end_soc_percent")
             if pd.notna(soc):
-                text += f"/{soc:.1f}%"
+                text += f"/{soc:.0f}%"
             parts.append(text)
         actions.append(formatted["plan_action"] + (": " + " to ".join(parts) if parts else ""))
     display["plan_action"] = actions
@@ -274,6 +310,40 @@ def detail_totals(frame: pd.DataFrame) -> dict:
             value = pd.to_numeric(frame[column]).sum(min_count=1)
             totals[column] = round(float(value), 4) if pd.notna(value) else None
     return totals
+
+
+def advanced_detail_totals(frame: pd.DataFrame) -> list[dict]:
+    """Summarise elapsed hours 0–24, the remaining horizon and the full plan."""
+    starts = pd.to_datetime(frame.starts_at, utc=True)
+    ends = pd.to_datetime(frame.ends_at, utc=True)
+    boundary = starts.iloc[0] + pd.Timedelta(hours=24)
+
+    def subtotal(begin: pd.Timestamp, end: pd.Timestamp, label: str) -> dict:
+        overlap = pd.Series([max(0., (min(stop, end) - max(start, begin)).total_seconds()) for start, stop in zip(starts, ends)], index=frame.index)
+        fraction = overlap / (ends - starts).dt.total_seconds()
+        subset = frame.loc[fraction > 0].copy()
+        fraction = fraction.loc[subset.index]
+        endpoint = pd.Series([(begin < stop <= end) for stop in ends], index=frame.index).loc[subset.index]
+        terminal = pd.to_numeric(subset["terminal_score"], errors="coerce") if "terminal_score" in subset else None
+        for column in subset:
+            aggregation = detail_column(column).aggregation
+            if aggregation == Aggregation.DURATION:
+                subset[column] = overlap.loc[subset.index] / 3600
+            elif aggregation == Aggregation.QUANTITY:
+                values = pd.to_numeric(subset[column], errors="coerce")
+                if column == "terminal_score":
+                    subset[column] = values * endpoint
+                elif column == "total_score" and terminal is not None:
+                    subset[column] = (values - terminal) * fraction + terminal * endpoint
+                else:
+                    subset[column] = values * fraction
+        totals = detail_totals(subset)
+        totals["starts_at"] = label
+        return totals
+
+    first = subtotal(starts.iloc[0], boundary, "0–24h")
+    second = subtotal(boundary, ends.iloc[-1], "24–48h" if ends.iloc[-1] <= boundary + pd.Timedelta(hours=24) else "24h+")
+    return [first, second, detail_totals(frame)]
 
 
 def hourly_detail_frame(frame: pd.DataFrame, timezone_name: str, first_mode: OperatingMode | NextAction) -> pd.DataFrame:
@@ -608,27 +678,38 @@ class PlanTab:
                 with ui.row().classes("items-center gap-2 flex-wrap"):
                     ui.toggle(["Compact", "Advanced"], value=self.detail_view, on_change=self._detail_view_changed).props("dense no-caps")
                     ui.button("Download Excel", icon="download", on_click=lambda: self._download_detail(frame, columns)).props("flat dense")
+            if self.detail_view == "Advanced":
+                ui.label("Flow key: S = Solar · B = Battery · L = Household load · G = Grid. Arrows show energy direction, e.g. S→B is Solar to Battery.").classes("text-xs text-gray-600")
             columns = detail_columns(frame, compact=self.detail_view == "Compact")
             display = table_detail_frame(frame)
             table = ui.table(columns=columns, rows=detail_rows(display, self.config.timezone, self.result.next_action.mode), row_key="period", pagination=None).props("dense flat bordered").classes("w-full max-w-full")
-            totals = detail_totals(frame.assign(t=display.t))
-            for column in columns:
-                name = column["name"]
-                if totals.get(name) is not None and detail_decimal_places(name) is not None:
-                    totals[name] = f"{totals[name]:.{detail_decimal_places(name)}f}"
-            table.add_slot("bottom-row", "<q-tr>" + "".join(
-                f'<q-td class="text-{column["align"]}">{escape(str(totals[column["name"]])) if totals.get(column["name"]) is not None else ""}</q-td>'
-                for column in columns
-            ) + "</q-tr>")
+            if self.detail_view == "Advanced":
+                table.classes("plan-detail-table--advanced")
+            total_frame = frame.assign(t=display.t)
+            footer_rows = advanced_detail_totals(total_frame) if self.detail_view == "Advanced" else [detail_totals(total_frame)]
+            footer_html = []
+            for index, totals in enumerate(footer_rows):
+                for column in columns:
+                    name = column["name"]
+                    if totals.get(name) is not None and detail_decimal_places(name) is not None:
+                        totals[name] = f"{totals[name]:.{detail_decimal_places(name)}f}"
+                row_class = ' class="plan-subtotal-row"' if index < len(footer_rows) - 1 else ""
+                footer_html.append("<q-tr" + row_class + ">" + "".join(
+                    f'<q-td class="text-{column["align"]}">{escape(str(totals[column["name"]])) if totals.get(column["name"]) is not None else ""}</q-td>'
+                    for column in columns
+                ) + "</q-tr>")
+            table.add_slot("bottom-row", "".join(footer_html))
             mark_final_total_row(table).classes("plan-detail-table")
+            ui.element("div").classes("h-16")
 
     def _download_detail(self, frame: pd.DataFrame, columns: list[dict]) -> None:
         try:
             columns = [column for column in columns if detail_column(column["name"]).export]
             rows = detail_rows(frame, self.config.timezone, self.result.next_action.mode, time_format="%Y-%m-%d %H:%M:%S")
-            exported = pd.DataFrame([*rows, detail_totals(frame)])
+            footer_rows = advanced_detail_totals(frame) if self.detail_view == "Advanced" else [detail_totals(frame)]
+            exported = pd.DataFrame([*rows, *footer_rows])
             exported = exported.reindex(columns=[column["name"] for column in columns])
-            exported = exported.rename(columns={column["name"]: column["label"] for column in columns})
+            exported = exported.rename(columns={column["name"]: column["label"].replace("\n", " ") for column in columns})
             content = excel_bytes(exported, sheet_name="Plan detail")
             start = pd.Timestamp(frame.starts_at.iloc[0]).tz_convert(self.timezone)
             view = "com" if self.detail_view == "Compact" else "adv"

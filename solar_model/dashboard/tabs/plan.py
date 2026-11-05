@@ -530,11 +530,6 @@ class PlanTab:
 
     def apply_plan_settings(self, text: str) -> None:
         self.energy_plan_override = parse_energy_plan_yaml(self.config, text)
-        self._settings_changed()
-
-    def _settings_changed(self) -> None:
-        if not self.running:
-            self.refresh_button.enable()
 
     async def refresh(self) -> None:
         if self.running:
@@ -549,7 +544,6 @@ class PlanTab:
         self.settings_button.disable()
         self.status.set_visibility(False)
         as_of = datetime.now(timezone.utc).replace(microsecond=0)
-        succeeded = False
         try:
             await ensure_planning_worker()
             report = await run.cpu_bound(generate_plan_report, self.config, as_of, override)
@@ -562,7 +556,6 @@ class PlanTab:
             with self.output:
                 self._render_result()
             self.applied_adjustment = report.protection_preference if report.protection_preference is not None else preference
-            succeeded = True
         except Exception as error:
             if isinstance(error, SubprocessException) and error.original_type == NoFeasiblePlanError.__name__:
                 error = NoFeasiblePlanError(error.original_message)
@@ -578,7 +571,6 @@ class PlanTab:
             self.running = False
             self.loading.set_visibility(False)
             self.refresh_button.set_visibility(True)
-            self.refresh_button.set_enabled(not succeeded)
             self.settings_button.enable()
 
     def _render_result(self) -> None:

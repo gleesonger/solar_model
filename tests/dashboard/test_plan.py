@@ -543,14 +543,14 @@ def test_infeasible_refresh_reports_message_without_traceback(monkeypatch, caplo
     tab = plan.PlanTab(load_config())
     previous = sample_result()
     tab.result = previous
-    status, notices, enabled = [], [], []
+    status, notices, refresh_visibility = [], [], []
     control = SimpleNamespace(
         set_visibility=lambda value: None,
         disable=lambda: None,
         enable=lambda: None,
-        set_enabled=enabled.append,
     )
-    tab.refresh_button = tab.loading = tab.settings_button = control
+    tab.loading = tab.settings_button = control
+    tab.refresh_button = SimpleNamespace(set_visibility=refresh_visibility.append)
     tab.status = SimpleNamespace(set_visibility=lambda value: None, set_text=status.append)
 
     def fail():
@@ -569,7 +569,7 @@ def test_infeasible_refresh_reports_message_without_traceback(monkeypatch, caplo
     assert notices == ["Unable to calculate plan: unable to find a feasible energy plan on the dynamic-programming grid"]
     assert status == ["Plan refresh failed. The previous plan is still shown."]
     assert tab.result is previous and not tab.running
-    assert enabled == [True]
+    assert refresh_visibility == [False, True]
     assert all(record.exc_info is None for record in caplog.records)
 
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 
 from nicegui import app, background_tasks, ui
+from nicegui.client import Client
 
 from solar_model.config import load_config
 from solar_model.storage.migrations import open_database
@@ -38,8 +39,7 @@ def main(config_path: str = "config.yaml") -> None:
     app.on_shutdown(plans.stop)
 
     async def start_snapshot_worker() -> None:
-        # Load once so browser pages can use shared cached data.
-        await snapshots.refresh()
+        # Load on demand and pause summaries when no browser is subscribed.
         background_tasks.create(snapshots.run_forever(), name="dashboard snapshot worker")
 
     app.on_startup(ensure_planning_worker)
@@ -89,12 +89,12 @@ def main(config_path: str = "config.yaml") -> None:
 
             client.safe_invoke(update_client)
 
-        unsubscribe = snapshots.subscribe(apply_snapshot)
+        unsubscribe = lambda: None
 
         def apply_plan() -> None:
             client.safe_invoke(layout.plan_tab.apply_shared_plan)
 
-        unsubscribe_plan = plans.subscribe(apply_plan)
+        unsubscribe_plan = lambda: None
 
         def resume_updates() -> None:
             nonlocal unsubscribe, unsubscribe_plan
@@ -115,12 +115,15 @@ def main(config_path: str = "config.yaml") -> None:
             layout.refresh_live_power,
         )
 
+    # The explicit page owns per-browser outboxes; the implicit page is unused.
+    Client.auto_index_client.outbox.stop()
     ui.run(
         host=config.dashboard.host,
         port=config.dashboard.port,
         title="Solar dashboard",
         favicon=package_path("dashboard/assets/solar_power.svg"),
         reload=False,
+        binding_refresh_interval=0.25,
     )
 
 

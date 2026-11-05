@@ -112,13 +112,13 @@ solar_model.dashboard.app.main()
   ui.run(..., favicon=SVG file path, reload=False)
 
 app startup callbacks (scheduled independently)
-  start_snapshot_worker(): await snapshots.refresh(); start snapshots.run_forever()
+  start_snapshot_worker(): start snapshots.run_forever(), awaiting connected subscribers
   ensure_planning_worker(): await one shared asynchronous warm-up task
     configure_planning_worker(): replace unused default executor with one spawn worker
     await run.cpu_bound(services.planning.warm_planning_worker)
     import planning dependencies, initialise highspy.Highs(), return worker PID
     log worker ready/startup seconds; log failures without aborting dashboard startup
-  start_plan_worker(): start plans.run_forever(), polling committed full readings every second
+  start_plan_worker(): start plans.run_forever(), querying the latest committed full-reading timestamp every second
 
 each browser page
   DashboardLayout(config, live_collector)
@@ -136,7 +136,7 @@ One server-wide live collector, Recent snapshot store and in-memory plan store s
 
 At startup, `main_dashboard` passes the source-relative `solar_model/dashboard/assets/solar_power.svg` path to `ui.run(favicon=...)`. NiceGUI references `/favicon.ico` in the page icon link and serves the SVG file through that route. The SVG is not embedded in the page. Deploy the valid asset, restart the dashboard and reload the page; the fixed favicon URL may require browser cache refresh after image changes.
 
-`apply_snapshot` uses `client.safe_invoke` to update that client's UI context. Reconnect replaces the subscription and reapplies the current snapshot. Disconnect unsubscribes and reevaluates whether live polling should pause. The server snapshot worker continues refreshing without a connected browser; live Modbus polling does not.
+`apply_snapshot` uses `client.safe_invoke` to update that client's UI context. Reconnect replaces the subscription and reapplies the current snapshot. Disconnect unsubscribes and reevaluates whether live polling should pause. Recent snapshots and live Modbus polling pause without connected browsers. Background plan change detection continues independently.
 
 ## 5. Paths, timestamps, and utilities
 

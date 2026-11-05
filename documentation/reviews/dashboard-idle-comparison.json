@@ -1,0 +1,465 @@
+{
+  "platform": "Windows-11-10.0.26200-SP0",
+  "python": "3.12.10 (tags/v3.12.10:0cc8128, Apr  8 2025, 12:21:36) [MSC v.1943 64 bit (AMD64)]",
+  "dataset_sha256": "c4506b1e2f52ccdfbc3a682a725994821673ed7c45848f5e3f933f87bb93ef11",
+  "cases": [
+    {
+      "case": "initial",
+      "cpu_percent": 0.46830800466111544,
+      "cpu_seconds": 0.28125,
+      "wall_seconds": 60.05662879999727,
+      "first_55_seconds_cpu_percent": 0.34054191861189587,
+      "timestamp_queries": 60,
+      "summary_loads": 1,
+      "change_checks": 0,
+      "profiled_calls": 44276,
+      "profiled_seconds": 15.028506799601018,
+      "binding_iterations": 137,
+      "outbox_iterations": 137,
+      "server_iterations": 137,
+      "browser_connections": 0,
+      "samples": [
+        {
+          "elapsed": 5.014530799351633,
+          "cpu": 0.015625
+        },
+        {
+          "elapsed": 10.013068499974906,
+          "cpu": 0.03125
+        },
+        {
+          "elapsed": 15.01055849995464,
+          "cpu": 0.03125
+        },
+        {
+          "elapsed": 20.008487599901855,
+          "cpu": 0.046875
+        },
+        {
+          "elapsed": 25.008887199684978,
+          "cpu": 0.0625
+        },
+        {
+          "elapsed": 30.023486799560487,
+          "cpu": 0.078125
+        },
+        {
+          "elapsed": 35.03533689957112,
+          "cpu": 0.125
+        },
+        {
+          "elapsed": 40.049893899820745,
+          "cpu": 0.125
+        },
+        {
+          "elapsed": 45.06425669975579,
+          "cpu": 0.125
+        },
+        {
+          "elapsed": 50.06173549965024,
+          "cpu": 0.140625
+        },
+        {
+          "elapsed": 55.05930100008845,
+          "cpu": 0.1875
+        },
+        {
+          "elapsed": 60.05659499950707,
+          "cpu": 0.28125
+        }
+      ]
+    },
+    {
+      "case": "full_original_1hz",
+      "cpu_percent": 0.3640324030532769,
+      "cpu_seconds": 0.21875,
+      "wall_seconds": 60.090804600156844,
+      "first_55_seconds_cpu_percent": 0.3688051262769679,
+      "timestamp_queries": 0,
+      "summary_loads": 0,
+      "change_checks": 60,
+      "profiled_calls": 16585,
+      "profiled_seconds": 15.009292799979448,
+      "binding_iterations": 15,
+      "outbox_iterations": 0,
+      "server_iterations": 138,
+      "browser_connections": 0,
+      "samples": [
+        {
+          "elapsed": 4.999542200006545,
+          "cpu": 0.03125
+        },
+        {
+          "elapsed": 10.01354550011456,
+          "cpu": 0.03125
+        },
+        {
+          "elapsed": 15.027900299988687,
+          "cpu": 0.046875
+        },
+        {
+          "elapsed": 20.042435599491,
+          "cpu": 0.0625
+        },
+        {
+          "elapsed": 25.0387917002663,
+          "cpu": 0.09375
+        },
+        {
+          "elapsed": 30.035880000330508,
+          "cpu": 0.140625
+        },
+        {
+          "elapsed": 35.03229739982635,
+          "cpu": 0.15625
+        },
+        {
+          "elapsed": 40.03227039985359,
+          "cpu": 0.171875
+        },
+        {
+          "elapsed": 45.0456978995353,
+          "cpu": 0.171875
+        },
+        {
+          "elapsed": 50.060315599665046,
+          "cpu": 0.171875
+        },
+        {
+          "elapsed": 55.07651210017502,
+          "cpu": 0.203125
+        },
+        {
+          "elapsed": 60.09075689967722,
+          "cpu": 0.21875
+        }
+      ]
+    },
+    {
+      "case": "full_4hz",
+      "cpu_percent": 0.13006869331710752,
+      "cpu_seconds": 0.078125,
+      "wall_seconds": 60.06441520061344,
+      "first_55_seconds_cpu_percent": 0.14187013014866343,
+      "timestamp_queries": 0,
+      "summary_loads": 0,
+      "change_checks": 60,
+      "profiled_calls": 19576,
+      "profiled_seconds": 15.02213770058006,
+      "binding_iterations": 59,
+      "outbox_iterations": 0,
+      "server_iterations": 140,
+      "browser_connections": 0,
+      "samples": [
+        {
+          "elapsed": 5.01951349992305,
+          "cpu": 0.0
+        },
+        {
+          "elapsed": 10.017540300264955,
+          "cpu": 0.0
+        },
+        {
+          "elapsed": 15.032225100323558,
+          "cpu": 0.0
+        },
+        {
+          "elapsed": 20.02919270005077,
+          "cpu": 0.0
+        },
+        {
+          "elapsed": 25.04424769990146,
+          "cpu": 0.0
+        },
+        {
+          "elapsed": 30.059446500614285,
+          "cpu": 0.015625
+        },
+        {
+          "elapsed": 35.06389210000634,
+          "cpu": 0.046875
+        },
+        {
+          "elapsed": 40.071982400491834,
+          "cpu": 0.046875
+        },
+        {
+          "elapsed": 45.07185450010002,
+          "cpu": 0.0625
+        },
+        {
+          "elapsed": 50.068455800414085,
+          "cpu": 0.0625
+        },
+        {
+          "elapsed": 55.0679695000872,
+          "cpu": 0.078125
+        },
+        {
+          "elapsed": 60.064377300441265,
+          "cpu": 0.078125
+        }
+      ]
+    },
+    {
+      "case": "current_no_monitor_4hz",
+      "cpu_percent": 0.1561398248769473,
+      "cpu_seconds": 0.09375,
+      "wall_seconds": 60.04233710002154,
+      "first_55_seconds_cpu_percent": 0.1703557047669785,
+      "timestamp_queries": 60,
+      "summary_loads": 0,
+      "change_checks": 0,
+      "profiled_calls": 33510,
+      "profiled_seconds": 15.025607599876821,
+      "binding_iterations": 60,
+      "outbox_iterations": 0,
+      "server_iterations": 139,
+      "browser_connections": 0,
+      "samples": [
+        {
+          "elapsed": 5.000542799942195,
+          "cpu": 0.015625
+        },
+        {
+          "elapsed": 10.015694899484515,
+          "cpu": 0.046875
+        },
+        {
+          "elapsed": 15.012775799259543,
+          "cpu": 0.0625
+        },
+        {
+          "elapsed": 20.025922399945557,
+          "cpu": 0.0625
+        },
+        {
+          "elapsed": 25.041539900004864,
+          "cpu": 0.0625
+        },
+        {
+          "elapsed": 30.039859999902546,
+          "cpu": 0.078125
+        },
+        {
+          "elapsed": 35.03708779998124,
+          "cpu": 0.078125
+        },
+        {
+          "elapsed": 40.03480379935354,
+          "cpu": 0.078125
+        },
+        {
+          "elapsed": 45.03149039950222,
+          "cpu": 0.09375
+        },
+        {
+          "elapsed": 50.02958279941231,
+          "cpu": 0.09375
+        },
+        {
+          "elapsed": 55.03191109932959,
+          "cpu": 0.09375
+        },
+        {
+          "elapsed": 60.04231959953904,
+          "cpu": 0.09375
+        }
+      ]
+    },
+    {
+      "case": "current_no_monitor_4hz_repeat",
+      "cpu_percent": 0.3384066897735181,
+      "cpu_seconds": 0.203125,
+      "wall_seconds": 60.023931600153446,
+      "first_55_seconds_cpu_percent": 0.3407495055234563,
+      "timestamp_queries": 60,
+      "summary_loads": 0,
+      "change_checks": 0,
+      "profiled_calls": null,
+      "profiled_seconds": null,
+      "binding_iterations": null,
+      "outbox_iterations": null,
+      "server_iterations": null,
+      "browser_connections": 0,
+      "samples": [
+        {
+          "elapsed": 4.99821210000664,
+          "cpu": 0.015625
+        },
+        {
+          "elapsed": 10.012555900029838,
+          "cpu": 0.03125
+        },
+        {
+          "elapsed": 15.008071000687778,
+          "cpu": 0.03125
+        },
+        {
+          "elapsed": 20.00799180008471,
+          "cpu": 0.03125
+        },
+        {
+          "elapsed": 25.006788100115955,
+          "cpu": 0.046875
+        },
+        {
+          "elapsed": 30.00555540062487,
+          "cpu": 0.046875
+        },
+        {
+          "elapsed": 35.00062230043113,
+          "cpu": 0.0625
+        },
+        {
+          "elapsed": 39.999781200662255,
+          "cpu": 0.0625
+        },
+        {
+          "elapsed": 45.00061820074916,
+          "cpu": 0.109375
+        },
+        {
+          "elapsed": 50.012812400236726,
+          "cpu": 0.15625
+        },
+        {
+          "elapsed": 55.02575850021094,
+          "cpu": 0.1875
+        },
+        {
+          "elapsed": 60.02387230005115,
+          "cpu": 0.203125
+        }
+      ]
+    },
+    {
+      "case": "full_4hz_repeat",
+      "cpu_percent": 0.2078993728438052,
+      "cpu_seconds": 0.125,
+      "wall_seconds": 60.1252415003255,
+      "first_55_seconds_cpu_percent": 0.1984660666124626,
+      "timestamp_queries": 0,
+      "summary_loads": 0,
+      "change_checks": 60,
+      "profiled_calls": null,
+      "profiled_seconds": null,
+      "binding_iterations": null,
+      "outbox_iterations": null,
+      "server_iterations": null,
+      "browser_connections": 0,
+      "samples": [
+        {
+          "elapsed": 5.015259999781847,
+          "cpu": 0.0
+        },
+        {
+          "elapsed": 10.030116500332952,
+          "cpu": 0.0
+        },
+        {
+          "elapsed": 15.044872400350869,
+          "cpu": 0.0
+        },
+        {
+          "elapsed": 20.05894870031625,
+          "cpu": 0.015625
+        },
+        {
+          "elapsed": 25.073164699599147,
+          "cpu": 0.015625
+        },
+        {
+          "elapsed": 30.104958600364625,
+          "cpu": 0.03125
+        },
+        {
+          "elapsed": 35.11839190032333,
+          "cpu": 0.046875
+        },
+        {
+          "elapsed": 40.11597849987447,
+          "cpu": 0.0625
+        },
+        {
+          "elapsed": 45.11448280047625,
+          "cpu": 0.0625
+        },
+        {
+          "elapsed": 50.11049760039896,
+          "cpu": 0.078125
+        },
+        {
+          "elapsed": 55.11017670016736,
+          "cpu": 0.109375
+        },
+        {
+          "elapsed": 60.125212700106204,
+          "cpu": 0.125
+        }
+      ]
+    }
+  ],
+  "source_hashes": {
+    "initial": {
+      "solar_model\\dashboard\\app.py": "6fe41b330068c575f07ea864fadace061dfd65c803f10c2909992bd5d764c499",
+      "solar_model\\dashboard\\plan_store.py": "cdd10be699d5092944d40f5c4b7d2a50efe37d8c9f5c5d5bbf46b45139ddefd5",
+      "solar_model\\dashboard\\snapshot.py": "82960fa4516b6f521113ad32bece2e9baa184420c27db3d742b823b739d7bf19",
+      "solar_model\\storage\\connection.py": "28877bbb48a60b0d71863947d63b12623270cf9a2aa4896550a2caa5154b2d6d"
+    },
+    "full_original_1hz": {
+      "solar_model\\dashboard\\app.py": "0784225dd88b53582d699e46afaa42c95ab87636519c4b5f4ae56478dce8164b",
+      "solar_model\\dashboard\\plan_store.py": "52e73b9af3c8da9e552e5810c6cdbed1907b661a24d9b95a452fa56072a43404",
+      "solar_model\\dashboard\\snapshot.py": "804b1bfa20ee3c97916d0f6d1cfa019edd1eb0cd3fe025f65081d4196e37e03b",
+      "solar_model\\storage\\connection.py": "0fad802262785874e308b35d4dc2725d0b10e6562e125092723ec6483e29f80a"
+    },
+    "full_4hz": {
+      "solar_model\\dashboard\\app.py": "e727ee0c1ef3ccd59a8b8de5c6a433f081d1acb34d4a9e8853601997c2c4274b",
+      "solar_model\\dashboard\\plan_store.py": "52e73b9af3c8da9e552e5810c6cdbed1907b661a24d9b95a452fa56072a43404",
+      "solar_model\\dashboard\\snapshot.py": "804b1bfa20ee3c97916d0f6d1cfa019edd1eb0cd3fe025f65081d4196e37e03b",
+      "solar_model\\storage\\connection.py": "0fad802262785874e308b35d4dc2725d0b10e6562e125092723ec6483e29f80a"
+    },
+    "current_no_monitor_4hz": {
+      "solar_model\\dashboard\\app.py": "e727ee0c1ef3ccd59a8b8de5c6a433f081d1acb34d4a9e8853601997c2c4274b",
+      "solar_model\\dashboard\\plan_store.py": "cdd10be699d5092944d40f5c4b7d2a50efe37d8c9f5c5d5bbf46b45139ddefd5",
+      "solar_model\\dashboard\\snapshot.py": "804b1bfa20ee3c97916d0f6d1cfa019edd1eb0cd3fe025f65081d4196e37e03b",
+      "solar_model\\storage\\connection.py": "28877bbb48a60b0d71863947d63b12623270cf9a2aa4896550a2caa5154b2d6d"
+    },
+    "current_no_monitor_4hz_repeat": {
+      "solar_model\\dashboard\\app.py": "e727ee0c1ef3ccd59a8b8de5c6a433f081d1acb34d4a9e8853601997c2c4274b",
+      "solar_model\\dashboard\\plan_store.py": "cdd10be699d5092944d40f5c4b7d2a50efe37d8c9f5c5d5bbf46b45139ddefd5",
+      "solar_model\\dashboard\\snapshot.py": "804b1bfa20ee3c97916d0f6d1cfa019edd1eb0cd3fe025f65081d4196e37e03b",
+      "solar_model\\storage\\connection.py": "28877bbb48a60b0d71863947d63b12623270cf9a2aa4896550a2caa5154b2d6d"
+    },
+    "full_4hz_repeat": {
+      "solar_model\\dashboard\\app.py": "e727ee0c1ef3ccd59a8b8de5c6a433f081d1acb34d4a9e8853601997c2c4274b",
+      "solar_model\\dashboard\\plan_store.py": "52e73b9af3c8da9e552e5810c6cdbed1907b661a24d9b95a452fa56072a43404",
+      "solar_model\\dashboard\\snapshot.py": "804b1bfa20ee3c97916d0f6d1cfa019edd1eb0cd3fe025f65081d4196e37e03b",
+      "solar_model\\storage\\connection.py": "0fad802262785874e308b35d4dc2725d0b10e6562e125092723ec6483e29f80a"
+    }
+  },
+  "nicegui_version": "2.24.2",
+  "method": "Separate local Windows processes; identical SQLite backup; no browser sockets, new readings or projections; startup excluded; 60s unprofiled CPU measurement per run; optional separate 15s cProfile trace. Repeated matched 4Hz cases in reversed order.",
+  "matched_aggregates": {
+    "full_4hz": {
+      "cpu_percent": 0.16900372758816037,
+      "range_percent": [
+        0.13006869331710752,
+        0.2078993728438052
+      ],
+      "runs": 2,
+      "total_wall_seconds": 120.18965670093894,
+      "total_cpu_seconds": 0.203125
+    },
+    "current_no_monitor_4hz": {
+      "cpu_percent": 0.24725928707033046,
+      "range_percent": [
+        0.1561398248769473,
+        0.3384066897735181
+      ],
+      "runs": 2,
+      "total_wall_seconds": 120.06626870017499,
+      "total_cpu_seconds": 0.296875
+    }
+  }
+}

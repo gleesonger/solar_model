@@ -71,6 +71,8 @@ class DashboardSnapshotStore:
         self._listeners: dict[int, Callable[[DashboardSnapshot], None]] = {}
         self._next_listener_id = 0
         self._stop = asyncio.Event()
+        self._wake = asyncio.Event()
+        self._last_attempt: float | None = None
 
     def current(self) -> DashboardSnapshot | None:
         with self._lock:
@@ -81,10 +83,12 @@ class DashboardSnapshotStore:
             listener_id = self._next_listener_id
             self._next_listener_id += 1
             self._listeners[listener_id] = listener
+        self._wake.set()
 
         def unsubscribe() -> None:
             with self._lock:
                 self._listeners.pop(listener_id, None)
+            self._wake.set()
 
         return unsubscribe
 
@@ -130,10 +134,21 @@ class DashboardSnapshotStore:
 
     async def run_forever(self) -> None:
         while not self._stop.is_set():
-            try:
-                await asyncio.wait_for(self._stop.wait(), timeout=self._interval_seconds)
-            except TimeoutError:
+            self._wake.clear()
+            with self._lock:
+                has_listeners = bool(self._listeners)
+            delay = None
+            if has_listeners:
+                delay = 0. if self._last_attempt is None else max(0., self._interval_seconds - (perf_counter() - self._last_attempt))
+            if delay == 0.:
                 await self.refresh()
+                self._last_attempt = perf_counter()
+                continue
+            try:
+                await asyncio.wait_for(self._wake.wait(), timeout=delay)
+            except TimeoutError:
+                pass
 
     def stop(self) -> None:
         self._stop.set()
+        self._wake.set()

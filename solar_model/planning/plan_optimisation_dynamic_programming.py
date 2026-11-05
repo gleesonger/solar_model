@@ -364,7 +364,7 @@ def get_numba_functions():
         raise RuntimeError('Numba requires installation with: pip install -e ".[numba]"') from error
     for helper in (simulate_system_single_time_period, interpolate, battery_protection_score, battery_limit_score, step_score):
         register_jitable(helper)
-    return njit(cache=True)(backward_values), njit(cache=True)(forward_projection)
+    return njit(cache=False)(backward_values), njit(cache=False)(forward_projection)
 
 
 def backward_values(device: DeviceParameters, capacity: float, periods: list[Period], grids: list[list[float]], choices: list[Action], terminal_rate: float) -> list[list[float]]:

@@ -31,6 +31,8 @@ open_database(path)
 
 `SolarDatabase.sessions()` creates a session; `sessions.begin()` owns a committing transaction. `close()` disposes the engine's pooled connections. Cached Engine identity is reused by path, but disposed engines can reconnect; a `SolarDatabase` is not a permanently open cursor.
 
+The dashboard's one-second planning-marker checks close their query session after each read, returning the connection to the cached pool without calling `SolarDatabase.close()`. They therefore reuse connections rather than disposing the shared pool every second. Sessions also release their connections on query failure, and later checks can see newly committed collector readings.
+
 | Representation | Measurement example | Timestamp example |
 | --- | --- | --- |
 | Decoder / ORM write | `plant_pv_power_kw = 2.5` | timezone-aware ISO string |

@@ -140,7 +140,7 @@ forecast:
         prior_effective_observations: 0.3333  # Controls how strongly today’s completed hours adjust the solar forecast - 1 hour weights 33%
 
 energy_plan:
-  plan_rerun_frequency_mins: 1
+  plan_rerun_frequency_mins: 5
   num_projection_hours: 48
   num_visible_projection_hours: 24
 

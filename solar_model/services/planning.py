@@ -55,12 +55,9 @@ class PlanReport:
 
 
 def latest_full_update(database_path: str) -> datetime | None:
-    """Read the collection marker without opening migrations or changing data."""
+    """Read the marker with a short-lived session, retaining the cached connection pool."""
     database = SolarDatabase(create_engine_for_database(database_path))
-    try:
-        return load_latest_full_update(database, datetime.now(timezone.utc))
-    finally:
-        database.close()
+    return load_latest_full_update(database, datetime.now(timezone.utc))
 
 
 def generate_plan_report(config: Config, as_of: datetime, energy_plan_override: EnergyPlanConfig | None = None) -> PlanReport:

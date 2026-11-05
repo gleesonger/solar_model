@@ -45,6 +45,8 @@ load_config(path='config.yaml')
 
 The intermediate YAML object is mutable. The normalisation steps alter it before constructing frozen dataclasses. Unknown keys are ignored because dacite strict mode is not enabled; this is why descriptive `name`/`comment` keys in YAML do not become runtime fields.
 
+`EnergyPlanConfig.plan_rerun_frequency_mins` has no constructor default. Both startup file loading and strict editor parsing reject an omitted field before a scheduler or plan starts. It must also be finite and positive. Other optional YAML fields are listed in the [configuration defaults catalogue](../overview/configuration.md#optional-fields-and-defaults).
+
 Required `Config.energy_plan.scenarios: ScenariosConfig` contains `solar` and `house_load` as frozen `ScenarioDimensionConfig` objects, each with low/med/high `ScenarioLevelConfig(multiplier, probability)` entries. `items()` returns the fixed low/med/high order. Multipliers are finite, non-negative and nondecreasing; probabilities are finite in [0,1] and must total 97%-103% per dimension, then are normalised to sum to one during construction. Scenario mappings reject extra/missing levels and entry fields. Planning and dashboard share these settings; joint probabilities assume independence.
 
 ```python
@@ -112,6 +114,7 @@ solar_model.dashboard.app.main()
 app startup callbacks (scheduled independently)
   start_snapshot_worker(): await snapshots.refresh(); start snapshots.run_forever()
   ensure_planning_worker(): await one shared asynchronous warm-up task
+    configure_planning_worker(): replace unused default executor with one spawn worker
     await run.cpu_bound(services.planning.warm_planning_worker)
     import planning dependencies, initialise highspy.Highs(), return worker PID
     log worker ready/startup seconds; log failures without aborting dashboard startup

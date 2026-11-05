@@ -1,18 +1,39 @@
 """The planning worker can be started and reused without any database inputs."""
-from concurrent.futures import ProcessPoolExecutor
-import multiprocessing
 import os
+from time import perf_counter, sleep
+from types import SimpleNamespace
+
+import cvxpy  # Load native solver dependencies before pandas/NiceGUI on Windows.
 
 from solar_model.services.planning import warm_planning_worker
 
 
+def timed_worker_job():
+    began_at = perf_counter()
+    sleep(.05)
+    return os.getpid(), began_at, perf_counter()
+
+
 def test_spawned_planning_worker_warms_and_reuses_process(tmp_path, monkeypatch):
+    from solar_model.dashboard import planning_worker
+
     monkeypatch.chdir(tmp_path)
-    with ProcessPoolExecutor(max_workers=1, mp_context=multiprocessing.get_context("spawn")) as pool:
+    monkeypatch.setattr(planning_worker, "_planning_pool", None)
+    shutdowns = []
+    previous = SimpleNamespace(shutdown=lambda **kwargs: shutdowns.append(kwargs))
+    monkeypatch.setattr(planning_worker.run, "process_pool", previous)
+    with planning_worker.configure_planning_worker() as pool:
+        assert planning_worker.run.process_pool is pool
+        assert planning_worker.configure_planning_worker() is pool
         first = pool.submit(warm_planning_worker).result(timeout=30)
         second = pool.submit(warm_planning_worker).result(timeout=30)
+        jobs = [pool.submit(timed_worker_job) for _ in range(2)]
+        runs = [job.result(timeout=10) for job in jobs]
     assert first != os.getpid()
     assert second == first
+    assert runs[0][0] == runs[1][0] == first
+    assert runs[1][1] >= runs[0][2]
+    assert shutdowns == [{"wait": False, "cancel_futures": True}]
     assert list(tmp_path.iterdir()) == []
 
 
@@ -20,6 +41,7 @@ def test_early_requests_share_warmup_and_cancellation_does_not_stop_it(monkeypat
     import asyncio
     from solar_model.dashboard import planning_worker
     monkeypatch.setattr(planning_worker, "_warmup_task", None)
+    monkeypatch.setattr(planning_worker, "configure_planning_worker", lambda: None)
     calls = []
     async def scenario():
         started, release = asyncio.Event(), asyncio.Event()
@@ -52,6 +74,7 @@ def test_failed_warmup_does_not_block_dashboard_or_later_plan_attempt(monkeypatc
     import asyncio
     from solar_model.dashboard import planning_worker
     monkeypatch.setattr(planning_worker, "_warmup_task", None)
+    monkeypatch.setattr(planning_worker, "configure_planning_worker", lambda: None)
     async def fail(callback):
         raise RuntimeError("synthetic warm-up failure")
     monkeypatch.setattr(planning_worker.run, "cpu_bound", fail)

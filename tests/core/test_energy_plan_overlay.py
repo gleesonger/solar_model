@@ -42,6 +42,18 @@ def test_plan_rerun_frequency_must_be_finite_and_positive(frequency):
         parse_energy_plan_yaml(config, energy_plan_yaml(replace(config.energy_plan, plan_rerun_frequency_mins=frequency)))
 
 
+def test_plan_rerun_frequency_is_required_in_file_and_editor(tmp_path):
+    config = load_config()
+    raw = yaml.safe_load(Path("config.yaml").read_text(encoding="utf-8"))
+    del raw["energy_plan"]["plan_rerun_frequency_mins"]
+    path = tmp_path / "config.yaml"
+    path.write_text(yaml.safe_dump(raw), encoding="utf-8")
+    with pytest.raises(ValueError, match="plan_rerun_frequency_mins"):
+        load_config(path)
+    with pytest.raises(ValueError, match="plan_rerun_frequency_mins"):
+        parse_energy_plan_yaml(config, yaml.safe_dump(raw["energy_plan"]))
+
+
 def test_save_replaces_only_energy_plan_and_keeps_other_text(tmp_path):
     config = load_config()
     path = tmp_path / "custom.yaml"

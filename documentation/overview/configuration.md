@@ -61,6 +61,34 @@ Joint probabilities multiply the two dimension probabilities, assuming independe
 - Validation checks timezone/log level, URL shape, ports/device ID, coordinates/orientation, supported PV strings, and mapped array names.
 - Array IDs are unique integers 1–4; names must also be unique and are referenced by `dashboard.actuals_to_forecast` (for example `pv1: East`). Mapping names must match exactly; replace numeric mapping values in deployed YAML files. Empty arrays/mapping and non-positive `peak_kw` are not explicitly rejected.
 
+## Optional fields and defaults
+
+These defaults apply when YAML fields or their optional containing blocks are omitted. They are code defaults, which can differ from explicit values in the shipped file. `energy_plan.plan_rerun_frequency_mins` is required and has no default.
+
+| Optional field | Default |
+| --- | --- |
+| `energy_plan.num_visible_projection_hours` | 24 hours |
+| `energy_plan.protection_preference` | 50 |
+| `energy_plan.preferred_reserve_kwh` | 4 kWh |
+| `energy_plan.minimum_battery_kwh` | Empty rules; uncovered times use 0 kWh |
+| `energy_plan.maximum_battery_kwh` | Empty rules; uncovered times use 999 kWh |
+| `energy_plan.limit_battery_export_rate_to_grid_kw` | Empty rules; uncovered times use 999 kW |
+| `energy_plan.min_forced_charge_power_kw` | 0.1 kW |
+| `energy_plan.min_forced_discharge_power_kw` | 0.1 kW |
+| `energy_plan.max_forced_charge_power_kw` | 999 kW |
+| `energy_plan.max_forced_discharge_power_kw` | 999 kW |
+| `energy_plan.optimiser.model` | `mix_integer_linear_prog` |
+| `energy_plan.optimiser.mix_integer_linear_prog.projection_resolution_mins` | `[15*4, 60*23, 240*6]` |
+| `energy_plan.optimiser.dynamic_programming.use_numba` | `true` |
+| `energy_plan.optimiser.dynamic_programming.projection_resolution_mins` | `[15*96, 60*24]` |
+| `energy_plan.optimiser.dynamic_programming.refinement_stages` | `(grid_step_percent, power_divisions, band_percent)`: `(2, 5, null)`, `(1, 10, 5)`, `(1, 20, 3)`, `(1, 40, 1)` |
+| `forecast.solar.model_calibration_parameters.day_ahead` | Whole block: lookback 56 days, halflife 21 days, prior influence `null` |
+| `forecast.solar.model_calibration_parameters.intraday` | Whole block: lookback `null`, halflife 1 hour, prior influence `1/3` |
+| `forecast.load.model_calibration_parameters` | Whole block: lookback 42 days, halflife 14 days, prior influence `0.2` |
+| Export/planning rule `name` | `null`; import rule names are required by validation |
+
+`energy_plan.optimiser`, either optimiser's configuration block, `forecast.load`, and `forecast.solar.model_calibration_parameters` may themselves be omitted, using the nested defaults above. A supplied forecast-model block must include all three fields: `lookback`, `halflife` and `prior_effective_observations`. All other YAML dataclass fields are required; an explicit `null` is not equivalent to omission unless that field permits null.
+
 ## Tariff and scheduled-limit rules
 
 - Periods must have strictly increasing `effective_from` ISO dates. Lookup chooses the newest period effective on the supplied local date; earlier uncovered dates raise an error.
@@ -79,7 +107,7 @@ Joint probabilities multiply the two dimension probabilities, assuming independe
 
 ## Planning command preferences
 
-`energy_plan.plan_rerun_frequency_mins` defaults to 5 and must be finite and positive. The dashboard checks for newly committed full SigEnergy readings once per second. It starts a background plan when the new reading is at least `max(0, plan_rerun_frequency_mins * 60 - 15)` seconds newer than the reading used by the last successful shared plan. Startup records existing data as a baseline and waits for a newer full reading before the first plan. Changed saved planning settings make the next new reading eligible immediately. Browser-only overrides do not alter this schedule. Save To Disk and external edits hot-reload the energy-plan section, including this interval; other application configuration retains restart semantics. See [Plan tab](dashboard.md#plan-tab).
+`energy_plan.plan_rerun_frequency_mins` is required and must be finite and positive; omission fails startup/configuration-editor validation. The shipped value is 5. The dashboard checks for newly committed full SigEnergy readings once per second. It starts a background plan when the new reading is at least `max(0, plan_rerun_frequency_mins * 60 - 15)` seconds newer than the reading used by the last successful shared plan. Startup records existing data as a baseline and waits for a newer full reading before the first plan. Changed saved planning settings make the next new reading eligible immediately. Browser-only overrides do not alter this schedule. Save To Disk and external edits hot-reload the energy-plan section, including this interval; other application configuration retains restart semantics. See [Plan tab](dashboard.md#plan-tab).
 
 `energy_plan.min_forced_charge_power_kw` and `energy_plan.min_forced_discharge_power_kw` are finite, strictly positive minimum requested powers in kW, each defaulting to 0.1. Both DP and MILP use them. They are planning preferences, not verified hardware minimums, and actual flows may be lower when limited by SOC stops or physical capability. They do not scale with interval duration. `energy_plan.max_forced_charge_power_kw` and `max_forced_discharge_power_kw` are finite, strictly positive numeric ceilings, both defaulting to 999 kW and explicitly set in the shipped YAML; null is not supported. Each effective ceiling is the smaller of the configured maximum and hardware maximum. A minimum above that ceiling makes the forced mode unavailable; self-consumption remains available.
 
@@ -91,6 +119,7 @@ DP-specific settings live under `energy_plan.optimiser.dynamic_programming`:
 
 ```yaml
 energy_plan:
+  plan_rerun_frequency_mins: 5
   num_projection_hours: 48
   num_visible_projection_hours: 24
   optimiser:

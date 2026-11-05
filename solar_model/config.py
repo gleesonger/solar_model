@@ -186,8 +186,8 @@ class OptimiserConfig:
 class EnergyPlanConfig:
     num_projection_hours: int
     scenarios: ScenariosConfig
+    plan_rerun_frequency_mins: float
     num_visible_projection_hours: int = 24
-    plan_rerun_frequency_mins: float = 5.
     protection_preference: float = 50.
     minimum_battery_kwh: tuple[TariffRule, ...] = ()
     maximum_battery_kwh: tuple[TariffRule, ...] = ()

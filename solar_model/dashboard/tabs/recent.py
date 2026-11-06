@@ -166,7 +166,7 @@ class RecentTab:
             row = dict(existing_row)
             key = str(row.get("latest_key", ""))
             if key in latest:
-                row["latest"] = formatting.format_dashboard_number(latest[key])
+                row["latest"] = formatting.format_dashboard_number(latest[key], decimal_places=2)
             metric = str(row.get("metric", ""))
             if metric in self._today_values:
                 row["today"] = formatting.format_dashboard_number(self._today_values[metric])

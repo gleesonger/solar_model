@@ -62,6 +62,7 @@ Keep concise explanations in `overview/`, detailed code/data contracts in `imple
 | [Verification scope](reviews/verification.md) | Regression coverage and remaining integration/verification limits |
 | [Performance conclusions](reviews/performance.md) | Key download, summary, forecasting and planning measurements |
 | [Dashboard idle CPU](reviews/dashboard-idle-cpu.md) | Local no-browser profiling, redundant background work, idle changes and Windows/container measurement limits |
+| [Staged dashboard idle CPU](reviews/dashboard-staged-idle-cpu.md) | Hello World baseline, incremental services, post-job idle windows, browser disconnect, process isolation and attribution limits |
 | [Current-config MILP versus DP](reviews/current-models-performance.md) | Repeated configured solves, first-call exclusion, result comparison and DP phase/stage timings |
 | [MILP versus DP after pruning](reviews/post-pruning-models-performance.md) | Current production DP compared with MILP after lookup caching and command pruning, including repeated timings and economics |
 | [DP LLVM inspection](reviews/dp-numba-llvm-review.md) | Generated native-code review: helper inlining, typed-list bookkeeping, repeated row access and an isolated compilation experiment |

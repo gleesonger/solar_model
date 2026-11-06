@@ -41,6 +41,8 @@ Known defects, undecided policies and verification gaps. These items qualify the
 
 ## Coverage and maintenance gaps
 
+- **Idle CPU attribution:** The [staged Windows investigation](dashboard-staged-idle-cpu.md) found sleeping workers/collectors and stopped browser-driven work, but dashboard idle samples varied substantially. A clean final pair measured 0.21% of one core for Hello World and 0.91% for the dashboard. Routine callbacks and database queries were identified, but their contribution does not explain the entire higher minute; Linux/container CPU and native/thread-level attribution remain unverified. Invalid profiler timings and process-isolation qualifications are retained in the report.
+
 - Chrome Android saved offline pages can preserve dashboard visuals while in-page scripts are inactive. Finite CSS activity indication and an absolute Last reading timestamp reduce ambiguity, but actual saved-page/freeze behaviour still needs verification on Android hardware; desktop Chromium regression checks do not establish it.
 
 - Runtime dependencies remain ranged, with no lockfile. HiGHS is now explicit; package extras declare test, browser and research dependencies.

@@ -82,7 +82,7 @@ def summary_rows(
             "metric": label,
             "latest_key": key,
             "is_solar_orientation": key.startswith("pv"),
-            "latest": format_dashboard_number(latest.get(key)),
+            "latest": format_dashboard_number(latest.get(key), decimal_places=2),
             "today": format_dashboard_number(today.get(key)),
             "latest_forecast": format_dashboard_number(latest_forecast.get(key)),
             "forecast": format_dashboard_number(forecast.get(key)),
@@ -92,11 +92,11 @@ def summary_rows(
     ]
     return rows
 
-def format_dashboard_number(value: float | None) -> str:
+def format_dashboard_number(value: float | None, decimal_places: int = 1) -> str:
     if value is None or pd.isna(value):
         return ""
-    rounded = round(float(value), 1)
-    return f"{0.0 if rounded == 0 else rounded:.1f}"
+    rounded = round(float(value), decimal_places)
+    return f"{0.0 if rounded == 0 else rounded:.{decimal_places}f}"
 
 def format_currency(value: float | None) -> str:
     if value is None or pd.isna(value):

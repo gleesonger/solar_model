@@ -251,7 +251,7 @@ def test_recent_house_load_actuals_and_bod_forecast(tmp_path, monkeypatch):
         live = LivePowerData("2026-10-26T10:00Z", "2026-10-26T10:00Z", {"load": .35})
         rows = formatting.summary_rows(frame, RecentTab._live_table_values(live))
         house = next(row for row in rows if row["metric"] == "House Load")
-        assert (house["latest"], house["today"], house["forecast"]) == ("0.3", "0.3", "24.0")
+        assert (house["latest"], house["today"], house["forecast"]) == ("0.35", "0.3", "24.0")
         assert house["latest_forecast"] == house["forecast_raw"] == ""
         daily, monthly = data.load_recent_energy_summaries(str(path), "UTC", date(2026, 10, 26), ())
         assert daily.loc[daily.period == "2026-10-26", "house_load"].iloc[0] == pytest.approx(.337)

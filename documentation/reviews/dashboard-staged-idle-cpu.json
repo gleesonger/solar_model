@@ -1,0 +1,3884 @@
+{
+  "metadata": {
+    "python": "3.12.10 (tags/v3.12.10:0cc8128, Apr  8 2025, 12:21:36) [MSC v.1943 64 bit (AMD64)]",
+    "nicegui": "2.24.2",
+    "platform": "Windows-11-10.0.26200-SP0",
+    "cpu_metric": "GetProcessTimes kernel+user, all process threads, percent of one core; observed Windows increments 0.015625 s",
+    "minimum_settle_seconds": 30,
+    "measurement_seconds": 60,
+    "notes": [
+      "Early baseline runs did not independently count unexpected HTTP; only health readiness was initiated by harness.",
+      "Stage 8/9 suspend the collector scheduler after one real scheduled full collection; these show residual process CPU, not continued scheduler behavior.",
+      "Stage 9 first attempt produced successful actual forecast HTTP: 22 rows per array, 11 solar adjustment rows; its idle attempt was rejected on state-file error.",
+      "Stage 9 valid retry respected forecast reservation and skipped external request; replay produced 11 adjusted solar rows and 0 house-load rows, which may reflect reuse of existing daily forecast.",
+      "Actual no-browser, solar-options and stock reverse-order repeats have incomplete process-tree isolation: an owned worker persisted with no measurable CPU over a later five-second observation; server teardown timing was also not logged.",
+      "Clean stock and actual pair held process handles through shutdown, and both exited before the next stage.",
+      "cProfile thread timing is invalid; polling/actual traces contain negative timings and impossible self times. Counts are diagnostic only; profile control endpoints caused two expected HTTP requests.",
+      "Initial standalone DP attempt timed out at the five-second cap. After explicit user approval of a 120-second cap, one actual configured persistent-worker DP projection completed; its full report preceded a 31-second settle and valid 60-second idle window."
+    ],
+    "repository_revision": "6e0b43bc40936ddeb42921e7f4af0a7b2ac2db56",
+    "processor": "12th Gen Intel Core i7-1280P; 14 physical cores, 20 logical processors",
+    "application_source_modified": false,
+    "temporary_artifact_directory": "C:\\Users\\glees\\AppData\\Local\\Temp\\solar-steady-1db7ff7a7ef144e8b7098f3a0122e51a"
+  },
+  "runs": {
+    "implicit_stock_first.json": {
+      "stage": "implicit_stock",
+      "pid": 14704,
+      "launcher_pid": 3380,
+      "port": 18761,
+      "ready_utc": "2026-11-05T20:11:28.234897+00:00",
+      "settled_seconds": 31.0,
+      "measurement_start_utc": "2026-11-05T20:11:59.243188+00:00",
+      "elapsed_seconds": 60.0,
+      "cpu_seconds": 0.140625,
+      "percent_one_core": 0.234375,
+      "bins": [
+        {
+          "elapsed": 5.0,
+          "cpu_seconds": 0.015625
+        },
+        {
+          "elapsed": 10.0,
+          "cpu_seconds": 0.015625
+        },
+        {
+          "elapsed": 15.0,
+          "cpu_seconds": 0.015625
+        },
+        {
+          "elapsed": 20.0,
+          "cpu_seconds": 0.0
+        },
+        {
+          "elapsed": 25.0,
+          "cpu_seconds": 0.0
+        },
+        {
+          "elapsed": 30.0,
+          "cpu_seconds": 0.015625
+        },
+        {
+          "elapsed": 35.0,
+          "cpu_seconds": 0.015625
+        },
+        {
+          "elapsed": 40.01599999982864,
+          "cpu_seconds": 0.0
+        },
+        {
+          "elapsed": 45.0,
+          "cpu_seconds": 0.0
+        },
+        {
+          "elapsed": 50.0,
+          "cpu_seconds": 0.0
+        },
+        {
+          "elapsed": 55.0,
+          "cpu_seconds": 0.03125
+        },
+        {
+          "elapsed": 60.0,
+          "cpu_seconds": 0.03125
+        }
+      ],
+      "browser": "none; FastAPI health GET only",
+      "worker": "none",
+      "collector": "none"
+    },
+    "solar_options_first.json": {
+      "stage": "solar_options",
+      "pid": 37156,
+      "launcher_pid": 41464,
+      "port": 18761,
+      "ready_utc": "2026-11-05T20:13:13.731243+00:00",
+      "settled_seconds": 31.0,
+      "measurement_start_utc": "2026-11-05T20:13:44.732163+00:00",
+      "elapsed_seconds": 60.0,
+      "cpu_seconds": 0.140625,
+      "percent_one_core": 0.234375,
+      "bins": [
+        {
+          "elapsed": 5.0,
+          "cpu_seconds": 0.015625
+        },
+        {
+          "elapsed": 10.015000000596046,
+          "cpu_seconds": 0.0
+        },
+        {
+          "elapsed": 15.0,
+          "cpu_seconds": 0.015625
+        },
+        {
+          "elapsed": 20.0,
+          "cpu_seconds": 0.015625
+        },
+        {
+          "elapsed": 25.0,
+          "cpu_seconds": 0.03125
+        },
+        {
+          "elapsed": 30.0,
+          "cpu_seconds": 0.0
+        },
+        {
+          "elapsed": 35.0,
+          "cpu_seconds": 0.03125
+        },
+        {
+          "elapsed": 40.0,
+          "cpu_seconds": 0.0
+        },
+        {
+          "elapsed": 45.0,
+          "cpu_seconds": 0.0
+        },
+        {
+          "elapsed": 50.0,
+          "cpu_seconds": 0.015625
+        },
+        {
+          "elapsed": 55.0,
+          "cpu_seconds": 0.0
+        },
+        {
+          "elapsed": 60.0,
+          "cpu_seconds": 0.015625
+        }
+      ],
+      "browser": "none; FastAPI health GET only",
+      "worker": "none",
+      "collector": "none"
+    },
+    "stage3.json": {
+      "stage": 3,
+      "pids": {
+        "parent": 26320
+      },
+      "launcher_pid": 11660,
+      "settled_seconds": 31.015999999828637,
+      "measurement_start_utc": "2026-11-05T20:15:45.653783+00:00",
+      "elapsed_seconds": 60.0,
+      "cpu_seconds": {
+        "parent": 0.09375
+      },
+      "percent_one_core": {
+        "parent": 0.15625
+      },
+      "combined_percent_one_core": 0.15625,
+      "before": {
+        "pid": 26320,
+        "stage": 3,
+        "ready": true,
+        "worker_pid": null,
+        "counts": {
+          "config": 0,
+          "timestamps": 0,
+          "snapshot": 0
+        },
+        "errors": [],
+        "events": [
+          {
+            "event": "database_initialised",
+            "utc": 1793909714.2037394,
+            "monotonic": 4291700.437
+          },
+          {
+            "event": "ready",
+            "utc": 1793909714.2037394,
+            "monotonic": 4291700.437
+          }
+        ],
+        "sockets": 0
+      },
+      "after": {
+        "pid": 26320,
+        "stage": 3,
+        "ready": true,
+        "worker_pid": null,
+        "counts": {
+          "config": 0,
+          "timestamps": 0,
+          "snapshot": 0
+        },
+        "errors": [],
+        "events": [
+          {
+            "event": "database_initialised",
+            "utc": 1793909714.2037394,
+            "monotonic": 4291700.437
+          },
+          {
+            "event": "ready",
+            "utc": 1793909714.2037394,
+            "monotonic": 4291700.437
+          }
+        ],
+        "sockets": 0
+      },
+      "bins": [
+        {
+          "elapsed": 5.0,
+          "cpu_seconds": {
+            "parent": 0.0
+          }
+        },
+        {
+          "elapsed": 10.0,
+          "cpu_seconds": {
+            "parent": 0.0
+          }
+        },
+        {
+          "elapsed": 15.0,
+          "cpu_seconds": {
+            "parent": 0.0
+          }
+        },
+        {
+          "elapsed": 20.014999999664724,
+          "cpu_seconds": {
+            "parent": 0.03125
+          }
+        },
+        {
+          "elapsed": 25.0,
+          "cpu_seconds": {
+            "parent": 0.0
+          }
+        },
+        {
+          "elapsed": 30.0,
+          "cpu_seconds": {
+            "parent": 0.015625
+          }
+        },
+        {
+          "elapsed": 35.0,
+          "cpu_seconds": {
+            "parent": 0.03125
+          }
+        },
+        {
+          "elapsed": 40.0,
+          "cpu_seconds": {
+            "parent": 0.0
+          }
+        },
+        {
+          "elapsed": 45.0,
+          "cpu_seconds": {
+            "parent": 0.0
+          }
+        },
+        {
+          "elapsed": 50.0,
+          "cpu_seconds": {
+            "parent": 0.0
+          }
+        },
+        {
+          "elapsed": 55.0,
+          "cpu_seconds": {
+            "parent": 0.0
+          }
+        },
+        {
+          "elapsed": 60.0,
+          "cpu_seconds": {
+            "parent": 0.015625
+          }
+        }
+      ]
+    },
+    "stage4.json": {
+      "stage": 4,
+      "pids": {
+        "parent": 8384,
+        "worker": 36148
+      },
+      "launcher_pid": 34284,
+      "settled_seconds": 31.015999999828637,
+      "measurement_start_utc": "2026-11-05T20:17:23.648547+00:00",
+      "elapsed_seconds": 60.0,
+      "cpu_seconds": {
+        "parent": 0.15625,
+        "worker": 0.0
+      },
+      "percent_one_core": {
+        "parent": 0.2604166666666667,
+        "worker": 0.0
+      },
+      "combined_percent_one_core": 0.2604166666666667,
+      "before": {
+        "pid": 8384,
+        "stage": 4,
+        "ready": true,
+        "worker_pid": 36148,
+        "collector_pid": null,
+        "counts": {
+          "config": 0,
+          "timestamps": 0,
+          "snapshot": 0
+        },
+        "errors": [],
+        "events": [
+          {
+            "event": "database_initialised",
+            "utc": 1793909809.7198417,
+            "monotonic": 4291795.953
+          },
+          {
+            "event": "worker_warmed",
+            "utc": 1793909812.5822518,
+            "monotonic": 4291798.812
+          },
+          {
+            "event": "ready",
+            "utc": 1793909812.5822518,
+            "monotonic": 4291798.812
+          }
+        ],
+        "sockets": 0
+      },
+      "after": {
+        "pid": 8384,
+        "stage": 4,
+        "ready": true,
+        "worker_pid": 36148,
+        "collector_pid": null,
+        "counts": {
+          "config": 0,
+          "timestamps": 0,
+          "snapshot": 0
+        },
+        "errors": [],
+        "events": [
+          {
+            "event": "database_initialised",
+            "utc": 1793909809.7198417,
+            "monotonic": 4291795.953
+          },
+          {
+            "event": "worker_warmed",
+            "utc": 1793909812.5822518,
+            "monotonic": 4291798.812
+          },
+          {
+            "event": "ready",
+            "utc": 1793909812.5822518,
+            "monotonic": 4291798.812
+          }
+        ],
+        "sockets": 0
+      },
+      "bins": [
+        {
+          "elapsed": 5.0,
+          "cpu_seconds": {
+            "parent": 0.015625,
+            "worker": 0.0
+          }
+        },
+        {
+          "elapsed": 10.0,
+          "cpu_seconds": {
+            "parent": 0.0,
+            "worker": 0.0
+          }
+        },
+        {
+          "elapsed": 15.0,
+          "cpu_seconds": {
+            "parent": 0.015625,
+            "worker": 0.0
+          }
+        },
+        {
+          "elapsed": 20.0,
+          "cpu_seconds": {
+            "parent": 0.015625,
+            "worker": 0.0
+          }
+        },
+        {
+          "elapsed": 25.0,
+          "cpu_seconds": {
+            "parent": 0.015625,
+            "worker": 0.0
+          }
+        },
+        {
+          "elapsed": 30.0,
+          "cpu_seconds": {
+            "parent": 0.015625,
+            "worker": 0.0
+          }
+        },
+        {
+          "elapsed": 35.0,
+          "cpu_seconds": {
+            "parent": 0.03125,
+            "worker": 0.0
+          }
+        },
+        {
+          "elapsed": 40.0,
+          "cpu_seconds": {
+            "parent": 0.0,
+            "worker": 0.0
+          }
+        },
+        {
+          "elapsed": 45.0,
+          "cpu_seconds": {
+            "parent": 0.0,
+            "worker": 0.0
+          }
+        },
+        {
+          "elapsed": 50.0,
+          "cpu_seconds": {
+            "parent": 0.015625,
+            "worker": 0.0
+          }
+        },
+        {
+          "elapsed": 55.014999999664724,
+          "cpu_seconds": {
+            "parent": 0.015625,
+            "worker": 0.0
+          }
+        },
+        {
+          "elapsed": 60.0,
+          "cpu_seconds": {
+            "parent": 0.015625,
+            "worker": 0.0
+          }
+        }
+      ]
+    },
+    "stage5.json": {
+      "source_sha256": "b7577188c90d2de409116b785b80778c81f7dbc041d70f665fb035d92c652bda",
+      "stage": 5,
+      "pids": {
+        "parent": 21940,
+        "worker": 41624
+      },
+      "launcher_pid": 27044,
+      "settled_seconds": 31.0,
+      "measurement_start_utc": "2026-11-05T20:19:01.699239+00:00",
+      "elapsed_seconds": 60.0,
+      "cpu_seconds": {
+        "parent": 0.125,
+        "worker": 0.0
+      },
+      "percent_one_core": {
+        "parent": 0.20833333333333334,
+        "worker": 0.0
+      },
+      "combined_percent_one_core": 0.20833333333333334,
+      "before": {
+        "pid": 21940,
+        "stage": 5,
+        "ready": true,
+        "worker_pid": 41624,
+        "collector_pid": null,
+        "counts": {
+          "config": 31,
+          "timestamps": 0,
+          "snapshot": 0
+        },
+        "errors": [],
+        "events": [
+          {
+            "event": "database_initialised",
+            "utc": 1793909907.6977947,
+            "monotonic": 4291893.921
+          },
+          {
+            "event": "worker_warmed",
+            "utc": 1793909910.4669895,
+            "monotonic": 4291896.687
+          },
+          {
+            "event": "polling_started",
+            "utc": 1793909910.4669895,
+            "monotonic": 4291896.687
+          },
+          {
+            "event": "ready",
+            "utc": 1793909910.4669895,
+            "monotonic": 4291896.687
+          }
+        ],
+        "sockets": 0
+      },
+      "after": {
+        "pid": 21940,
+        "stage": 5,
+        "ready": true,
+        "worker_pid": 41624,
+        "collector_pid": null,
+        "counts": {
+          "config": 91,
+          "timestamps": 0,
+          "snapshot": 0
+        },
+        "errors": [],
+        "events": [
+          {
+            "event": "database_initialised",
+            "utc": 1793909907.6977947,
+            "monotonic": 4291893.921
+          },
+          {
+            "event": "worker_warmed",
+            "utc": 1793909910.4669895,
+            "monotonic": 4291896.687
+          },
+          {
+            "event": "polling_started",
+            "utc": 1793909910.4669895,
+            "monotonic": 4291896.687
+          },
+          {
+            "event": "ready",
+            "utc": 1793909910.4669895,
+            "monotonic": 4291896.687
+          }
+        ],
+        "sockets": 0
+      },
+      "bins": [
+        {
+          "elapsed": 5.0,
+          "cpu_seconds": {
+            "parent": 0.015625,
+            "worker": 0.0
+          }
+        },
+        {
+          "elapsed": 10.0,
+          "cpu_seconds": {
+            "parent": 0.0,
+            "worker": 0.0
+          }
+        },
+        {
+          "elapsed": 15.0,
+          "cpu_seconds": {
+            "parent": 0.015625,
+            "worker": 0.0
+          }
+        },
+        {
+          "elapsed": 20.0,
+          "cpu_seconds": {
+            "parent": 0.015625,
+            "worker": 0.0
+          }
+        },
+        {
+          "elapsed": 25.015999999828637,
+          "cpu_seconds": {
+            "parent": 0.015625,
+            "worker": 0.0
+          }
+        },
+        {
+          "elapsed": 30.0,
+          "cpu_seconds": {
+            "parent": 0.0,
+            "worker": 0.0
+          }
+        },
+        {
+          "elapsed": 35.0,
+          "cpu_seconds": {
+            "parent": 0.0,
+            "worker": 0.0
+          }
+        },
+        {
+          "elapsed": 40.0,
+          "cpu_seconds": {
+            "parent": 0.015625,
+            "worker": 0.0
+          }
+        },
+        {
+          "elapsed": 45.0,
+          "cpu_seconds": {
+            "parent": 0.015625,
+            "worker": 0.0
+          }
+        },
+        {
+          "elapsed": 50.0,
+          "cpu_seconds": {
+            "parent": 0.015625,
+            "worker": 0.0
+          }
+        },
+        {
+          "elapsed": 55.0,
+          "cpu_seconds": {
+            "parent": 0.015625,
+            "worker": 0.0
+          }
+        },
+        {
+          "elapsed": 60.0,
+          "cpu_seconds": {
+            "parent": 0.0,
+            "worker": 0.0
+          }
+        }
+      ]
+    },
+    "stage6.json": {
+      "source_sha256": "b7577188c90d2de409116b785b80778c81f7dbc041d70f665fb035d92c652bda",
+      "stage": 6,
+      "pids": {
+        "parent": 41064,
+        "infrastructure_launcher": 13780,
+        "worker": 27928
+      },
+      "launcher_pid": 13780,
+      "settled_seconds": 31.03099999949336,
+      "measurement_start_utc": "2026-11-05T20:20:39.658472+00:00",
+      "elapsed_seconds": 60.0,
+      "cpu_seconds": {
+        "parent": 0.125,
+        "infrastructure_launcher": 0.0,
+        "worker": 0.0
+      },
+      "percent_one_core": {
+        "parent": 0.20833333333333334,
+        "infrastructure_launcher": 0.0,
+        "worker": 0.0
+      },
+      "combined_percent_one_core": 0.20833333333333334,
+      "before": {
+        "pid": 41064,
+        "stage": 6,
+        "ready": true,
+        "worker_pid": 27928,
+        "collector_pid": null,
+        "counts": {
+          "config": 31,
+          "timestamps": 31,
+          "snapshot": 0
+        },
+        "errors": [],
+        "events": [
+          {
+            "event": "database_initialised",
+            "utc": 1793910005.6060307,
+            "monotonic": 4291991.828
+          },
+          {
+            "event": "worker_warmed",
+            "utc": 1793910008.4804451,
+            "monotonic": 4291994.703
+          },
+          {
+            "event": "polling_started",
+            "utc": 1793910008.4804451,
+            "monotonic": 4291994.703
+          },
+          {
+            "event": "ready",
+            "utc": 1793910008.4804451,
+            "monotonic": 4291994.703
+          }
+        ],
+        "sockets": 0
+      },
+      "after": {
+        "pid": 41064,
+        "stage": 6,
+        "ready": true,
+        "worker_pid": 27928,
+        "collector_pid": null,
+        "counts": {
+          "config": 91,
+          "timestamps": 91,
+          "snapshot": 0
+        },
+        "errors": [],
+        "events": [
+          {
+            "event": "database_initialised",
+            "utc": 1793910005.6060307,
+            "monotonic": 4291991.828
+          },
+          {
+            "event": "worker_warmed",
+            "utc": 1793910008.4804451,
+            "monotonic": 4291994.703
+          },
+          {
+            "event": "polling_started",
+            "utc": 1793910008.4804451,
+            "monotonic": 4291994.703
+          },
+          {
+            "event": "ready",
+            "utc": 1793910008.4804451,
+            "monotonic": 4291994.703
+          }
+        ],
+        "sockets": 0
+      },
+      "bins": [
+        {
+          "elapsed": 5.0,
+          "cpu_seconds": {
+            "parent": 0.0,
+            "infrastructure_launcher": 0.0,
+            "worker": 0.0
+          }
+        },
+        {
+          "elapsed": 10.0,
+          "cpu_seconds": {
+            "parent": 0.0,
+            "infrastructure_launcher": 0.0,
+            "worker": 0.0
+          }
+        },
+        {
+          "elapsed": 15.0,
+          "cpu_seconds": {
+            "parent": 0.0,
+            "infrastructure_launcher": 0.0,
+            "worker": 0.0
+          }
+        },
+        {
+          "elapsed": 20.0,
+          "cpu_seconds": {
+            "parent": 0.0,
+            "infrastructure_launcher": 0.0,
+            "worker": 0.0
+          }
+        },
+        {
+          "elapsed": 25.0,
+          "cpu_seconds": {
+            "parent": 0.0,
+            "infrastructure_launcher": 0.0,
+            "worker": 0.0
+          }
+        },
+        {
+          "elapsed": 30.0,
+          "cpu_seconds": {
+            "parent": 0.015625,
+            "infrastructure_launcher": 0.0,
+            "worker": 0.0
+          }
+        },
+        {
+          "elapsed": 35.0,
+          "cpu_seconds": {
+            "parent": 0.03125,
+            "infrastructure_launcher": 0.0,
+            "worker": 0.0
+          }
+        },
+        {
+          "elapsed": 40.0,
+          "cpu_seconds": {
+            "parent": 0.015625,
+            "infrastructure_launcher": 0.0,
+            "worker": 0.0
+          }
+        },
+        {
+          "elapsed": 45.0,
+          "cpu_seconds": {
+            "parent": 0.015625,
+            "infrastructure_launcher": 0.0,
+            "worker": 0.0
+          }
+        },
+        {
+          "elapsed": 50.0,
+          "cpu_seconds": {
+            "parent": 0.03125,
+            "infrastructure_launcher": 0.0,
+            "worker": 0.0
+          }
+        },
+        {
+          "elapsed": 55.0,
+          "cpu_seconds": {
+            "parent": 0.0,
+            "infrastructure_launcher": 0.0,
+            "worker": 0.0
+          }
+        },
+        {
+          "elapsed": 60.0,
+          "cpu_seconds": {
+            "parent": 0.015625,
+            "infrastructure_launcher": 0.0,
+            "worker": 0.0
+          }
+        }
+      ]
+    },
+    "stage7.json": {
+      "source_sha256": "70c2cefe98c2104d07b391171895c524deb1a5653bc498a8b9a8b9d0a44256fd",
+      "stage": 7,
+      "pids": {
+        "parent": 10168,
+        "infrastructure_launcher": 27152,
+        "worker": 37424
+      },
+      "launcher_pid": 27152,
+      "settled_seconds": 31.031000000424683,
+      "measurement_start_utc": "2026-11-05T20:22:18.249968+00:00",
+      "elapsed_seconds": 60.0,
+      "cpu_seconds": {
+        "parent": 0.109375,
+        "infrastructure_launcher": 0.0,
+        "worker": 0.0
+      },
+      "percent_one_core": {
+        "parent": 0.18229166666666666,
+        "infrastructure_launcher": 0.0,
+        "worker": 0.0
+      },
+      "combined_percent_one_core": 0.18229166666666666,
+      "before": {
+        "pid": 10168,
+        "stage": 7,
+        "ready": true,
+        "worker_pid": 37424,
+        "collector_pid": null,
+        "counts": {
+          "config": 32,
+          "timestamps": 32,
+          "snapshot": 1
+        },
+        "http_other": 0,
+        "errors": [],
+        "events": [
+          {
+            "event": "database_initialised",
+            "utc": 1793910103.7960753,
+            "monotonic": 4292090.015
+          },
+          {
+            "event": "worker_warmed",
+            "utc": 1793910106.6614435,
+            "monotonic": 4292092.89
+          },
+          {
+            "event": "polling_started",
+            "utc": 1793910106.6614435,
+            "monotonic": 4292092.89
+          },
+          {
+            "event": "snapshot_complete_no_subscribers",
+            "utc": 1793910107.056923,
+            "monotonic": 4292093.281
+          },
+          {
+            "event": "ready",
+            "utc": 1793910107.056923,
+            "monotonic": 4292093.281
+          }
+        ],
+        "sockets": 0
+      },
+      "after": {
+        "pid": 10168,
+        "stage": 7,
+        "ready": true,
+        "worker_pid": 37424,
+        "collector_pid": null,
+        "counts": {
+          "config": 91,
+          "timestamps": 91,
+          "snapshot": 1
+        },
+        "http_other": 0,
+        "errors": [],
+        "events": [
+          {
+            "event": "database_initialised",
+            "utc": 1793910103.7960753,
+            "monotonic": 4292090.015
+          },
+          {
+            "event": "worker_warmed",
+            "utc": 1793910106.6614435,
+            "monotonic": 4292092.89
+          },
+          {
+            "event": "polling_started",
+            "utc": 1793910106.6614435,
+            "monotonic": 4292092.89
+          },
+          {
+            "event": "snapshot_complete_no_subscribers",
+            "utc": 1793910107.056923,
+            "monotonic": 4292093.281
+          },
+          {
+            "event": "ready",
+            "utc": 1793910107.056923,
+            "monotonic": 4292093.281
+          }
+        ],
+        "sockets": 0
+      },
+      "bins": [
+        {
+          "elapsed": 5.0,
+          "cpu_seconds": {
+            "parent": 0.015625,
+            "infrastructure_launcher": 0.0,
+            "worker": 0.0
+          }
+        },
+        {
+          "elapsed": 10.0,
+          "cpu_seconds": {
+            "parent": 0.015625,
+            "infrastructure_launcher": 0.0,
+            "worker": 0.0
+          }
+        },
+        {
+          "elapsed": 15.0,
+          "cpu_seconds": {
+            "parent": 0.015625,
+            "infrastructure_launcher": 0.0,
+            "worker": 0.0
+          }
+        },
+        {
+          "elapsed": 20.0,
+          "cpu_seconds": {
+            "parent": 0.0,
+            "infrastructure_launcher": 0.0,
+            "worker": 0.0
+          }
+        },
+        {
+          "elapsed": 25.0,
+          "cpu_seconds": {
+            "parent": 0.0,
+            "infrastructure_launcher": 0.0,
+            "worker": 0.0
+          }
+        },
+        {
+          "elapsed": 30.0,
+          "cpu_seconds": {
+            "parent": 0.015625,
+            "infrastructure_launcher": 0.0,
+            "worker": 0.0
+          }
+        },
+        {
+          "elapsed": 35.0,
+          "cpu_seconds": {
+            "parent": 0.0,
+            "infrastructure_launcher": 0.0,
+            "worker": 0.0
+          }
+        },
+        {
+          "elapsed": 40.0,
+          "cpu_seconds": {
+            "parent": 0.03125,
+            "infrastructure_launcher": 0.0,
+            "worker": 0.0
+          }
+        },
+        {
+          "elapsed": 45.0,
+          "cpu_seconds": {
+            "parent": 0.0,
+            "infrastructure_launcher": 0.0,
+            "worker": 0.0
+          }
+        },
+        {
+          "elapsed": 50.0,
+          "cpu_seconds": {
+            "parent": 0.015625,
+            "infrastructure_launcher": 0.0,
+            "worker": 0.0
+          }
+        },
+        {
+          "elapsed": 55.0,
+          "cpu_seconds": {
+            "parent": 0.0,
+            "infrastructure_launcher": 0.0,
+            "worker": 0.0
+          }
+        },
+        {
+          "elapsed": 60.0,
+          "cpu_seconds": {
+            "parent": 0.0,
+            "infrastructure_launcher": 0.0,
+            "worker": 0.0
+          }
+        }
+      ]
+    },
+    "stage8.json": {
+      "source_sha256": "70c2cefe98c2104d07b391171895c524deb1a5653bc498a8b9a8b9d0a44256fd",
+      "stage": 8,
+      "pids": {
+        "parent": 20500,
+        "infrastructure_launcher": 7704,
+        "worker": 24204,
+        "collector": 9968
+      },
+      "launcher_pid": 7704,
+      "settled_seconds": 31.01600000075996,
+      "measurement_start_utc": "2026-11-05T20:24:31.560172+00:00",
+      "elapsed_seconds": 60.0,
+      "cpu_seconds": {
+        "parent": 0.1875,
+        "infrastructure_launcher": 0.0,
+        "worker": 0.0,
+        "collector": 0.0
+      },
+      "percent_one_core": {
+        "parent": 0.3125,
+        "infrastructure_launcher": 0.0,
+        "worker": 0.0,
+        "collector": 0.0
+      },
+      "combined_percent_one_core": 0.3125,
+      "before": {
+        "pid": 20500,
+        "stage": 8,
+        "ready": true,
+        "worker_pid": 24204,
+        "collector_pid": 9968,
+        "counts": {
+          "config": 58,
+          "timestamps": 58,
+          "snapshot": 1
+        },
+        "http_other": 0,
+        "errors": [],
+        "events": [
+          {
+            "event": "database_initialised",
+            "utc": 1793910210.174746,
+            "monotonic": 4292196.406
+          },
+          {
+            "event": "worker_warmed",
+            "utc": 1793910213.0147922,
+            "monotonic": 4292199.234
+          },
+          {
+            "event": "polling_started",
+            "utc": 1793910213.0147922,
+            "monotonic": 4292199.234
+          },
+          {
+            "event": "snapshot_complete_no_subscribers",
+            "utc": 1793910213.4181423,
+            "monotonic": 4292199.64
+          },
+          {
+            "event": "collector_jobs_completed",
+            "utc": 1793910240.372177,
+            "monotonic": 4292226.593
+          },
+          {
+            "event": "ready",
+            "utc": 1793910240.372177,
+            "monotonic": 4292226.593
+          }
+        ],
+        "sockets": 0,
+        "collector_state": {
+          "pid": 9968,
+          "stage": 8,
+          "status": "idle",
+          "events": [
+            {
+              "event": "start",
+              "utc": 1793910214.6486638,
+              "monotonic": 4292200.875
+            },
+            {
+              "event": "scheduled_collection_started",
+              "utc": 1793910240.0037508,
+              "monotonic": 4292226.234
+            },
+            {
+              "event": "scheduled_collection_completed",
+              "utc": 1793910240.3391461,
+              "monotonic": 4292226.562
+            },
+            {
+              "event": "idle",
+              "utc": 1793910240.340044,
+              "monotonic": 4292226.562
+            }
+          ]
+        }
+      },
+      "after": {
+        "pid": 20500,
+        "stage": 8,
+        "ready": true,
+        "worker_pid": 24204,
+        "collector_pid": 9968,
+        "counts": {
+          "config": 118,
+          "timestamps": 118,
+          "snapshot": 1
+        },
+        "http_other": 0,
+        "errors": [],
+        "events": [
+          {
+            "event": "database_initialised",
+            "utc": 1793910210.174746,
+            "monotonic": 4292196.406
+          },
+          {
+            "event": "worker_warmed",
+            "utc": 1793910213.0147922,
+            "monotonic": 4292199.234
+          },
+          {
+            "event": "polling_started",
+            "utc": 1793910213.0147922,
+            "monotonic": 4292199.234
+          },
+          {
+            "event": "snapshot_complete_no_subscribers",
+            "utc": 1793910213.4181423,
+            "monotonic": 4292199.64
+          },
+          {
+            "event": "collector_jobs_completed",
+            "utc": 1793910240.372177,
+            "monotonic": 4292226.593
+          },
+          {
+            "event": "ready",
+            "utc": 1793910240.372177,
+            "monotonic": 4292226.593
+          }
+        ],
+        "sockets": 0,
+        "collector_state": {
+          "pid": 9968,
+          "stage": 8,
+          "status": "idle",
+          "events": [
+            {
+              "event": "start",
+              "utc": 1793910214.6486638,
+              "monotonic": 4292200.875
+            },
+            {
+              "event": "scheduled_collection_started",
+              "utc": 1793910240.0037508,
+              "monotonic": 4292226.234
+            },
+            {
+              "event": "scheduled_collection_completed",
+              "utc": 1793910240.3391461,
+              "monotonic": 4292226.562
+            },
+            {
+              "event": "idle",
+              "utc": 1793910240.340044,
+              "monotonic": 4292226.562
+            }
+          ]
+        }
+      },
+      "bins": [
+        {
+          "elapsed": 5.0,
+          "cpu_seconds": {
+            "parent": 0.015625,
+            "infrastructure_launcher": 0.0,
+            "worker": 0.0,
+            "collector": 0.0
+          }
+        },
+        {
+          "elapsed": 10.0,
+          "cpu_seconds": {
+            "parent": 0.0,
+            "infrastructure_launcher": 0.0,
+            "worker": 0.0,
+            "collector": 0.0
+          }
+        },
+        {
+          "elapsed": 15.0,
+          "cpu_seconds": {
+            "parent": 0.03125,
+            "infrastructure_launcher": 0.0,
+            "worker": 0.0,
+            "collector": 0.0
+          }
+        },
+        {
+          "elapsed": 20.0,
+          "cpu_seconds": {
+            "parent": 0.015625,
+            "infrastructure_launcher": 0.0,
+            "worker": 0.0,
+            "collector": 0.0
+          }
+        },
+        {
+          "elapsed": 25.014999999664724,
+          "cpu_seconds": {
+            "parent": 0.0,
+            "infrastructure_launcher": 0.0,
+            "worker": 0.0,
+            "collector": 0.0
+          }
+        },
+        {
+          "elapsed": 30.0,
+          "cpu_seconds": {
+            "parent": 0.015625,
+            "infrastructure_launcher": 0.0,
+            "worker": 0.0,
+            "collector": 0.0
+          }
+        },
+        {
+          "elapsed": 35.0,
+          "cpu_seconds": {
+            "parent": 0.03125,
+            "infrastructure_launcher": 0.0,
+            "worker": 0.0,
+            "collector": 0.0
+          }
+        },
+        {
+          "elapsed": 40.0,
+          "cpu_seconds": {
+            "parent": 0.03125,
+            "infrastructure_launcher": 0.0,
+            "worker": 0.0,
+            "collector": 0.0
+          }
+        },
+        {
+          "elapsed": 45.0,
+          "cpu_seconds": {
+            "parent": 0.015625,
+            "infrastructure_launcher": 0.0,
+            "worker": 0.0,
+            "collector": 0.0
+          }
+        },
+        {
+          "elapsed": 50.0,
+          "cpu_seconds": {
+            "parent": 0.015625,
+            "infrastructure_launcher": 0.0,
+            "worker": 0.0,
+            "collector": 0.0
+          }
+        },
+        {
+          "elapsed": 55.0,
+          "cpu_seconds": {
+            "parent": 0.015625,
+            "infrastructure_launcher": 0.0,
+            "worker": 0.0,
+            "collector": 0.0
+          }
+        },
+        {
+          "elapsed": 60.0,
+          "cpu_seconds": {
+            "parent": 0.0,
+            "infrastructure_launcher": 0.0,
+            "worker": 0.0,
+            "collector": 0.0
+          }
+        }
+      ]
+    },
+    "stage9.json": {
+      "source_sha256": "70c2cefe98c2104d07b391171895c524deb1a5653bc498a8b9a8b9d0a44256fd",
+      "stage": 9,
+      "pids": {
+        "parent": 31180,
+        "infrastructure_launcher": 19132,
+        "worker": 29524,
+        "collector": 31756
+      },
+      "launcher_pid": 19132,
+      "settled_seconds": 31.01600000075996,
+      "measurement_start_utc": "2026-11-05T20:27:31.797601+00:00",
+      "elapsed_seconds": 60.0,
+      "cpu_seconds": {
+        "parent": 0.171875,
+        "infrastructure_launcher": 0.0,
+        "worker": 0.0,
+        "collector": 0.0
+      },
+      "percent_one_core": {
+        "parent": 0.2864583333333333,
+        "infrastructure_launcher": 0.0,
+        "worker": 0.0,
+        "collector": 0.0
+      },
+      "combined_percent_one_core": 0.2864583333333333,
+      "before": {
+        "pid": 31180,
+        "stage": 9,
+        "ready": true,
+        "worker_pid": 29524,
+        "collector_pid": 31756,
+        "counts": {
+          "config": 59,
+          "timestamps": 59,
+          "snapshot": 1
+        },
+        "http_other": 0,
+        "errors": [],
+        "events": [
+          {
+            "event": "database_initialised",
+            "utc": 1793910389.5892231,
+            "monotonic": 4292375.812
+          },
+          {
+            "event": "worker_warmed",
+            "utc": 1793910392.402673,
+            "monotonic": 4292378.625
+          },
+          {
+            "event": "polling_started",
+            "utc": 1793910392.402673,
+            "monotonic": 4292378.625
+          },
+          {
+            "event": "snapshot_complete_no_subscribers",
+            "utc": 1793910392.7715175,
+            "monotonic": 4292379.0
+          },
+          {
+            "event": "collector_jobs_completed",
+            "utc": 1793910420.754548,
+            "monotonic": 4292406.984
+          },
+          {
+            "event": "ready",
+            "utc": 1793910420.754548,
+            "monotonic": 4292406.984
+          }
+        ],
+        "sockets": 0,
+        "collector_state": {
+          "pid": 31756,
+          "stage": 9,
+          "status": "idle",
+          "events": [
+            {
+              "event": "start",
+              "utc": 1793910393.9896128,
+              "monotonic": 4292380.218
+            },
+            {
+              "event": "scheduled_collection_started",
+              "utc": 1793910420.000739,
+              "monotonic": 4292406.234
+            },
+            {
+              "event": "scheduled_collection_completed",
+              "utc": 1793910420.216175,
+              "monotonic": 4292406.437
+            },
+            {
+              "event": "forecast_schedule_check_started",
+              "utc": 1793910420.2172568,
+              "monotonic": 4292406.437
+            },
+            {
+              "event": "forecast_schedule_check_completed",
+              "utc": 1793910420.221773,
+              "monotonic": 4292406.453
+            },
+            {
+              "event": "recorded_data_calibration_replay_started",
+              "utc": 1793910420.2227728,
+              "monotonic": 4292406.453
+            },
+            {
+              "event": "recorded_data_calibration_replay_completed",
+              "utc": 1793910420.5592031,
+              "monotonic": 4292406.781
+            },
+            {
+              "event": "idle",
+              "utc": 1793910420.5592031,
+              "monotonic": 4292406.781
+            }
+          ],
+          "calibration_replay": {
+            "house_load_rows": 0,
+            "adjusted_rows": 11
+          }
+        }
+      },
+      "after": {
+        "pid": 31180,
+        "stage": 9,
+        "ready": true,
+        "worker_pid": 29524,
+        "collector_pid": 31756,
+        "counts": {
+          "config": 119,
+          "timestamps": 119,
+          "snapshot": 1
+        },
+        "http_other": 0,
+        "errors": [],
+        "events": [
+          {
+            "event": "database_initialised",
+            "utc": 1793910389.5892231,
+            "monotonic": 4292375.812
+          },
+          {
+            "event": "worker_warmed",
+            "utc": 1793910392.402673,
+            "monotonic": 4292378.625
+          },
+          {
+            "event": "polling_started",
+            "utc": 1793910392.402673,
+            "monotonic": 4292378.625
+          },
+          {
+            "event": "snapshot_complete_no_subscribers",
+            "utc": 1793910392.7715175,
+            "monotonic": 4292379.0
+          },
+          {
+            "event": "collector_jobs_completed",
+            "utc": 1793910420.754548,
+            "monotonic": 4292406.984
+          },
+          {
+            "event": "ready",
+            "utc": 1793910420.754548,
+            "monotonic": 4292406.984
+          }
+        ],
+        "sockets": 0,
+        "collector_state": {
+          "pid": 31756,
+          "stage": 9,
+          "status": "idle",
+          "events": [
+            {
+              "event": "start",
+              "utc": 1793910393.9896128,
+              "monotonic": 4292380.218
+            },
+            {
+              "event": "scheduled_collection_started",
+              "utc": 1793910420.000739,
+              "monotonic": 4292406.234
+            },
+            {
+              "event": "scheduled_collection_completed",
+              "utc": 1793910420.216175,
+              "monotonic": 4292406.437
+            },
+            {
+              "event": "forecast_schedule_check_started",
+              "utc": 1793910420.2172568,
+              "monotonic": 4292406.437
+            },
+            {
+              "event": "forecast_schedule_check_completed",
+              "utc": 1793910420.221773,
+              "monotonic": 4292406.453
+            },
+            {
+              "event": "recorded_data_calibration_replay_started",
+              "utc": 1793910420.2227728,
+              "monotonic": 4292406.453
+            },
+            {
+              "event": "recorded_data_calibration_replay_completed",
+              "utc": 1793910420.5592031,
+              "monotonic": 4292406.781
+            },
+            {
+              "event": "idle",
+              "utc": 1793910420.5592031,
+              "monotonic": 4292406.781
+            }
+          ],
+          "calibration_replay": {
+            "house_load_rows": 0,
+            "adjusted_rows": 11
+          }
+        }
+      },
+      "bins": [
+        {
+          "elapsed": 5.0,
+          "cpu_seconds": {
+            "parent": 0.015625,
+            "infrastructure_launcher": 0.0,
+            "worker": 0.0,
+            "collector": 0.0
+          }
+        },
+        {
+          "elapsed": 10.0,
+          "cpu_seconds": {
+            "parent": 0.0,
+            "infrastructure_launcher": 0.0,
+            "worker": 0.0,
+            "collector": 0.0
+          }
+        },
+        {
+          "elapsed": 15.0,
+          "cpu_seconds": {
+            "parent": 0.0,
+            "infrastructure_launcher": 0.0,
+            "worker": 0.0,
+            "collector": 0.0
+          }
+        },
+        {
+          "elapsed": 20.0,
+          "cpu_seconds": {
+            "parent": 0.046875,
+            "infrastructure_launcher": 0.0,
+            "worker": 0.0,
+            "collector": 0.0
+          }
+        },
+        {
+          "elapsed": 25.0,
+          "cpu_seconds": {
+            "parent": 0.0,
+            "infrastructure_launcher": 0.0,
+            "worker": 0.0,
+            "collector": 0.0
+          }
+        },
+        {
+          "elapsed": 30.0,
+          "cpu_seconds": {
+            "parent": 0.015625,
+            "infrastructure_launcher": 0.0,
+            "worker": 0.0,
+            "collector": 0.0
+          }
+        },
+        {
+          "elapsed": 35.0,
+          "cpu_seconds": {
+            "parent": 0.03125,
+            "infrastructure_launcher": 0.0,
+            "worker": 0.0,
+            "collector": 0.0
+          }
+        },
+        {
+          "elapsed": 40.0,
+          "cpu_seconds": {
+            "parent": 0.015625,
+            "infrastructure_launcher": 0.0,
+            "worker": 0.0,
+            "collector": 0.0
+          }
+        },
+        {
+          "elapsed": 45.0,
+          "cpu_seconds": {
+            "parent": 0.0,
+            "infrastructure_launcher": 0.0,
+            "worker": 0.0,
+            "collector": 0.0
+          }
+        },
+        {
+          "elapsed": 50.0,
+          "cpu_seconds": {
+            "parent": 0.03125,
+            "infrastructure_launcher": 0.0,
+            "worker": 0.0,
+            "collector": 0.0
+          }
+        },
+        {
+          "elapsed": 55.0,
+          "cpu_seconds": {
+            "parent": 0.015625,
+            "infrastructure_launcher": 0.0,
+            "worker": 0.0,
+            "collector": 0.0
+          }
+        },
+        {
+          "elapsed": 60.0,
+          "cpu_seconds": {
+            "parent": 0.0,
+            "infrastructure_launcher": 0.0,
+            "worker": 0.0,
+            "collector": 0.0
+          }
+        }
+      ]
+    },
+    "actual_nobrowser_first.json": {
+      "source_sha256": "9184ac620a8016e46ef6f5934ca05a49e4661df6fd73e42a9c8a8c014722b7e5",
+      "stage": 12,
+      "pids": {
+        "parent": 42432,
+        "infrastructure_launcher": 20912,
+        "worker": 16596
+      },
+      "launcher_pid": 20912,
+      "settled_seconds": 31.015999999828637,
+      "measurement_start_utc": "2026-11-05T20:29:35.459003+00:00",
+      "elapsed_seconds": 60.0,
+      "cpu_seconds": {
+        "parent": 0.015625,
+        "infrastructure_launcher": 0.0,
+        "worker": 0.0
+      },
+      "percent_one_core": {
+        "parent": 0.026041666666666668,
+        "infrastructure_launcher": 0.0,
+        "worker": 0.0
+      },
+      "combined_percent_one_core": 0.026041666666666668,
+      "before": {
+        "pid": 42432,
+        "ready": true,
+        "worker_pid": 16596,
+        "counts": {
+          "checks": 34,
+          "refresh": 0,
+          "projection": 0,
+          "live_reads": 0,
+          "refresh_failed": 0
+        },
+        "events": [
+          {
+            "event": "initial_jobs_completed",
+            "utc": 1793910544.3880477,
+            "monotonic": 4292530.609
+          }
+        ],
+        "http_other": 0,
+        "errors": [],
+        "sockets": 0
+      },
+      "after": {
+        "pid": 42432,
+        "ready": true,
+        "worker_pid": 16596,
+        "counts": {
+          "checks": 94,
+          "refresh": 0,
+          "projection": 0,
+          "live_reads": 0,
+          "refresh_failed": 0
+        },
+        "events": [
+          {
+            "event": "initial_jobs_completed",
+            "utc": 1793910544.3880477,
+            "monotonic": 4292530.609
+          }
+        ],
+        "http_other": 0,
+        "errors": [],
+        "sockets": 0
+      },
+      "bins": [
+        {
+          "elapsed": 5.0,
+          "cpu_seconds": {
+            "parent": 0.0,
+            "infrastructure_launcher": 0.0,
+            "worker": 0.0
+          }
+        },
+        {
+          "elapsed": 10.0,
+          "cpu_seconds": {
+            "parent": 0.0,
+            "infrastructure_launcher": 0.0,
+            "worker": 0.0
+          }
+        },
+        {
+          "elapsed": 15.0,
+          "cpu_seconds": {
+            "parent": 0.0,
+            "infrastructure_launcher": 0.0,
+            "worker": 0.0
+          }
+        },
+        {
+          "elapsed": 20.0,
+          "cpu_seconds": {
+            "parent": 0.0,
+            "infrastructure_launcher": 0.0,
+            "worker": 0.0
+          }
+        },
+        {
+          "elapsed": 25.0,
+          "cpu_seconds": {
+            "parent": 0.0,
+            "infrastructure_launcher": 0.0,
+            "worker": 0.0
+          }
+        },
+        {
+          "elapsed": 30.0,
+          "cpu_seconds": {
+            "parent": 0.0,
+            "infrastructure_launcher": 0.0,
+            "worker": 0.0
+          }
+        },
+        {
+          "elapsed": 35.0,
+          "cpu_seconds": {
+            "parent": 0.0,
+            "infrastructure_launcher": 0.0,
+            "worker": 0.0
+          }
+        },
+        {
+          "elapsed": 40.0,
+          "cpu_seconds": {
+            "parent": 0.0,
+            "infrastructure_launcher": 0.0,
+            "worker": 0.0
+          }
+        },
+        {
+          "elapsed": 45.0,
+          "cpu_seconds": {
+            "parent": 0.0,
+            "infrastructure_launcher": 0.0,
+            "worker": 0.0
+          }
+        },
+        {
+          "elapsed": 50.0,
+          "cpu_seconds": {
+            "parent": 0.015625,
+            "infrastructure_launcher": 0.0,
+            "worker": 0.0
+          }
+        },
+        {
+          "elapsed": 55.01599999982864,
+          "cpu_seconds": {
+            "parent": 0.0,
+            "infrastructure_launcher": 0.0,
+            "worker": 0.0
+          }
+        },
+        {
+          "elapsed": 60.0,
+          "cpu_seconds": {
+            "parent": 0.0,
+            "infrastructure_launcher": 0.0,
+            "worker": 0.0
+          }
+        }
+      ]
+    },
+    "actual_browser_first_valid.json": {
+      "source_sha256": "269bb4362562ea9ba43750f01dcf688c0c0a8c152ad535c0634f601b0b9cf237",
+      "stage": 11,
+      "pids": {
+        "parent": 20880,
+        "infrastructure_launcher": 33352,
+        "worker": 28184
+      },
+      "launcher_pid": 33352,
+      "settled_seconds": 31.01600000075996,
+      "measurement_start_utc": "2026-11-05T20:34:43.811838+00:00",
+      "elapsed_seconds": 60.0,
+      "cpu_seconds": {
+        "parent": 0.203125,
+        "infrastructure_launcher": 0.0,
+        "worker": 0.0
+      },
+      "percent_one_core": {
+        "parent": 0.3385416666666667,
+        "infrastructure_launcher": 0.0,
+        "worker": 0.0
+      },
+      "combined_percent_one_core": 0.3385416666666667,
+      "before": {
+        "pid": 20880,
+        "ready": true,
+        "worker_pid": 28184,
+        "counts": {
+          "checks": 55,
+          "refresh": 1,
+          "projection": 0,
+          "live_reads": 18,
+          "refresh_failed": 0
+        },
+        "events": [
+          {
+            "event": "initial_jobs_completed",
+            "utc": 1793910831.8159332,
+            "monotonic": 4292818.046
+          },
+          {
+            "event": "refresh_started",
+            "utc": 1793910832.8821223,
+            "monotonic": 4292819.109
+          },
+          {
+            "event": "refresh_finished",
+            "utc": 1793910833.030112,
+            "monotonic": 4292819.25
+          },
+          {
+            "event": "live_browser_paused",
+            "utc": 1793910852.5870643,
+            "monotonic": 4292838.812
+          }
+        ],
+        "http_other": 25,
+        "errors": [],
+        "sockets": 0,
+        "snapshot_listeners": 0
+      },
+      "after": {
+        "pid": 20880,
+        "ready": true,
+        "worker_pid": 28184,
+        "counts": {
+          "checks": 115,
+          "refresh": 1,
+          "projection": 0,
+          "live_reads": 18,
+          "refresh_failed": 0
+        },
+        "events": [
+          {
+            "event": "initial_jobs_completed",
+            "utc": 1793910831.8159332,
+            "monotonic": 4292818.046
+          },
+          {
+            "event": "refresh_started",
+            "utc": 1793910832.8821223,
+            "monotonic": 4292819.109
+          },
+          {
+            "event": "refresh_finished",
+            "utc": 1793910833.030112,
+            "monotonic": 4292819.25
+          },
+          {
+            "event": "live_browser_paused",
+            "utc": 1793910852.5870643,
+            "monotonic": 4292838.812
+          }
+        ],
+        "http_other": 25,
+        "errors": [],
+        "sockets": 0,
+        "snapshot_listeners": 0
+      },
+      "bins": [
+        {
+          "elapsed": 5.0,
+          "cpu_seconds": {
+            "parent": 0.0,
+            "infrastructure_launcher": 0.0,
+            "worker": 0.0
+          }
+        },
+        {
+          "elapsed": 10.014999999664724,
+          "cpu_seconds": {
+            "parent": 0.015625,
+            "infrastructure_launcher": 0.0,
+            "worker": 0.0
+          }
+        },
+        {
+          "elapsed": 15.0,
+          "cpu_seconds": {
+            "parent": 0.015625,
+            "infrastructure_launcher": 0.0,
+            "worker": 0.0
+          }
+        },
+        {
+          "elapsed": 20.0,
+          "cpu_seconds": {
+            "parent": 0.015625,
+            "infrastructure_launcher": 0.0,
+            "worker": 0.0
+          }
+        },
+        {
+          "elapsed": 25.0,
+          "cpu_seconds": {
+            "parent": 0.03125,
+            "infrastructure_launcher": 0.0,
+            "worker": 0.0
+          }
+        },
+        {
+          "elapsed": 30.0,
+          "cpu_seconds": {
+            "parent": 0.0,
+            "infrastructure_launcher": 0.0,
+            "worker": 0.0
+          }
+        },
+        {
+          "elapsed": 35.0,
+          "cpu_seconds": {
+            "parent": 0.015625,
+            "infrastructure_launcher": 0.0,
+            "worker": 0.0
+          }
+        },
+        {
+          "elapsed": 40.0,
+          "cpu_seconds": {
+            "parent": 0.015625,
+            "infrastructure_launcher": 0.0,
+            "worker": 0.0
+          }
+        },
+        {
+          "elapsed": 45.0,
+          "cpu_seconds": {
+            "parent": 0.015625,
+            "infrastructure_launcher": 0.0,
+            "worker": 0.0
+          }
+        },
+        {
+          "elapsed": 50.0,
+          "cpu_seconds": {
+            "parent": 0.046875,
+            "infrastructure_launcher": 0.0,
+            "worker": 0.0
+          }
+        },
+        {
+          "elapsed": 55.0,
+          "cpu_seconds": {
+            "parent": 0.015625,
+            "infrastructure_launcher": 0.0,
+            "worker": 0.0
+          }
+        },
+        {
+          "elapsed": 60.0,
+          "cpu_seconds": {
+            "parent": 0.015625,
+            "infrastructure_launcher": 0.0,
+            "worker": 0.0
+          }
+        }
+      ]
+    },
+    "actual_nobrowser.json": {
+      "source_sha256": "269bb4362562ea9ba43750f01dcf688c0c0a8c152ad535c0634f601b0b9cf237",
+      "stage": 12,
+      "pids": {
+        "parent": 7668,
+        "infrastructure_launcher": 27724,
+        "worker": 42160
+      },
+      "launcher_pid": 27724,
+      "settled_seconds": 31.014999999664724,
+      "measurement_start_utc": "2026-11-05T20:36:35.663091+00:00",
+      "elapsed_seconds": 60.0,
+      "cpu_seconds": {
+        "parent": 0.21875,
+        "infrastructure_launcher": 0.0,
+        "worker": 0.0
+      },
+      "percent_one_core": {
+        "parent": 0.3645833333333333,
+        "infrastructure_launcher": 0.0,
+        "worker": 0.0
+      },
+      "combined_percent_one_core": 0.3645833333333333,
+      "before": {
+        "pid": 7668,
+        "ready": true,
+        "worker_pid": 42160,
+        "counts": {
+          "checks": 34,
+          "refresh": 0,
+          "projection": 0,
+          "live_reads": 0,
+          "refresh_failed": 0
+        },
+        "events": [
+          {
+            "event": "initial_jobs_completed",
+            "utc": 1793910964.4883049,
+            "monotonic": 4292950.718
+          }
+        ],
+        "http_other": 0,
+        "errors": [],
+        "sockets": 0,
+        "snapshot_listeners": 0
+      },
+      "after": {
+        "pid": 7668,
+        "ready": true,
+        "worker_pid": 42160,
+        "counts": {
+          "checks": 94,
+          "refresh": 0,
+          "projection": 0,
+          "live_reads": 0,
+          "refresh_failed": 0
+        },
+        "events": [
+          {
+            "event": "initial_jobs_completed",
+            "utc": 1793910964.4883049,
+            "monotonic": 4292950.718
+          }
+        ],
+        "http_other": 0,
+        "errors": [],
+        "sockets": 0,
+        "snapshot_listeners": 0
+      },
+      "bins": [
+        {
+          "elapsed": 5.0,
+          "cpu_seconds": {
+            "parent": 0.03125,
+            "infrastructure_launcher": 0.0,
+            "worker": 0.0
+          }
+        },
+        {
+          "elapsed": 10.0,
+          "cpu_seconds": {
+            "parent": 0.015625,
+            "infrastructure_launcher": 0.0,
+            "worker": 0.0
+          }
+        },
+        {
+          "elapsed": 15.0,
+          "cpu_seconds": {
+            "parent": 0.0,
+            "infrastructure_launcher": 0.0,
+            "worker": 0.0
+          }
+        },
+        {
+          "elapsed": 20.0,
+          "cpu_seconds": {
+            "parent": 0.015625,
+            "infrastructure_launcher": 0.0,
+            "worker": 0.0
+          }
+        },
+        {
+          "elapsed": 25.0,
+          "cpu_seconds": {
+            "parent": 0.0,
+            "infrastructure_launcher": 0.0,
+            "worker": 0.0
+          }
+        },
+        {
+          "elapsed": 30.0,
+          "cpu_seconds": {
+            "parent": 0.0,
+            "infrastructure_launcher": 0.0,
+            "worker": 0.0
+          }
+        },
+        {
+          "elapsed": 35.0,
+          "cpu_seconds": {
+            "parent": 0.03125,
+            "infrastructure_launcher": 0.0,
+            "worker": 0.0
+          }
+        },
+        {
+          "elapsed": 40.0,
+          "cpu_seconds": {
+            "parent": 0.03125,
+            "infrastructure_launcher": 0.0,
+            "worker": 0.0
+          }
+        },
+        {
+          "elapsed": 45.0,
+          "cpu_seconds": {
+            "parent": 0.0,
+            "infrastructure_launcher": 0.0,
+            "worker": 0.0
+          }
+        },
+        {
+          "elapsed": 50.0,
+          "cpu_seconds": {
+            "parent": 0.015625,
+            "infrastructure_launcher": 0.0,
+            "worker": 0.0
+          }
+        },
+        {
+          "elapsed": 55.0,
+          "cpu_seconds": {
+            "parent": 0.046875,
+            "infrastructure_launcher": 0.0,
+            "worker": 0.0
+          }
+        },
+        {
+          "elapsed": 60.0,
+          "cpu_seconds": {
+            "parent": 0.03125,
+            "infrastructure_launcher": 0.0,
+            "worker": 0.0
+          }
+        }
+      ]
+    },
+    "solar_options.json": {
+      "before": {
+        "ok": true,
+        "sockets": 0,
+        "client_count": 1,
+        "http_other": 0
+      },
+      "after": {
+        "ok": true,
+        "sockets": 0,
+        "client_count": 1,
+        "http_other": 0
+      },
+      "stage": "solar_options",
+      "pid": 32068,
+      "launcher_pid": 30728,
+      "port": 18761,
+      "ready_utc": "2026-11-05T20:37:37.999007+00:00",
+      "settled_seconds": 31.046999999321997,
+      "measurement_start_utc": "2026-11-05T20:38:09.036540+00:00",
+      "elapsed_seconds": 60.0,
+      "cpu_seconds": 0.0625,
+      "percent_one_core": 0.10416666666666667,
+      "bins": [
+        {
+          "elapsed": 5.0,
+          "cpu_seconds": 0.0
+        },
+        {
+          "elapsed": 10.0,
+          "cpu_seconds": 0.03125
+        },
+        {
+          "elapsed": 15.0,
+          "cpu_seconds": 0.0
+        },
+        {
+          "elapsed": 20.0,
+          "cpu_seconds": 0.015625
+        },
+        {
+          "elapsed": 25.0,
+          "cpu_seconds": 0.0
+        },
+        {
+          "elapsed": 30.0,
+          "cpu_seconds": 0.0
+        },
+        {
+          "elapsed": 35.0,
+          "cpu_seconds": 0.0
+        },
+        {
+          "elapsed": 40.0,
+          "cpu_seconds": 0.0
+        },
+        {
+          "elapsed": 45.0,
+          "cpu_seconds": 0.015625
+        },
+        {
+          "elapsed": 50.0,
+          "cpu_seconds": 0.0
+        },
+        {
+          "elapsed": 55.0,
+          "cpu_seconds": 0.0
+        },
+        {
+          "elapsed": 60.0,
+          "cpu_seconds": 0.0
+        }
+      ],
+      "browser": "none; FastAPI health GET only",
+      "worker": "none",
+      "collector": "none"
+    },
+    "implicit_stock.json": {
+      "before": {
+        "ok": true,
+        "sockets": 0,
+        "client_count": 1,
+        "http_other": 0
+      },
+      "after": {
+        "ok": true,
+        "sockets": 0,
+        "client_count": 1,
+        "http_other": 0
+      },
+      "stage": "implicit_stock",
+      "pid": 41048,
+      "launcher_pid": 22524,
+      "port": 18761,
+      "ready_utc": "2026-11-05T20:39:11.122167+00:00",
+      "settled_seconds": 31.031999999657273,
+      "measurement_start_utc": "2026-11-05T20:39:42.145640+00:00",
+      "elapsed_seconds": 60.0,
+      "cpu_seconds": 0.09375,
+      "percent_one_core": 0.15625,
+      "bins": [
+        {
+          "elapsed": 5.0,
+          "cpu_seconds": 0.015625
+        },
+        {
+          "elapsed": 10.0,
+          "cpu_seconds": 0.03125
+        },
+        {
+          "elapsed": 15.0,
+          "cpu_seconds": 0.0
+        },
+        {
+          "elapsed": 20.0,
+          "cpu_seconds": 0.015625
+        },
+        {
+          "elapsed": 25.0,
+          "cpu_seconds": 0.0
+        },
+        {
+          "elapsed": 30.0,
+          "cpu_seconds": 0.0
+        },
+        {
+          "elapsed": 35.0,
+          "cpu_seconds": 0.015625
+        },
+        {
+          "elapsed": 40.0,
+          "cpu_seconds": 0.0
+        },
+        {
+          "elapsed": 45.0,
+          "cpu_seconds": 0.0
+        },
+        {
+          "elapsed": 50.0,
+          "cpu_seconds": 0.0
+        },
+        {
+          "elapsed": 55.0,
+          "cpu_seconds": 0.015625
+        },
+        {
+          "elapsed": 60.0,
+          "cpu_seconds": 0.0
+        }
+      ],
+      "browser": "none; FastAPI health GET only",
+      "worker": "none",
+      "collector": "none"
+    },
+    "clean_stock.json": {
+      "before": {
+        "ok": true,
+        "sockets": 0,
+        "client_count": 1,
+        "http_other": 0
+      },
+      "after": {
+        "ok": true,
+        "sockets": 0,
+        "client_count": 1,
+        "http_other": 0
+      },
+      "stage": "implicit_stock",
+      "pid": 19580,
+      "launcher_pid": 26856,
+      "port": 18761,
+      "ready_utc": "2026-11-05T20:45:11.764585+00:00",
+      "settled_seconds": 31.03099999949336,
+      "measurement_start_utc": "2026-11-05T20:45:42.788827+00:00",
+      "elapsed_seconds": 60.0,
+      "cpu_seconds": 0.125,
+      "percent_one_core": 0.20833333333333334,
+      "bins": [
+        {
+          "elapsed": 5.0,
+          "cpu_seconds": 0.03125
+        },
+        {
+          "elapsed": 10.0,
+          "cpu_seconds": 0.0
+        },
+        {
+          "elapsed": 15.0,
+          "cpu_seconds": 0.0
+        },
+        {
+          "elapsed": 20.0,
+          "cpu_seconds": 0.015625
+        },
+        {
+          "elapsed": 25.0,
+          "cpu_seconds": 0.03125
+        },
+        {
+          "elapsed": 30.0,
+          "cpu_seconds": 0.015625
+        },
+        {
+          "elapsed": 35.0,
+          "cpu_seconds": 0.0
+        },
+        {
+          "elapsed": 40.0,
+          "cpu_seconds": 0.0
+        },
+        {
+          "elapsed": 45.0,
+          "cpu_seconds": 0.03125
+        },
+        {
+          "elapsed": 50.0,
+          "cpu_seconds": 0.0
+        },
+        {
+          "elapsed": 55.0,
+          "cpu_seconds": 0.0
+        },
+        {
+          "elapsed": 60.0,
+          "cpu_seconds": 0.0
+        }
+      ],
+      "browser": "none; FastAPI health GET only",
+      "worker": "none",
+      "collector": "none",
+      "cleanup": {
+        "server": "exited"
+      }
+    },
+    "clean_actual.json": {
+      "source_sha256": "269bb4362562ea9ba43750f01dcf688c0c0a8c152ad535c0634f601b0b9cf237",
+      "stage": 12,
+      "pids": {
+        "parent": 34524,
+        "infrastructure_launcher": 37384,
+        "worker": 40148
+      },
+      "launcher_pid": 37384,
+      "settled_seconds": 31.0,
+      "measurement_start_utc": "2026-11-05T20:47:43.015865+00:00",
+      "elapsed_seconds": 60.0,
+      "cpu_seconds": {
+        "parent": 0.546875,
+        "infrastructure_launcher": 0.0,
+        "worker": 0.0
+      },
+      "percent_one_core": {
+        "parent": 0.9114583333333334,
+        "infrastructure_launcher": 0.0,
+        "worker": 0.0
+      },
+      "combined_percent_one_core": 0.9114583333333334,
+      "before": {
+        "pid": 34524,
+        "ready": true,
+        "worker_pid": 40148,
+        "counts": {
+          "checks": 34,
+          "refresh": 0,
+          "projection": 0,
+          "live_reads": 0,
+          "refresh_failed": 0
+        },
+        "events": [
+          {
+            "event": "initial_jobs_completed",
+            "utc": 1793911631.8357217,
+            "monotonic": 4293618.062
+          }
+        ],
+        "http_other": 0,
+        "errors": [],
+        "sockets": 0,
+        "snapshot_listeners": 0
+      },
+      "after": {
+        "pid": 34524,
+        "ready": true,
+        "worker_pid": 40148,
+        "counts": {
+          "checks": 93,
+          "refresh": 0,
+          "projection": 0,
+          "live_reads": 0,
+          "refresh_failed": 0
+        },
+        "events": [
+          {
+            "event": "initial_jobs_completed",
+            "utc": 1793911631.8357217,
+            "monotonic": 4293618.062
+          }
+        ],
+        "http_other": 0,
+        "errors": [],
+        "sockets": 0,
+        "snapshot_listeners": 0
+      },
+      "bins": [
+        {
+          "elapsed": 5.0,
+          "cpu_seconds": {
+            "parent": 0.015625,
+            "infrastructure_launcher": 0.0,
+            "worker": 0.0
+          }
+        },
+        {
+          "elapsed": 10.0,
+          "cpu_seconds": {
+            "parent": 0.03125,
+            "infrastructure_launcher": 0.0,
+            "worker": 0.0
+          }
+        },
+        {
+          "elapsed": 15.015999999828637,
+          "cpu_seconds": {
+            "parent": 0.125,
+            "infrastructure_launcher": 0.0,
+            "worker": 0.0
+          }
+        },
+        {
+          "elapsed": 20.0,
+          "cpu_seconds": {
+            "parent": 0.109375,
+            "infrastructure_launcher": 0.0,
+            "worker": 0.0
+          }
+        },
+        {
+          "elapsed": 25.0,
+          "cpu_seconds": {
+            "parent": 0.0,
+            "infrastructure_launcher": 0.0,
+            "worker": 0.0
+          }
+        },
+        {
+          "elapsed": 30.0,
+          "cpu_seconds": {
+            "parent": 0.0,
+            "infrastructure_launcher": 0.0,
+            "worker": 0.0
+          }
+        },
+        {
+          "elapsed": 35.0,
+          "cpu_seconds": {
+            "parent": 0.046875,
+            "infrastructure_launcher": 0.0,
+            "worker": 0.0
+          }
+        },
+        {
+          "elapsed": 40.0,
+          "cpu_seconds": {
+            "parent": 0.109375,
+            "infrastructure_launcher": 0.0,
+            "worker": 0.0
+          }
+        },
+        {
+          "elapsed": 45.0,
+          "cpu_seconds": {
+            "parent": 0.015625,
+            "infrastructure_launcher": 0.0,
+            "worker": 0.0
+          }
+        },
+        {
+          "elapsed": 50.0,
+          "cpu_seconds": {
+            "parent": 0.015625,
+            "infrastructure_launcher": 0.0,
+            "worker": 0.0
+          }
+        },
+        {
+          "elapsed": 55.0,
+          "cpu_seconds": {
+            "parent": 0.046875,
+            "infrastructure_launcher": 0.0,
+            "worker": 0.0
+          }
+        },
+        {
+          "elapsed": 60.0,
+          "cpu_seconds": {
+            "parent": 0.03125,
+            "infrastructure_launcher": 0.0,
+            "worker": 0.0
+          }
+        }
+      ],
+      "cleanup": {
+        "server": "exited",
+        "worker": "exited"
+      }
+    },
+    "actual_projection.json": {
+      "source_sha256": "65e13e2722748e7b1dde0bb9f30c581abdfc989dfb9482360d89145a7a6209c3",
+      "stage": 10,
+      "pids": {
+        "parent": 20868,
+        "infrastructure_launcher": 16208,
+        "worker": 20608
+      },
+      "launcher_pid": 16208,
+      "settled_seconds": 31.015999999828637,
+      "measurement_start_utc": "2026-11-05T20:53:46.028851+00:00",
+      "elapsed_seconds": 60.0,
+      "cpu_seconds": {
+        "parent": 0.1875,
+        "infrastructure_launcher": 0.0,
+        "worker": 0.0
+      },
+      "percent_one_core": {
+        "parent": 0.3125,
+        "infrastructure_launcher": 0.0,
+        "worker": 0.0
+      },
+      "combined_percent_one_core": 0.3125,
+      "before": {
+        "pid": 20868,
+        "ready": true,
+        "worker_pid": 20608,
+        "counts": {
+          "checks": 39,
+          "refresh": 0,
+          "projection": 1,
+          "live_reads": 0,
+          "refresh_failed": 0
+        },
+        "events": [
+          {
+            "event": "initial_jobs_completed",
+            "utc": 1793911990.4599533,
+            "monotonic": 4293976.687
+          },
+          {
+            "event": "projection_started",
+            "utc": 1793911990.593211,
+            "monotonic": 4293976.812
+          },
+          {
+            "event": "projection_finished",
+            "utc": 1793911994.9504013,
+            "monotonic": 4293981.171
+          }
+        ],
+        "http_other": 72,
+        "errors": [],
+        "sockets": 0
+      },
+      "after": {
+        "pid": 20868,
+        "ready": true,
+        "worker_pid": 20608,
+        "counts": {
+          "checks": 98,
+          "refresh": 0,
+          "projection": 1,
+          "live_reads": 0,
+          "refresh_failed": 0
+        },
+        "events": [
+          {
+            "event": "initial_jobs_completed",
+            "utc": 1793911990.4599533,
+            "monotonic": 4293976.687
+          },
+          {
+            "event": "projection_started",
+            "utc": 1793911990.593211,
+            "monotonic": 4293976.812
+          },
+          {
+            "event": "projection_finished",
+            "utc": 1793911994.9504013,
+            "monotonic": 4293981.171
+          }
+        ],
+        "http_other": 72,
+        "errors": [],
+        "sockets": 0
+      },
+      "bins": [
+        {
+          "elapsed": 5.0,
+          "cpu_seconds": {
+            "parent": 0.03125,
+            "infrastructure_launcher": 0.0,
+            "worker": 0.0
+          }
+        },
+        {
+          "elapsed": 10.0,
+          "cpu_seconds": {
+            "parent": 0.015625,
+            "infrastructure_launcher": 0.0,
+            "worker": 0.0
+          }
+        },
+        {
+          "elapsed": 15.0,
+          "cpu_seconds": {
+            "parent": 0.0,
+            "infrastructure_launcher": 0.0,
+            "worker": 0.0
+          }
+        },
+        {
+          "elapsed": 20.0,
+          "cpu_seconds": {
+            "parent": 0.0,
+            "infrastructure_launcher": 0.0,
+            "worker": 0.0
+          }
+        },
+        {
+          "elapsed": 25.0,
+          "cpu_seconds": {
+            "parent": 0.015625,
+            "infrastructure_launcher": 0.0,
+            "worker": 0.0
+          }
+        },
+        {
+          "elapsed": 30.014999999664724,
+          "cpu_seconds": {
+            "parent": 0.015625,
+            "infrastructure_launcher": 0.0,
+            "worker": 0.0
+          }
+        },
+        {
+          "elapsed": 35.0,
+          "cpu_seconds": {
+            "parent": 0.0,
+            "infrastructure_launcher": 0.0,
+            "worker": 0.0
+          }
+        },
+        {
+          "elapsed": 40.0,
+          "cpu_seconds": {
+            "parent": 0.0,
+            "infrastructure_launcher": 0.0,
+            "worker": 0.0
+          }
+        },
+        {
+          "elapsed": 45.0,
+          "cpu_seconds": {
+            "parent": 0.0,
+            "infrastructure_launcher": 0.0,
+            "worker": 0.0
+          }
+        },
+        {
+          "elapsed": 50.0,
+          "cpu_seconds": {
+            "parent": 0.03125,
+            "infrastructure_launcher": 0.0,
+            "worker": 0.0
+          }
+        },
+        {
+          "elapsed": 55.0,
+          "cpu_seconds": {
+            "parent": 0.03125,
+            "infrastructure_launcher": 0.0,
+            "worker": 0.0
+          }
+        },
+        {
+          "elapsed": 60.0,
+          "cpu_seconds": {
+            "parent": 0.046875,
+            "infrastructure_launcher": 0.0,
+            "worker": 0.0
+          }
+        }
+      ],
+      "cleanup": {
+        "server": "exited",
+        "worker": "exited"
+      }
+    }
+  },
+  "rejected": {
+    "browser_short_settle": {
+      "source_sha256": "9184ac620a8016e46ef6f5934ca05a49e4661df6fd73e42a9c8a8c014722b7e5",
+      "stage": 11,
+      "pids": {
+        "parent": 22776,
+        "infrastructure_launcher": 5416,
+        "worker": 40660
+      },
+      "launcher_pid": 5416,
+      "settled_seconds": 31.01600000075996,
+      "measurement_start_utc": "2026-11-05T20:31:44.686716+00:00",
+      "elapsed_seconds": 60.0,
+      "cpu_seconds": {
+        "parent": 0.21875,
+        "infrastructure_launcher": 0.0,
+        "worker": 0.0
+      },
+      "percent_one_core": {
+        "parent": 0.3645833333333333,
+        "infrastructure_launcher": 0.0,
+        "worker": 0.0
+      },
+      "combined_percent_one_core": 0.3645833333333333,
+      "before": {
+        "pid": 22776,
+        "ready": true,
+        "worker_pid": 40660,
+        "counts": {
+          "checks": 53,
+          "refresh": 1,
+          "projection": 0,
+          "live_reads": 18,
+          "refresh_failed": 0
+        },
+        "events": [
+          {
+            "event": "initial_jobs_completed",
+            "utc": 1793910654.1936796,
+            "monotonic": 4292640.421
+          },
+          {
+            "event": "refresh_started",
+            "utc": 1793910656.7886765,
+            "monotonic": 4292643.015
+          },
+          {
+            "event": "refresh_finished",
+            "utc": 1793910656.9276426,
+            "monotonic": 4292643.156
+          }
+        ],
+        "http_other": 25,
+        "errors": [],
+        "sockets": 0
+      },
+      "after": {
+        "pid": 22776,
+        "ready": true,
+        "worker_pid": 40660,
+        "counts": {
+          "checks": 113,
+          "refresh": 1,
+          "projection": 0,
+          "live_reads": 18,
+          "refresh_failed": 0
+        },
+        "events": [
+          {
+            "event": "initial_jobs_completed",
+            "utc": 1793910654.1936796,
+            "monotonic": 4292640.421
+          },
+          {
+            "event": "refresh_started",
+            "utc": 1793910656.7886765,
+            "monotonic": 4292643.015
+          },
+          {
+            "event": "refresh_finished",
+            "utc": 1793910656.9276426,
+            "monotonic": 4292643.156
+          }
+        ],
+        "http_other": 25,
+        "errors": [],
+        "sockets": 0
+      },
+      "bins": [
+        {
+          "elapsed": 5.014999999664724,
+          "cpu_seconds": {
+            "parent": 0.0,
+            "infrastructure_launcher": 0.0,
+            "worker": 0.0
+          }
+        },
+        {
+          "elapsed": 10.0,
+          "cpu_seconds": {
+            "parent": 0.015625,
+            "infrastructure_launcher": 0.0,
+            "worker": 0.0
+          }
+        },
+        {
+          "elapsed": 15.0,
+          "cpu_seconds": {
+            "parent": 0.03125,
+            "infrastructure_launcher": 0.0,
+            "worker": 0.0
+          }
+        },
+        {
+          "elapsed": 20.0,
+          "cpu_seconds": {
+            "parent": 0.015625,
+            "infrastructure_launcher": 0.0,
+            "worker": 0.0
+          }
+        },
+        {
+          "elapsed": 25.0,
+          "cpu_seconds": {
+            "parent": 0.0,
+            "infrastructure_launcher": 0.0,
+            "worker": 0.0
+          }
+        },
+        {
+          "elapsed": 30.0,
+          "cpu_seconds": {
+            "parent": 0.03125,
+            "infrastructure_launcher": 0.0,
+            "worker": 0.0
+          }
+        },
+        {
+          "elapsed": 35.0,
+          "cpu_seconds": {
+            "parent": 0.03125,
+            "infrastructure_launcher": 0.0,
+            "worker": 0.0
+          }
+        },
+        {
+          "elapsed": 40.0,
+          "cpu_seconds": {
+            "parent": 0.0,
+            "infrastructure_launcher": 0.0,
+            "worker": 0.0
+          }
+        },
+        {
+          "elapsed": 45.0,
+          "cpu_seconds": {
+            "parent": 0.0,
+            "infrastructure_launcher": 0.0,
+            "worker": 0.0
+          }
+        },
+        {
+          "elapsed": 50.0,
+          "cpu_seconds": {
+            "parent": 0.03125,
+            "infrastructure_launcher": 0.0,
+            "worker": 0.0
+          }
+        },
+        {
+          "elapsed": 55.0,
+          "cpu_seconds": {
+            "parent": 0.015625,
+            "infrastructure_launcher": 0.0,
+            "worker": 0.0
+          }
+        },
+        {
+          "elapsed": 60.0,
+          "cpu_seconds": {
+            "parent": 0.046875,
+            "infrastructure_launcher": 0.0,
+            "worker": 0.0
+          }
+        }
+      ]
+    },
+    "stage9_first_state": {
+      "pid": 3764,
+      "stage": 9,
+      "status": "waiting_scheduled_interval",
+      "events": [
+        {
+          "event": "start",
+          "utc": 1793910339.9937909,
+          "monotonic": 4292326.218
+        },
+        {
+          "event": "scheduled_collection_started",
+          "utc": 1793910360.0008442,
+          "monotonic": 4292346.234
+        },
+        {
+          "event": "scheduled_collection_completed",
+          "utc": 1793910360.2784512,
+          "monotonic": 4292346.5
+        },
+        {
+          "event": "forecast_schedule_check_started",
+          "utc": 1793910360.2784512,
+          "monotonic": 4292346.5
+        },
+        {
+          "event": "forecast_schedule_check_completed",
+          "utc": 1793910361.3479474,
+          "monotonic": 4292347.578
+        }
+      ]
+    }
+  },
+  "projection": {
+    "initial_five_second_attempt": {
+      "status": "timed_out_NA",
+      "simulation_start": {
+        "pid": 35216,
+        "monotonic": 4292510.156,
+        "utc": 1793910523.9309528
+      },
+      "observed_end_monotonic": 4292515.156
+    },
+    "approved_persistent_worker_attempt": {
+      "status": "completed",
+      "entry": {
+        "pid": 20608,
+        "monotonic": 4293977.156,
+        "utc": 1793911990.939304
+      },
+      "completed_monotonic": 4293981.234,
+      "cap_seconds": 120.0,
+      "cleanup": {
+        "server": "exited",
+        "worker": "exited"
+      }
+    },
+    "log": "C:\\Users\\glees\\AppData\\Local\\Temp\\solar-steady-1db7ff7a7ef144e8b7098f3a0122e51a\\actual_projection.log",
+    "controller_sha256": "70113a0817152ddb4efd35408590b31ef61a848131a58a2b88408c6d6efab3c8",
+    "launched_source_sha256": "65e13e2722748e7b1dde0bb9f30c581abdfc989dfb9482360d89145a7a6209c3"
+  },
+  "source_hashes": [
+    {
+      "Path": "C:\\Users\\glees\\source\\solar_model\\solar_model\\config.py",
+      "Hash": "0697D555E0252C0048D87B73159BC781316F3B9D445C7EB6D8D56DA7C99B3CE8"
+    },
+    {
+      "Path": "C:\\Users\\glees\\source\\solar_model\\solar_model\\logging_setup.py",
+      "Hash": "B8A695227892810C09004D2B8EB5C4BA3C8109733E49EF333C10438689542E48"
+    },
+    {
+      "Path": "C:\\Users\\glees\\source\\solar_model\\solar_model\\paths.py",
+      "Hash": "71496D06A3067E96BB10CE3DE51703FCEA58CB89FD47531916E5DDF42805C546"
+    },
+    {
+      "Path": "C:\\Users\\glees\\source\\solar_model\\solar_model\\tariffs.py",
+      "Hash": "1A542F6D3920A430B520308F8FE1C29707766332C7C51D43F0145693636F2BC0"
+    },
+    {
+      "Path": "C:\\Users\\glees\\source\\solar_model\\solar_model\\time_utils.py",
+      "Hash": "F9C31B1279A40CEAC185B1D44949330A6E69E9CA3B21FF1998AF452EAA6D75F1"
+    },
+    {
+      "Path": "C:\\Users\\glees\\source\\solar_model\\solar_model\\utils.py",
+      "Hash": "7305AEB09C03DA781FEE229506360E27F3B799805AC12B8363B25BFF359F7352"
+    },
+    {
+      "Path": "C:\\Users\\glees\\source\\solar_model\\solar_model\\__init__.py",
+      "Hash": "B5CFA6F6C16E3A7F2756A55E021DC8B1A2EA4FF878E22EFD3B7BCAB15AE039B1"
+    },
+    {
+      "Path": "C:\\Users\\glees\\source\\solar_model\\solar_model\\dashboard\\app.py",
+      "Hash": "E727EE0C1EF3CCD59A8B8DE5C6A433F081D1ACB34D4A9E8853601997C2C4274B"
+    },
+    {
+      "Path": "C:\\Users\\glees\\source\\solar_model\\solar_model\\dashboard\\formatting.py",
+      "Hash": "B48B3DD06E941FF0D8E98F07B01BD1E7373B71781C37E7C99E1515318E73B425"
+    },
+    {
+      "Path": "C:\\Users\\glees\\source\\solar_model\\solar_model\\dashboard\\layout.py",
+      "Hash": "58D53043486F1EA1F22A43582B8E75CC43D661F1158C0255BCA21E7EADEFFEF2"
+    },
+    {
+      "Path": "C:\\Users\\glees\\source\\solar_model\\solar_model\\dashboard\\live.py",
+      "Hash": "A42365C2ABD23ECAA8DCD76039C7FEEAEA11502CA9A1E45567593E992EB3D1A2"
+    },
+    {
+      "Path": "C:\\Users\\glees\\source\\solar_model\\solar_model\\dashboard\\planning_worker.py",
+      "Hash": "8925DF641C46C7A38C927035838A239DC46D9C8BF8479395F3F6D870FBE75703"
+    },
+    {
+      "Path": "C:\\Users\\glees\\source\\solar_model\\solar_model\\dashboard\\plan_store.py",
+      "Hash": "CDD10BE699D5092944D40F5C4B7D2A50EFE37D8C9F5C5D5BBF46B45139DDEFD5"
+    },
+    {
+      "Path": "C:\\Users\\glees\\source\\solar_model\\solar_model\\dashboard\\snapshot.py",
+      "Hash": "804B1BFA20EE3C97916D0F6D1CFA019EDD1EB0CD3FE025F65081D4196E37E03B"
+    },
+    {
+      "Path": "C:\\Users\\glees\\source\\solar_model\\solar_model\\dashboard\\state.py",
+      "Hash": "73879CA71E7DDC60C8AEB46E224FE470800EBD2B6992B74A1A5431462ED44E73"
+    },
+    {
+      "Path": "C:\\Users\\glees\\source\\solar_model\\solar_model\\dashboard\\__init__.py",
+      "Hash": "E3B0C44298FC1C149AFBF4C8996FB92427AE41E4649B934CA495991B7852B855"
+    },
+    {
+      "Path": "C:\\Users\\glees\\source\\solar_model\\solar_model\\dashboard\\assets\\create_solar_icon.py",
+      "Hash": "336F6A0BEACB8713A90166EA5A9B6DC9E410D5F06EB680A412FD9DB0A1A98498"
+    },
+    {
+      "Path": "C:\\Users\\glees\\source\\solar_model\\solar_model\\dashboard\\components\\charts.py",
+      "Hash": "DDC996AEBF5634F4DC699A28791A12B9DBD9B8F2FCFE2AB1BB366E8087671FF1"
+    },
+    {
+      "Path": "C:\\Users\\glees\\source\\solar_model\\solar_model\\dashboard\\components\\chart_display.py",
+      "Hash": "3270BD5AFC2F9B4132D41D3C7AECD41B29084FB0D8936BEEBA762A4E86738E6E"
+    },
+    {
+      "Path": "C:\\Users\\glees\\source\\solar_model\\solar_model\\dashboard\\components\\download_dialog.py",
+      "Hash": "03AA2391E63351009256B92D7F91E02740DB765C7FE58BB382A15B9896EFDF76"
+    },
+    {
+      "Path": "C:\\Users\\glees\\source\\solar_model\\solar_model\\dashboard\\components\\tables.py",
+      "Hash": "D6F2EB082A372104AA17B38C7398A172EFE9F20D18123DA4A61CE1A6E3CCC1B7"
+    },
+    {
+      "Path": "C:\\Users\\glees\\source\\solar_model\\solar_model\\dashboard\\components\\warnings.py",
+      "Hash": "A6BE272F49E853C1FD5463892187CBE09CD695B401DA34B5213C9E7A7BB55886"
+    },
+    {
+      "Path": "C:\\Users\\glees\\source\\solar_model\\solar_model\\dashboard\\components\\__init__.py",
+      "Hash": "E3B0C44298FC1C149AFBF4C8996FB92427AE41E4649B934CA495991B7852B855"
+    },
+    {
+      "Path": "C:\\Users\\glees\\source\\solar_model\\solar_model\\dashboard\\tabs\\analysis.py",
+      "Hash": "C2FF575B77914906A434547B2264970B7227B98C7020BD4CED99A55B7BB68CF0"
+    },
+    {
+      "Path": "C:\\Users\\glees\\source\\solar_model\\solar_model\\dashboard\\tabs\\control.py",
+      "Hash": "C24DA06739F32E8BB82B2CEF168D5519637C7FFFC5C26C15149EE93EA818FAF5"
+    },
+    {
+      "Path": "C:\\Users\\glees\\source\\solar_model\\solar_model\\dashboard\\tabs\\plan.py",
+      "Hash": "4E23D748BEB6CFB8C2B1E18E80E4BA107545D951A34ECDE372726722EBE5F45D"
+    },
+    {
+      "Path": "C:\\Users\\glees\\source\\solar_model\\solar_model\\dashboard\\tabs\\recent.py",
+      "Hash": "41419FE5C0E5FBE639316BBBD8205E59A795AE0D513480287066DBBB22144C0B"
+    },
+    {
+      "Path": "C:\\Users\\glees\\source\\solar_model\\solar_model\\dashboard\\tabs\\system_info.py",
+      "Hash": "FB473DC43C324C03E15EA1BB194E3BFFB2D539B1ECD197467C71E8048DA6174B"
+    },
+    {
+      "Path": "C:\\Users\\glees\\source\\solar_model\\solar_model\\dashboard\\tabs\\__init__.py",
+      "Hash": "E3B0C44298FC1C149AFBF4C8996FB92427AE41E4649B934CA495991B7852B855"
+    },
+    {
+      "Path": "C:\\Users\\glees\\source\\solar_model\\solar_model\\integrations\\forecast_solar.py",
+      "Hash": "3244B80976B93D353576080B5014215F7928E77B7D561C8B4219D8800FB06E69"
+    },
+    {
+      "Path": "C:\\Users\\glees\\source\\solar_model\\solar_model\\integrations\\__init__.py",
+      "Hash": "E3B0C44298FC1C149AFBF4C8996FB92427AE41E4649B934CA495991B7852B855"
+    },
+    {
+      "Path": "C:\\Users\\glees\\source\\solar_model\\solar_model\\integrations\\sigenstor\\client.py",
+      "Hash": "06D545BE7C5F8CA28727BA2B5E88531B363E6A6F54F5C7DD22BAC90880F4FA78"
+    },
+    {
+      "Path": "C:\\Users\\glees\\source\\solar_model\\solar_model\\integrations\\sigenstor\\datasheets.py",
+      "Hash": "FE3FD88FCE75ECE27FA14E71D124B663FC4FD3158B3F0022B5B4E7430245AB6A"
+    },
+    {
+      "Path": "C:\\Users\\glees\\source\\solar_model\\solar_model\\integrations\\sigenstor\\registers.py",
+      "Hash": "082330F71DA13FC016A35559826DB9781C5DC855B653F7427E85C1CB36D3B74E"
+    },
+    {
+      "Path": "C:\\Users\\glees\\source\\solar_model\\solar_model\\integrations\\sigenstor\\__init__.py",
+      "Hash": "E3B0C44298FC1C149AFBF4C8996FB92427AE41E4649B934CA495991B7852B855"
+    },
+    {
+      "Path": "C:\\Users\\glees\\source\\solar_model\\solar_model\\planning\\plan_optimisation_dynamic_programming.py",
+      "Hash": "89263009EDC3210AFF9E362688FD8A039248A708714540E40F5C94B1ED7BFD26"
+    },
+    {
+      "Path": "C:\\Users\\glees\\source\\solar_model\\solar_model\\planning\\plan_optimisation_milp.py",
+      "Hash": "5D4F2C161A3F441267BBB466907910A8A0F4AB02875A3C08F138EE32296D2340"
+    },
+    {
+      "Path": "C:\\Users\\glees\\source\\solar_model\\solar_model\\planning\\projection_grid.py",
+      "Hash": "810D8EC454053656DC3D6C55572A0CE955DDED8E753EC2AC5EBCE0DB24654A85"
+    },
+    {
+      "Path": "C:\\Users\\glees\\source\\solar_model\\solar_model\\planning\\scenarios.py",
+      "Hash": "6F795D9776C08B03AD0BC0CFB9908D1BCB771398A777DFACB83A8790B0381793"
+    },
+    {
+      "Path": "C:\\Users\\glees\\source\\solar_model\\solar_model\\planning\\system.py",
+      "Hash": "2CA13E93F8E74B7DD9F8D455F6F1EB2AB16BFBF618DF1052B4A563AD57934FA5"
+    },
+    {
+      "Path": "C:\\Users\\glees\\source\\solar_model\\solar_model\\planning\\types.py",
+      "Hash": "65A9516B9D1C232A69A18CE553875B5745AC54C1BE0736609A70D820A8EF94A6"
+    },
+    {
+      "Path": "C:\\Users\\glees\\source\\solar_model\\solar_model\\planning\\__init__.py",
+      "Hash": "E3B0C44298FC1C149AFBF4C8996FB92427AE41E4649B934CA495991B7852B855"
+    },
+    {
+      "Path": "C:\\Users\\glees\\source\\solar_model\\solar_model\\planning\\forecasts\\house_load.py",
+      "Hash": "0A5E8E0FFD4A85924F867BB62FBAE333C759FD096776B804297598DEE889B688"
+    },
+    {
+      "Path": "C:\\Users\\glees\\source\\solar_model\\solar_model\\planning\\forecasts\\solar.py",
+      "Hash": "CC54FC66361BDFCB7C250907DBF61138E899C9362BA801B4F8E63090F0B49C74"
+    },
+    {
+      "Path": "C:\\Users\\glees\\source\\solar_model\\solar_model\\planning\\forecasts\\__init__.py",
+      "Hash": "E3B0C44298FC1C149AFBF4C8996FB92427AE41E4649B934CA495991B7852B855"
+    },
+    {
+      "Path": "C:\\Users\\glees\\source\\solar_model\\solar_model\\runtime\\collector.py",
+      "Hash": "AF8F7C93B2D7E2F643235E712C4857E774E342343CE92FE272E92870B73B4BC9"
+    },
+    {
+      "Path": "C:\\Users\\glees\\source\\solar_model\\solar_model\\runtime\\supervisor.py",
+      "Hash": "B72343DADE2E7448DE78AEF3188CFA8C8D888F9A51C8E81EEDA2C945ACB48984"
+    },
+    {
+      "Path": "C:\\Users\\glees\\source\\solar_model\\solar_model\\runtime\\__init__.py",
+      "Hash": "E3B0C44298FC1C149AFBF4C8996FB92427AE41E4649B934CA495991B7852B855"
+    },
+    {
+      "Path": "C:\\Users\\glees\\source\\solar_model\\solar_model\\services\\collection.py",
+      "Hash": "4E5EBCC25D1C4D929DFAFE604FA0DD7886B4AB920AA855AC4E3BBA212E988AFB"
+    },
+    {
+      "Path": "C:\\Users\\glees\\source\\solar_model\\solar_model\\services\\forecasting.py",
+      "Hash": "A8FAAF076737EF51B95F97220F242BCA58F27186DDE97723A6F04D22A8D109BD"
+    },
+    {
+      "Path": "C:\\Users\\glees\\source\\solar_model\\solar_model\\services\\planning.py",
+      "Hash": "B8CEF3FFE4A8CE8B6456F5F9B1E8730454F3649510F30B6F3CDDCC01C2DBD0B3"
+    },
+    {
+      "Path": "C:\\Users\\glees\\source\\solar_model\\solar_model\\services\\__init__.py",
+      "Hash": "E3B0C44298FC1C149AFBF4C8996FB92427AE41E4649B934CA495991B7852B855"
+    },
+    {
+      "Path": "C:\\Users\\glees\\source\\solar_model\\solar_model\\storage\\connection.py",
+      "Hash": "28877BBB48A60B0D71863947D63B12623270CF9A2AA4896550A2CAA5154B2D6D"
+    },
+    {
+      "Path": "C:\\Users\\glees\\source\\solar_model\\solar_model\\storage\\forecasts.py",
+      "Hash": "2B3D384634F870434D379B22D3EC46292C78D85F4BFB13D1209D44A62836AAA2"
+    },
+    {
+      "Path": "C:\\Users\\glees\\source\\solar_model\\solar_model\\storage\\measurements.py",
+      "Hash": "0305DF507881CCA958A60DE74F8DA23E3CDB69A774B6CCEF91B0139381CE8A10"
+    },
+    {
+      "Path": "C:\\Users\\glees\\source\\solar_model\\solar_model\\storage\\migrations.py",
+      "Hash": "D4BED9EE5AE5774EB65013ED48EA7AB23E63E49AC891A3C222EAFDFCDD29792A"
+    },
+    {
+      "Path": "C:\\Users\\glees\\source\\solar_model\\solar_model\\storage\\schema.py",
+      "Hash": "DD1E76718CC1B3B3E1AC82787BF69B9BF0B3B21A451823033BBB7939EA6C02FE"
+    },
+    {
+      "Path": "C:\\Users\\glees\\source\\solar_model\\solar_model\\storage\\__init__.py",
+      "Hash": "300A8B323A89416BC2DBEBFD14E2C0C5EF1258DB0DFE0EA50B3971044F0601F1"
+    },
+    {
+      "Path": "C:\\Users\\glees\\source\\solar_model\\solar_model\\storage\\queries\\analysis.py",
+      "Hash": "363164FB99E03CBB3D5765C6EEF2716F2ED7B2BC508F9154BE8F6BE0CF0DF229"
+    },
+    {
+      "Path": "C:\\Users\\glees\\source\\solar_model\\solar_model\\storage\\queries\\dashboard.py",
+      "Hash": "520C41F93CA06A2397F100232539908577CD5D6A1641229DBD719C54B3028057"
+    },
+    {
+      "Path": "C:\\Users\\glees\\source\\solar_model\\solar_model\\storage\\queries\\exports.py",
+      "Hash": "3CF83FAFB474667BCDC6F3DB141AA0D595C9A752491BC84B515029483A55FBA6"
+    },
+    {
+      "Path": "C:\\Users\\glees\\source\\solar_model\\solar_model\\storage\\queries\\forecasting.py",
+      "Hash": "C006BC00CB5993842EDEABDEF0A59913EF68EEF388EEC15D7D0CE6061EB47464"
+    },
+    {
+      "Path": "C:\\Users\\glees\\source\\solar_model\\solar_model\\storage\\queries\\planning.py",
+      "Hash": "B0B8A8794EC3A97DF8B3408BF6D522CF4DB20321F072B3AEB9B9F3AE3C6CE502"
+    },
+    {
+      "Path": "C:\\Users\\glees\\source\\solar_model\\solar_model\\storage\\queries\\recent.py",
+      "Hash": "8760946A4C1A00CFBA398B8A48C18FC43A999D779680D2CCF7A4C29369C36611"
+    },
+    {
+      "Path": "C:\\Users\\glees\\source\\solar_model\\solar_model\\storage\\queries\\types.py",
+      "Hash": "3B7DBC0C1D273CDABDE6F84D9C66D44B952198EAC003FB431BD0E0F5741B8276"
+    },
+    {
+      "Path": "C:\\Users\\glees\\source\\solar_model\\solar_model\\storage\\queries\\__init__.py",
+      "Hash": "E3B0C44298FC1C149AFBF4C8996FB92427AE41E4649B934CA495991B7852B855"
+    },
+    {
+      "Path": "C:\\Users\\glees\\source\\solar_model\\solar_model\\tools\\benchmark_planning.py",
+      "Hash": "D3E2007DA3B26BB5F3D60BB7AC585AA45881AF6F7F5585FEE8E814AD92748BBC"
+    },
+    {
+      "Path": "C:\\Users\\glees\\source\\solar_model\\solar_model\\tools\\compare_house_load.py",
+      "Hash": "AB0CEDE5A83A42F608C504C19B8344990CA21E399C0D3313940826CEA757B91F"
+    },
+    {
+      "Path": "C:\\Users\\glees\\source\\solar_model\\solar_model\\tools\\evaluate_forecasts.py",
+      "Hash": "958C654D2B89C099F9B38B60B84C53DCCC5DE6ECAFB0A2FB42F52F27749B5CA6"
+    },
+    {
+      "Path": "C:\\Users\\glees\\source\\solar_model\\solar_model\\tools\\evaluate_load.py",
+      "Hash": "6B058C85D6110D33D7767686C3D1613A7743AFC58A90CDA38282031BF057A414"
+    },
+    {
+      "Path": "C:\\Users\\glees\\source\\solar_model\\solar_model\\tools\\migrate_database.py",
+      "Hash": "4DD03866CFD05B0F14A4B68354C1D79F135244E3B1D8F9DEC45FA13D07280330"
+    },
+    {
+      "Path": "C:\\Users\\glees\\source\\solar_model\\solar_model\\tools\\plan_as_of.py",
+      "Hash": "D4F697DAB0158C5CAF48ECDB14F15C7B21B1294B41051E19686159A192F49D36"
+    },
+    {
+      "Path": "C:\\Users\\glees\\source\\solar_model\\solar_model\\tools\\rebuild_forecasts.py",
+      "Hash": "7D06986EB4572FACBE7E0EAEF3EC6CEB240904FBFEA5359F4528FB01A1E8CB7D"
+    },
+    {
+      "Path": "C:\\Users\\glees\\source\\solar_model\\solar_model\\tools\\recalculate_economics.py",
+      "Hash": "DBB55465F5A7EBA186C68C49FEDD19B16CA25FA3BC782AD0DF08154982E4EB16"
+    },
+    {
+      "Path": "C:\\Users\\glees\\source\\solar_model\\solar_model\\tools\\reports.py",
+      "Hash": "76777A8159689EAA5EBF776621351904D5E657E92300E032420462FD7139763F"
+    },
+    {
+      "Path": "C:\\Users\\glees\\source\\solar_model\\solar_model\\tools\\__init__.py",
+      "Hash": "E3B0C44298FC1C149AFBF4C8996FB92427AE41E4649B934CA495991B7852B855"
+    }
+  ],
+  "config_hash": {
+    "Path": "C:\\Users\\glees\\source\\solar_model\\config.yaml",
+    "Hash": "FB32596F85F403018A0E93AF98774D1E4DB6A1B58789B5E2C96C16F5CDA50EC9"
+  },
+  "baseline_repeat_hashes": [
+    {
+      "Path": "C:\\Users\\glees\\AppData\\Local\\Temp\\solar-steady-1db7ff7a7ef144e8b7098f3a0122e51a\\server.py",
+      "Hash": "3859684D62EEA596EAE5B779E6F93B5F8FED9D70ECFADFA95356839AF70A276E"
+    },
+    {
+      "Path": "C:\\Users\\glees\\AppData\\Local\\Temp\\solar-steady-1db7ff7a7ef144e8b7098f3a0122e51a\\measure.py",
+      "Hash": "765B3056D10CE234AFA03B876E9414AAC85AC04AD9EF85986F549726EF197F1D"
+    }
+  ],
+  "collector_retry_hash": {
+    "Path": "C:\\Users\\glees\\AppData\\Local\\Temp\\solar-steady-1db7ff7a7ef144e8b7098f3a0122e51a\\collector_stage.py",
+    "Hash": "7540790BF4A084447EF180C7654B3C6941D8E5DC452EB8EA3C4258E2BDCF9259"
+  },
+  "profile_integrity_and_counts": {
+    "baseline": {
+      "timing_valid": false,
+      "negative_self_entries": 0,
+      "negative_cumulative_entries": 0,
+      "max_self_seconds_invalid": 0.078125,
+      "most_called": [
+        {
+          "function": "~:0:<built-in method builtins.isinstance>",
+          "calls": 1780
+        },
+        {
+          "function": "C:\\Users\\glees\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\asyncio\\base_events.py:2017:get_debug",
+          "calls": 1755
+        },
+        {
+          "function": "C:\\Users\\glees\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\asyncio\\events.py:127:__lt__",
+          "calls": 1669
+        },
+        {
+          "function": "~:0:<method 'append' of 'collections.deque' objects>",
+          "calls": 902
+        },
+        {
+          "function": "C:\\Users\\glees\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\asyncio\\base_events.py:543:_check_closed",
+          "calls": 899
+        },
+        {
+          "function": "~:0:<method 'popleft' of 'collections.deque' objects>",
+          "calls": 894
+        },
+        {
+          "function": "C:\\Users\\glees\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\asyncio\\events.py:86:_run",
+          "calls": 891
+        },
+        {
+          "function": "C:\\Users\\glees\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\asyncio\\events.py:36:__init__",
+          "calls": 891
+        },
+        {
+          "function": "~:0:<method 'run' of '_contextvars.Context' objects>",
+          "calls": 891
+        },
+        {
+          "function": "C:\\Users\\glees\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\asyncio\\tasks.py:653:sleep",
+          "calls": 874
+        },
+        {
+          "function": "C:\\Users\\glees\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\asyncio\\base_events.py:738:time",
+          "calls": 861
+        },
+        {
+          "function": "~:0:<built-in method time.monotonic>",
+          "calls": 861
+        },
+        {
+          "function": "~:0:<built-in method builtins.len>",
+          "calls": 660
+        },
+        {
+          "function": "C:\\Users\\glees\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\asyncio\\base_events.py:818:_call_soon",
+          "calls": 471
+        },
+        {
+          "function": "C:\\Users\\glees\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\asyncio\\base_events.py:789:call_soon",
+          "calls": 471
+        },
+        {
+          "function": "~:0:<built-in method _asyncio.get_running_loop>",
+          "calls": 471
+        },
+        {
+          "function": "~:0:<method 'set_result' of '_asyncio.Future' objects>",
+          "calls": 435
+        },
+        {
+          "function": "C:\\Users\\glees\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\asyncio\\base_events.py:446:create_future",
+          "calls": 430
+        },
+        {
+          "function": "~:0:<method 'cancelled' of '_asyncio.Future' objects>",
+          "calls": 425
+        },
+        {
+          "function": "~:0:<built-in method _contextvars.copy_context>",
+          "calls": 423
+        },
+        {
+          "function": "C:\\Users\\glees\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\asyncio\\base_events.py:771:call_at",
+          "calls": 420
+        },
+        {
+          "function": "C:\\Users\\glees\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\asyncio\\base_events.py:1917:_timer_handle_cancelled",
+          "calls": 420
+        },
+        {
+          "function": "C:\\Users\\glees\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\asyncio\\base_events.py:747:call_later",
+          "calls": 420
+        },
+        {
+          "function": "C:\\Users\\glees\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\asyncio\\events.py:72:cancel",
+          "calls": 420
+        },
+        {
+          "function": "C:\\Users\\glees\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\asyncio\\events.py:155:cancel",
+          "calls": 420
+        }
+      ]
+    },
+    "polling": {
+      "timing_valid": false,
+      "negative_self_entries": 3,
+      "negative_cumulative_entries": 6,
+      "max_self_seconds_invalid": 39.9375,
+      "most_called": [
+        {
+          "function": "C:\\Users\\glees\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\weakref.py:454:__contains__",
+          "calls": 2250
+        },
+        {
+          "function": "~:0:<built-in method builtins.isinstance>",
+          "calls": 1404
+        },
+        {
+          "function": "~:0:<built-in method builtins.getattr>",
+          "calls": 1116
+        },
+        {
+          "function": "C:\\Users\\glees\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\asyncio\\base_events.py:2017:get_debug",
+          "calls": 1037
+        },
+        {
+          "function": "~:0:<built-in method builtins.len>",
+          "calls": 993
+        },
+        {
+          "function": "C:\\Users\\glees\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\asyncio\\events.py:127:__lt__",
+          "calls": 873
+        },
+        {
+          "function": "C:\\Users\\glees\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\asyncio\\base_events.py:738:time",
+          "calls": 863
+        },
+        {
+          "function": "~:0:<built-in method time.monotonic>",
+          "calls": 863
+        },
+        {
+          "function": "C:\\Users\\glees\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\weakref.py:414:__getitem__",
+          "calls": 792
+        },
+        {
+          "function": "~:0:<method 'append' of 'collections.deque' objects>",
+          "calls": 573
+        },
+        {
+          "function": "C:\\Users\\glees\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\asyncio\\base_events.py:543:_check_closed",
+          "calls": 570
+        },
+        {
+          "function": "~:0:<method 'popleft' of 'collections.deque' objects>",
+          "calls": 565
+        },
+        {
+          "function": "C:\\Users\\glees\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\asyncio\\events.py:86:_run",
+          "calls": 547
+        },
+        {
+          "function": "C:\\Users\\glees\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\asyncio\\events.py:36:__init__",
+          "calls": 547
+        },
+        {
+          "function": "~:0:<method 'run' of '_contextvars.Context' objects>",
+          "calls": 547
+        },
+        {
+          "function": "C:\\Users\\glees\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\asyncio\\tasks.py:653:sleep",
+          "calls": 470
+        },
+        {
+          "function": "~:0:<built-in method _overlapped.GetQueuedCompletionStatus>",
+          "calls": 457
+        },
+        {
+          "function": "C:\\Users\\glees\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\asyncio\\base_events.py:1922:_run_once",
+          "calls": 438
+        },
+        {
+          "function": "C:\\Users\\glees\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\asyncio\\proactor_events.py:883:_process_events",
+          "calls": 437
+        },
+        {
+          "function": "C:\\Users\\glees\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\asyncio\\windows_events.py:761:_poll",
+          "calls": 437
+        },
+        {
+          "function": "C:\\Users\\glees\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\asyncio\\windows_events.py:443:select",
+          "calls": 437
+        },
+        {
+          "function": "~:0:<built-in method math.ceil>",
+          "calls": 437
+        },
+        {
+          "function": "~:0:<method 'clear' of 'list' objects>",
+          "calls": 437
+        },
+        {
+          "function": "C:\\Users\\glees\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\weakref.py:427:__setitem__",
+          "calls": 394
+        },
+        {
+          "function": "C:\\Users\\glees\\source\\solar_model\\.venv\\Lib\\site-packages\\sqlalchemy\\event\\base.py:171:_event_descriptors",
+          "calls": 390
+        }
+      ]
+    },
+    "actual": {
+      "timing_valid": false,
+      "negative_self_entries": 3,
+      "negative_cumulative_entries": 5,
+      "max_self_seconds_invalid": 38.25,
+      "most_called": [
+        {
+          "function": "C:\\Users\\glees\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\weakref.py:454:__contains__",
+          "calls": 2250
+        },
+        {
+          "function": "~:0:<built-in method builtins.isinstance>",
+          "calls": 1400
+        },
+        {
+          "function": "~:0:<built-in method builtins.getattr>",
+          "calls": 1116
+        },
+        {
+          "function": "C:\\Users\\glees\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\asyncio\\base_events.py:2017:get_debug",
+          "calls": 1014
+        },
+        {
+          "function": "~:0:<built-in method builtins.len>",
+          "calls": 996
+        },
+        {
+          "function": "C:\\Users\\glees\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\asyncio\\base_events.py:738:time",
+          "calls": 878
+        },
+        {
+          "function": "~:0:<built-in method time.monotonic>",
+          "calls": 878
+        },
+        {
+          "function": "C:\\Users\\glees\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\asyncio\\events.py:127:__lt__",
+          "calls": 869
+        },
+        {
+          "function": "C:\\Users\\glees\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\weakref.py:414:__getitem__",
+          "calls": 792
+        },
+        {
+          "function": "~:0:<method 'append' of 'collections.deque' objects>",
+          "calls": 584
+        },
+        {
+          "function": "C:\\Users\\glees\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\asyncio\\base_events.py:543:_check_closed",
+          "calls": 566
+        },
+        {
+          "function": "~:0:<method 'popleft' of 'collections.deque' objects>",
+          "calls": 561
+        },
+        {
+          "function": "C:\\Users\\glees\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\asyncio\\events.py:86:_run",
+          "calls": 543
+        },
+        {
+          "function": "C:\\Users\\glees\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\asyncio\\events.py:36:__init__",
+          "calls": 543
+        },
+        {
+          "function": "~:0:<method 'run' of '_contextvars.Context' objects>",
+          "calls": 543
+        },
+        {
+          "function": "C:\\Users\\glees\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\weakref.py:369:remove",
+          "calls": 521
+        },
+        {
+          "function": "~:0:<built-in method _overlapped.GetQueuedCompletionStatus>",
+          "calls": 459
+        },
+        {
+          "function": "C:\\Users\\glees\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\asyncio\\base_events.py:1922:_run_once",
+          "calls": 440
+        },
+        {
+          "function": "C:\\Users\\glees\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\asyncio\\windows_events.py:761:_poll",
+          "calls": 439
+        },
+        {
+          "function": "C:\\Users\\glees\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\asyncio\\proactor_events.py:883:_process_events",
+          "calls": 439
+        },
+        {
+          "function": "C:\\Users\\glees\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\asyncio\\windows_events.py:443:select",
+          "calls": 439
+        },
+        {
+          "function": "~:0:<built-in method math.ceil>",
+          "calls": 439
+        },
+        {
+          "function": "~:0:<method 'clear' of 'list' objects>",
+          "calls": 439
+        },
+        {
+          "function": "C:\\Users\\glees\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\asyncio\\tasks.py:653:sleep",
+          "calls": 436
+        },
+        {
+          "function": "C:\\Users\\glees\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\weakref.py:427:__setitem__",
+          "calls": 394
+        }
+      ]
+    }
+  },
+  "cleanup": {
+    "orphan_pid": 28184,
+    "orphan_parent_pid": 20880,
+    "orphan_cpu_seconds_before_after_5s": [
+      2.09375,
+      2.09375
+    ],
+    "orphan_action": "terminated exact owned process after observation",
+    "clean_stock": {
+      "server": "exited"
+    },
+    "clean_actual": {
+      "server": "exited",
+      "worker": "exited"
+    },
+    "unrelated_preexisting_worker_pid": 19912,
+    "unrelated_worker_action": "untouched",
+    "approved_projection": {
+      "server": "exited",
+      "worker": "exited"
+    }
+  },
+  "independent_cycle_diagnostic": {
+    "elapsed_seconds": 15.003152499906719,
+    "rows": [
+      {
+        "callback": "Server.serve",
+        "calls": 140,
+        "cycles": 20548933
+      },
+      {
+        "callback": "PlanStore.run_forever",
+        "calls": 30,
+        "cycles": 17748538
+      },
+      {
+        "callback": "_set_result_unless_cancelled",
+        "calls": 201,
+        "cycles": 13127482
+      },
+      {
+        "callback": "refresh_loop",
+        "calls": 58,
+        "cycles": 8344062
+      },
+      {
+        "callback": "TaskHandle._run_coro",
+        "calls": 22,
+        "cycles": 1641537
+      },
+      {
+        "callback": "Timeout._on_timeout",
+        "calls": 15,
+        "cycles": 1489560
+      },
+      {
+        "callback": "BaseProactorEventLoop._loop_self_reading",
+        "calls": 15,
+        "cycles": 1061606
+      },
+      {
+        "callback": "Timer._run_in_loop",
+        "calls": 6,
+        "cycles": 775836
+      },
+      {
+        "callback": "RequestResponseCycle.run_asgi",
+        "calls": 8,
+        "cycles": 691162
+      },
+      {
+        "callback": "_chain_future.<locals>._set_state",
+        "calls": 15,
+        "cycles": 689963
+      },
+      {
+        "callback": "Timer._invoke_callback",
+        "calls": 3,
+        "cycles": 544781
+      },
+      {
+        "callback": "BaseProactorEventLoop._start_serving.<locals>.loop",
+        "calls": 1,
+        "cycles": 358861
+      },
+      {
+        "callback": "_ProactorReadPipeTransport._loop_reading",
+        "calls": 3,
+        "cycles": 123415
+      },
+      {
+        "callback": "_chain_future.<locals>._call_check_cancel",
+        "calls": 15,
+        "cycles": 110033
+      },
+      {
+        "callback": "_ProactorBasePipeTransport._call_connection_lost",
+        "calls": 1,
+        "cycles": 66899
+      },
+      {
+        "callback": "HttpToolsProtocol.connection_made",
+        "calls": 1,
+        "cycles": 34548
+      },
+      {
+        "callback": "TaskGroup._spawn.<locals>.task_done",
+        "calls": 3,
+        "cycles": 32152
+      },
+      {
+        "callback": "IocpProactor.accept.<locals>.accept_coro",
+        "calls": 2,
+        "cycles": 23166
+      },
+      {
+        "callback": "_ProactorBaseWritePipeTransport._loop_writing",
+        "calls": 2,
+        "cycles": 12980
+      },
+      {
+        "callback": "set.discard",
+        "calls": 1,
+        "cycles": 3395
+      }
+    ],
+    "database_timestamp_query_in_io_threads": {
+      "calls": 15,
+      "cycles": 48501942,
+      "thread_cpu_ns": 0,
+      "wall_seconds": 0.025049599818885326
+    },
+    "scope": "Event-loop callbacks measured with QueryThreadCycleTime; excludes native event-loop waits and other processes. Timestamp query cycles and elapsed time are measured separately within I/O threads. Instrumentation overhead is present. Cycles are not milliseconds or unprofiled CPU percentages.",
+    "before": {
+      "pid": 20244,
+      "ready": true,
+      "worker_pid": 39928,
+      "counts": {
+        "checks": 34,
+        "refresh": 0,
+        "projection": 0,
+        "live_reads": 0,
+        "refresh_failed": 0
+      },
+      "events": [
+        {
+          "event": "initial_jobs_completed",
+          "utc": 1793911767.6941333,
+          "monotonic": 4293753.921
+        }
+      ],
+      "http_other": 0,
+      "errors": [],
+      "sockets": 0,
+      "snapshot_listeners": 0
+    },
+    "after": {
+      "pid": 20244,
+      "ready": true,
+      "worker_pid": 39928,
+      "counts": {
+        "checks": 49,
+        "refresh": 0,
+        "projection": 0,
+        "live_reads": 0,
+        "refresh_failed": 0
+      },
+      "events": [
+        {
+          "event": "initial_jobs_completed",
+          "utc": 1793911767.6941333,
+          "monotonic": 4293753.921
+        }
+      ],
+      "http_other": 2,
+      "errors": [],
+      "sockets": 0,
+      "snapshot_listeners": 0
+    },
+    "cleanup": {
+      "parent": {
+        "exited": true,
+        "forced": false
+      },
+      "worker": {
+        "exited": true,
+        "forced": false
+      },
+      "launcher_exit_code": 0
+    },
+    "harness_sha256": {
+      "cycle_diagnostic.py": "41b8f218173ac49138f72cbab19ee0d0f6b62d48a629783d88ce59b38bcbe0c5",
+      "run_cycles.py": "014787779b466c87d30062f6e53f0fc2cae031d54532323389ad37514b3eae8f",
+      "actual_app.py": "269bb4362562ea9ba43750f01dcf688c0c0a8c152ad535c0634f601b0b9cf237"
+    }
+  }
+}

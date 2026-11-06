@@ -2,6 +2,8 @@
 
 This is a local Windows investigation of the dashboard revision tested, not a Linux/container benchmark or a universal CPU expectation. Current ownership and scheduling contracts are in [dashboard implementation](../implementation/dashboard-ui.md).
 
+The subsequent [staged steady-state investigation](dashboard-staged-idle-cpu.md) adds a Hello World baseline, waits at least 31 seconds after work completes and measures individual processes. Its clean final comparison found 0.21% of one core for Hello World and 0.91% for the dashboard, with substantial variation across earlier dashboard samples. It does not establish a single cause or a Linux/container result.
+
 The initial measured configuration included a database change monitor that has since been removed and one-second binding polling that has since changed to 0.25 seconds. The first investigation below is historical; the repeat comparison at the end includes the current configuration.
 
 ## Method

@@ -5,13 +5,15 @@ Detailed startup/call hierarchies and object ownership are in [runtime.md](../im
 ## Runtime ownership
 
 - Root launchers forward to `solar_model.runtime.supervisor`, `solar_model.runtime.collector` and `solar_model.dashboard.app`, preserving existing commands.
-- The supervisor initialises storage and manages the persisted collector and NiceGUI server. The collector calls collection/forecasting services; the dashboard owns its snapshot worker and browser-activated live collector.
+- The supervisor initialises storage and manages the persisted collector, independent planning service and NiceGUI server. The collector calls collection/forecasting services; the dashboard owns its snapshot worker and browser-activated live collector.
 - `solar_model.storage` owns schema, migrations, measurements, forecast persistence and queries. Data-only query results do not depend on NiceGUI.
-- `solar_model.planning` owns pure forecasts, planning inputs, scenarios, physical limits, scoring and optimisation. `services.planning` loads as-of data; `tools.plan_as_of` writes reports. The dashboard owns a shared cache of database-backed plans that invokes the planning service in a process worker after eligible full electrical updates, with manual refreshes and browser-only demonstrations. Planning sends no device commands.
+- `solar_model.planning` owns pure forecasts, planning inputs, scenarios, physical limits, scoring and optimisation. `services.planning` loads as-of data; `tools.plan_as_of` writes reports. The independent planner owns scheduled calculations/publication after eligible full electrical updates. The dashboard observes saved IDs, caches reports and owns only private demonstration calculations. Planning sends no device commands.
 
 ```mermaid
 flowchart LR
     Supervisor[Managed launcher] --> Collector[Persisted collector]
+    Supervisor --> Planner[Headless planner]
+    Planner --> DB
     Supervisor --> Dashboard[NiceGUI server]
     Device[Sigenergy Modbus] --> Collector
     Provider[Forecast.Solar API] --> Collector
@@ -47,3 +49,16 @@ flowchart LR
 See [code-map.md](code-map.md) for implementation locations and [review findings](../reviews/findings.md) for boundary inconsistencies.
 
 Shared plan workers prepare report views and commit snapshots before notifying the server. The server loads the committed ID and shares its cache with browsers; Plan History reads the same table. See [saved plans](../implementation/plan-history.md).
+
+## Process ownership and recovery
+
+```text
+supervisor
+  collector process: persisted measurements and due forecast work
+  planner service process: scheduling, health and one calculation worker
+    calculation process: fresh-cutoff optimiser, report preparation and atomic save/retention
+  dashboard process: saved-plan cache, UI, live Modbus thread and query thread pool
+    on-demand private demonstration process (no queue)
+```
+
+Unexpected exits restart only the affected service with 1?30 second backoff. POSIX services own process sessions; Windows services own kill-on-close Job Objects, so descendants are cleaned even after the service root crashes. Supervisor-requested restart reloads the whole application. Windows Job cleanup forcibly terminates services; SQLite atomic transactions protect interrupted writes. Planner health is refreshed every five seconds; the dashboard flags stopped or older-than-20-second status.

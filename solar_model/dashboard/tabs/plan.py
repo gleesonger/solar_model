@@ -1,7 +1,8 @@
 """Per-browser energy-plan controls and presentation."""
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from dataclasses import replace
+from datetime import date, datetime, time, timedelta, timezone
 import json
 from zoneinfo import ZoneInfo
 from typing import Any
@@ -13,12 +14,14 @@ import pandas as pd
 
 from solar_model.config import Config, EnergyPlanConfig, energy_plan_yaml, parse_energy_plan_yaml, save_energy_plan_yaml
 from solar_model.dashboard.components.warnings import notify_error, notify_success
-from solar_model.dashboard.planning_worker import ensure_planning_worker
+from solar_model.dashboard.planning_worker import demonstrate
 from solar_model.dashboard.plan_store import PlanRun, PlanStore
 from solar_model.dashboard.components.plan_detail import detail_excel, render_detail_table
 from solar_model.logging_setup import LOGGER
 from solar_model.planning.types import NextAction, NoFeasiblePlanError, OperatingMode, SimulationResult
 from solar_model.services.planning import PlanReport, generate_plan_report
+from solar_model.services.plan_history import read_saved_run
+from solar_model.storage.plan_history import list_plans
 
 
 from solar_model.planning.plan_report import (
@@ -61,7 +64,8 @@ def plan_chart_options(frame: pd.DataFrame, actuals: pd.DataFrame, timezone_name
                      None if pd.isna(getattr(row, column)) else float(getattr(row, column))]
                     for row in actuals.itertuples()]
         if column == "battery":
-            forecast = [[starts[0], float(frame.battery_start_kwh.iloc[0])]] + list(zip(ends, frame.battery_end_kwh.astype(float)))
+            opening = frame.battery_start_kwh.iloc[0]
+            forecast = [[starts[0], float(opening) if pd.notna(opening) else None]] + list(zip(ends, frame.battery_end_kwh.astype(float)))
         else:
             energy_column = {"solar": "solar_kwh", "house_load": "load_kwh"}.get(column, column + "_kwh")
             values = (frame[energy_column].astype(float) / hours).tolist()
@@ -110,10 +114,15 @@ class PlanTab:
         self.detail_view = "Compact"
         self.applied_adjustment: float | None = None
         self.applied_model: str | None = None
+        self.historical_id: str | None = None
+        self._history_request = 0
+        self._date_request = 0
 
     def render_plan_tab(self) -> None:
         with ui.row().classes("w-full items-end gap-4 flex-wrap"):
             self.settings_button = ui.button("Plan settings", icon="settings", on_click=self.open_plan_settings)
+            self.history_date = ui.input("Plan date", value="", on_change=self._load_snapshot_options).props("type=date clearable outlined dense").classes("w-40")
+            self.history_snapshot = ui.select({}, value=None, label="Snapshot", on_change=self._select_snapshot).props("clearable outlined dense").classes("w-64 max-w-full")
             with ui.row().classes("items-center gap-2") as self.loading:
                 ui.spinner(size="sm")
                 ui.label("Calculating plan…").classes("text-sm text-gray-600")
@@ -121,6 +130,58 @@ class PlanTab:
         self.status = ui.label("Waiting for a new full SigEnergy reading to calculate the plan." if self.plan_store else "Run a demonstration using the latest available data.").classes("text-sm text-gray-600")
         self.output = ui.column().classes("w-full min-w-0 gap-4")
         self.apply_shared_plan()
+
+    async def _load_snapshot_options(self) -> None:
+        self._date_request += 1
+        request = self._date_request
+        self._history_request += 1
+        self.historical_id = None
+        self.apply_shared_plan(force=True)
+        raw = self.history_date.value
+        if not raw:
+            self.history_snapshot.set_options({}, value=None)
+            return
+        try:
+            day = date.fromisoformat(raw)
+            start = datetime.combine(day, time.min, self.timezone)
+            end = datetime.combine(day + timedelta(days=1), time.min, self.timezone)
+            plans = await run.io_bound(list_plans, self.config.database.path, start, end)
+            if request != self._date_request:
+                return
+            options = {plan.snapshot_id: plan.saved_at.astimezone(self.timezone).strftime("%H:%M:%S %Z") for plan in plans}
+            self.history_snapshot.set_options(options, value=None)
+            if not plans:
+                self.status.set_text("No saved plans for this date. The latest plan remains displayed.")
+                self.status.set_visibility(True)
+        except Exception as error:
+            if request == self._date_request:
+                notify_error(f"Unable to load saved plans: {error}")
+
+    async def _select_snapshot(self) -> None:
+        snapshot_id = self.history_snapshot.value
+        self._history_request += 1
+        request = self._history_request
+        if not snapshot_id:
+            self.historical_id = None
+            self.apply_shared_plan(force=True)
+            return
+        self.historical_id = snapshot_id
+        self.loading.set_visibility(True)
+        try:
+            saved = await run.io_bound(read_saved_run, self.config, snapshot_id, True)
+            if request != self._history_request:
+                return
+            if saved is None:
+                raise ValueError("This snapshot is no longer retained")
+            completed = PlanRun(saved.report, saved.settings, saved.began_at, saved.full_data_at, saved.completed_at, snapshot_id=saved.snapshot_id)
+            self._apply_run(completed)
+        except Exception as error:
+            if request == self._history_request:
+                self.status.set_text(f"Unable to load saved plan: {error}")
+                self.status.set_visibility(True)
+        finally:
+            if request == self._history_request:
+                self.loading.set_visibility(False)
 
     @property
     def live_config(self) -> Config:
@@ -137,15 +198,19 @@ class PlanTab:
         self.applied_model = "MILP" if settings.optimiser.model == "mix_integer_linear_prog" else "DP"
         self.applied_adjustment = report.protection_preference if report.protection_preference is not None else settings.protection_preference
         self.demonstration = demonstration
+        if not report.full_resolution:
+            self.detail_view = "Compact"
         self.status.set_visibility(False)
         with self.output:
             self._render_result()
 
-    def apply_shared_plan(self) -> None:
+    def apply_shared_plan(self, force: bool = False) -> None:
         store = self.plan_store
         if store is None or not hasattr(self, "output"):
             return
-        if store.current is not None and store.version > self.shared_version:
+        if self.historical_id is not None:
+            return
+        if store.current is not None and (force or store.version > self.shared_version):
             self.shared_version = store.version
             self._apply_run(store.current)
         self.loading.set_visibility(store.running or self.running)
@@ -153,6 +218,8 @@ class PlanTab:
             previous = " The previous plan is still shown." if self.result is not None else ""
             self.status.set_text("Plan refresh failed: " + store.last_error + previous)
             self.status.set_visibility(True)
+        elif self.result is not None:
+            self.status.set_visibility(False)
 
     def open_plan_settings(self) -> None:
         with ui.dialog() as dialog, ui.card().classes("w-full").style("width: 938px; max-width: calc(100vw - 48px)"):
@@ -225,6 +292,11 @@ class PlanTab:
         settings = override or self.live_config.energy_plan
         shared_version = self.plan_store.version if self.plan_store else 0
         self.running = True
+        self.historical_id = None
+        self._history_request += 1
+        if hasattr(self, "history_date"):
+            self.history_date.set_value("")
+            self.history_snapshot.set_value(None)
         self.loading.set_visibility(True)
         self.settings_button.disable()
         self.status.set_visibility(False)
@@ -232,16 +304,17 @@ class PlanTab:
         try:
             if self.plan_store:
                 completed = await self.plan_store.demonstrate(settings)
-                if shared_version == self.plan_store.version:
+                if shared_version == self.plan_store.version and self.historical_id is None:
                     self._apply_run(completed)
             else:
-                await ensure_planning_worker()
-                report = await run.cpu_bound(generate_plan_report, self.config, as_of, override)
+                demonstrated = await demonstrate(replace(self.config, energy_plan=settings))
+                report = demonstrated["report"]
                 if report is None:
                     raise RuntimeError("The plan calculation did not return a result")
-                self._show_report(report, settings, True)
+                if self.historical_id is None:
+                    self._show_report(report, settings, True)
         except Exception as error:
-            if self.plan_store and shared_version != self.plan_store.version:
+            if self.historical_id is not None or (self.plan_store and shared_version != self.plan_store.version):
                 return
             if isinstance(error, SubprocessException) and error.original_type == NoFeasiblePlanError.__name__:
                 error = NoFeasiblePlanError(error.original_message)
@@ -262,9 +335,10 @@ class PlanTab:
         result = self.result
         first = result.results.get("med", next(iter(result.results.values())))
         action = result.next_action
-        minutes = (first.ends_at.iloc[0] - first.starts_at.iloc[0]).total_seconds() / 60
+        minutes = self.report.action_minutes or (15. if not self.report.full_resolution else (first.ends_at.iloc[0] - first.starts_at.iloc[0]).total_seconds() / 60)
         capacity = self.report.command_battery_capacity_kwh if self.report is not None else None
-        solar_export = first.solar_to_grid_kwh.iloc[0] if "solar_to_grid_kwh" in first else 0.
+        first_name = "med" if "med" in result.results else next(iter(result.results))
+        solar_export = (self.report.action_solar_export or {}).get(first_name, first.solar_to_grid_kwh.iloc[0] if "solar_to_grid_kwh" in first else 0.)
         description = next_action_description(action, solar_export, capacity)
         local_start = first.starts_at.iloc[0].astimezone(self.timezone)
 
@@ -330,10 +404,10 @@ class PlanTab:
     def _render_scenario(self) -> None:
         frame = self.result.results[self.scenario_name]
         capacity = self.report.command_battery_capacity_kwh if self.report is not None else None
-        solar_export = frame.solar_to_grid_kwh.iloc[0] if "solar_to_grid_kwh" in frame else 0.
+        solar_export = (self.report.action_solar_export or {}).get(self.scenario_name, frame.solar_to_grid_kwh.iloc[0] if "solar_to_grid_kwh" in frame else 0.)
         self.action_label.set_text(next_action_description(self.result.next_action, solar_export, capacity))
         reserve = self.report.preferred_reserve_kwh if self.report is not None and self.report.preferred_reserve_kwh is not None else self.config.energy_plan.preferred_reserve_kwh
-        summary = scenario_summary(frame, reserve)
+        summary = (self.report.summaries or {}).get(self.scenario_name) or scenario_summary(frame, reserve)
         cost_text = scenario_cost_summary(self.result.results, self.scenario_name)
         series = plan_chart_options(self._scenario_frame(), self.actuals, self.config.timezone)["series"]
         self.chart.options["series"] = series
@@ -373,10 +447,13 @@ class PlanTab:
             with ui.row().classes("w-full items-center justify-between flex-wrap gap-2"):
                 ui.label("Plan detail").classes("text-lg font-semibold")
                 with ui.row().classes("items-center gap-2 flex-wrap"):
-                    ui.toggle(["Compact", "Advanced"], value=self.detail_view, on_change=self._detail_view_changed).props("dense no-caps")
+                    views = ["Compact", "Advanced"] if self.report.full_resolution else ["Compact"]
+                    ui.toggle(views, value=self.detail_view, on_change=self._detail_view_changed).props("dense no-caps")
                     ui.button("Download Excel", icon="download", on_click=lambda: self._download_detail(frame, columns)).props("flat dense")
             if self.detail_view == "Advanced":
                 ui.label("Flow key: S = Solar · B = Battery · L = Household load · G = Grid. Arrows show energy direction, e.g. S→B is Solar to Battery.").classes("text-xs text-gray-600")
+            if not self.report.full_resolution:
+                ui.label("Advanced details have expired. This snapshot retains Compact data and an hourly forecast chart.").classes("text-xs text-gray-600")
             columns = render_detail_table(frame, self.config.timezone, self.result.next_action.mode, self.detail_view)
 
     def _download_detail(self, frame: pd.DataFrame, columns: list[dict[str, Any]]) -> None:

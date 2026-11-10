@@ -96,3 +96,5 @@ Advanced and Compact Plan detail share `.plan-detail-table` with 0.75rem text, 4
 Advanced Plan detail keeps full descriptive column names alongside its wider columns. Compact alone uses the shortened headers; underlying field keys and numeric formatting are unchanged.
 
 Plan table t is elapsed row duration in hours and shows two decimals. Cost, Protection and Limit Score cells show hourly rates to two decimals; Terminal and Total Score cells show period contributions. Advanced has lightly shaded first/second 24-hour subtotals and a grey bold full Total. Footer scores sum original contributions, rather than hourly rates. This presentation does not change other interval totals or Excel score contributions.
+
+The Plan date and Snapshot controls sit immediately right of Plan settings, initially blank for latest. They wrap in that order on mobile. Current and historical reports reuse the same action, chart, summaries and table styling; there is no separate Plan History tab.

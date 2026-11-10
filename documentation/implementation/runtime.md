@@ -6,27 +6,11 @@ Root files are compatibility launchers. Installable console commands and module 
 
 ## 1. Managed process hierarchy
 
-```text
-solar_model.runtime.supervisor.main()
-  start_processes()                       nested supervisor helper
-    load_config()
-    open_database(config.database.path)
-    database.close()
-    subprocess.Popen(python -m solar_model.runtime.collector)
-    subprocess.Popen(python -m solar_model.dashboard.app)
-  supervision loop
-    restart marker exists -> stop_processes() -> start_processes()
-    child exits -> record exit code -> stop remaining children
-  shutdown -> stop_processes() -> remove restart marker
-```
+The supervisor migrates storage, then starts `runtime.collector`, `runtime.planner` and `dashboard.app`. Each is an `OwnedProcess`: a separate POSIX session/process group or a Windows kill-on-close Job Object. Startup launch failure cleans all children already started. Once running, a service exit reaps its descendants and restarts only that service after exponential 1?30 second backoff; a service surviving 60 seconds resets its failure count. Collector and planner continue through dashboard failure. A Control restart marker stops/restarts all three and reloads configuration/storage. Stop waits are bounded; Windows Job closure forcibly stops the owned tree.
 
-The supervisor does not pass a `Config` object to children. Each process rereads the same working-directory `config.yaml`. Database initialisation occurs first to reduce concurrent startup migration work, but each child also calls `open_database()`.
+The headless `runtime.planner.PlannerService` checks input markers/settings once per second, keeps at most one in-flight calculation, coalesces readings arriving during work and applies the existing cadence tolerance. At startup it restores previous publication/cadence metadata, establishes the latest-reading baseline and waits for a newer reading. Calculation failures retry on a later new reading. Its owned calculation worker captures the input cutoff inside the worker, enforces the configured time limit, and saves before returning an ID. Expired/crashed workers are reaped and recreated on later submissions. `database_metadata.planning_service_status` carries PID, worker PID, heartbeat, state, last error and last successful publication. Status writes occur on state changes and every five seconds.
 
-Supervisor state is a list of `Popen` objects, a boolean shutdown flag, and a temporary restart-file `Path`. The environment variable `SOLAR_MODEL_RESTART_FILE` passes that path to both children. Dashboard Control touches it; the supervisor detects it at approximately 0.25-second intervals. There is no persistent IPC message queue or configuration hot reload.
-
-Shutdown terminates children, waits up to ten seconds per child, then kills survivors. A child crash stops the managed application; automatic restart after a crash requires an external service/container policy.
-
-If either child launch fails, `start_processes()` terminates and reaps any children already launched, then propagates the original failure. This applies during both initial start and requested restart.
+The dashboard polls saved plan IDs/status, not electrical markers. Its private demonstration worker is created only on demand and admits one request globally; further requests receive a busy message. It cannot delay the independent scheduled worker. See [saved-plan contracts](plan-history.md).
 
 ## 2. YAML to typed configuration
 
@@ -111,20 +95,16 @@ solar_model.dashboard.app.main()
   ui.page('/') -> render_dashboard_page()
   ui.run(..., favicon=SVG file path, reload=False)
 
-app startup callbacks (scheduled independently)
-  start_snapshot_worker(): start snapshots.run_forever(), awaiting connected subscribers
-  ensure_planning_worker(): await one shared asynchronous warm-up task
-    configure_planning_worker(): replace unused default executor with one spawn worker
-    await run.cpu_bound(services.planning.warm_planning_worker)
-    import planning dependencies, initialise highspy.Highs(), return worker PID
-    log worker ready/startup seconds; log failures without aborting dashboard startup
-  start_plan_worker(): start plans.run_forever(), querying the latest committed full-reading timestamp every second
+app startup callbacks
+  start_snapshot_worker(): start snapshots.run_forever(), awaiting subscribers
+  start_plan_worker(): start plans.run_forever(), observing saved IDs/status
+  no optimiser worker warm-up or shared calculation in the dashboard
 
 each browser page
   DashboardLayout(config, live_collector)
     DashboardState + DashboardElements
     DashboardWarnings
-    RecentTab / AnalysisTab / SystemInfoTab / ControlTab
+    RecentTab / AnalysisTab / PlanTab (including saved selection) / SystemInfoTab / ControlTab
   render cached snapshot, or loading state
   subscribe apply_snapshot callback
   subscribe plan_tab.apply_shared_plan through client.safe_invoke
@@ -132,7 +112,7 @@ each browser page
   ui.timer(live_interval, layout.refresh_live_power)
 ```
 
-One server-wide live collector, Recent snapshot store and in-memory plan store serve all pages. `DashboardState`, `DashboardElements`, tab instances, warnings metadata and subscriptions belong to individual pages. The persisted collector runs in another process; the plan scheduler observes its committed electrical timestamps through SQLite. Only `energy_plan` supports hot reload from the startup file; other settings retain restart semantics. Plan scheduling and browser demonstration behaviour are detailed in [dashboard ownership](dashboard-ui.md#plan-tab-ownership-and-refresh).
+One server-wide live collector, Recent snapshot store and saved-plan cache serve all pages. `DashboardState`, `DashboardElements`, tab instances, warnings metadata and subscriptions belong to individual pages. The persisted collector runs in another process; the independent planning service observes its committed electrical timestamps through SQLite. The dashboard observes saved plan IDs through SQLite. Only `energy_plan` supports hot reload from the startup file; other settings retain restart semantics. Plan scheduling and browser demonstration behaviour are detailed in [dashboard ownership](dashboard-ui.md#plan-tab-ownership-and-refresh).
 
 At startup, `main_dashboard` passes the source-relative `solar_model/dashboard/assets/solar_power.svg` path to `ui.run(favicon=...)`. NiceGUI references `/favicon.ico` in the page icon link and serves the SVG file through that route. The SVG is not embedded in the page. Deploy the valid asset, restart the dashboard and reload the page; the fixed favicon URL may require browser cache refresh after image changes.
 

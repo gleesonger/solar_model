@@ -1,80 +1,98 @@
+"""Own collector, planner and dashboard lifetimes independently."""
 from __future__ import annotations
 
+from dataclasses import dataclass
 import os
 import signal
-import subprocess
 import sys
 import tempfile
-import time
 from pathlib import Path
+from threading import Event
+from time import monotonic
 from types import FrameType
 
 from solar_model.config import load_config
+from solar_model.logging_setup import LOGGER
 from solar_model.paths import subprocess_environment
+from solar_model.runtime.processes import OwnedProcess
 from solar_model.storage.migrations import open_database
+
+MODULES = ("solar_model.runtime.collector", "solar_model.runtime.planner", "solar_model.dashboard.app")
+
+
+@dataclass
+class Service:
+    module: str
+    process: OwnedProcess | None = None
+    started_at: float = 0.
+    retry_at: float = 0.
+    failures: int = 0
+
+
+def start_services(environment: dict[str, str]) -> list[Service]:
+    services = [Service(module) for module in MODULES]
+    try:
+        for service in services:
+            service.process = OwnedProcess([sys.executable, "-m", service.module], environment)
+            service.started_at = monotonic()
+    except BaseException:
+        for service in services:
+            if service.process is not None:
+                service.process.stop()
+        raise
+    return services
+
+
+def check_services(services: list[Service], environment: dict[str, str]) -> None:
+    now = monotonic()
+    for service in services:
+        if service.process is not None and service.process.poll() is not None:
+            code = service.process.poll()
+            service.process.stop()  # Reap descendants even when the root has exited.
+            service.process = None
+            service.failures = 1 if now - service.started_at >= 60 else service.failures + 1
+            service.retry_at = now + min(30., 2. ** min(service.failures - 1, 5))
+            LOGGER.error("Service %s exited (%s); restart in %.1fs", service.module, code, service.retry_at - now)
+        if service.process is None and now >= service.retry_at:
+            try:
+                service.process = OwnedProcess([sys.executable, "-m", service.module], environment)
+                service.started_at = now
+            except Exception:
+                service.failures += 1
+                service.retry_at = now + min(30., 2. ** min(service.failures, 5))
+                LOGGER.exception("Unable to restart %s", service.module)
 
 
 def main() -> int:
     restart_file = Path(tempfile.gettempdir()) / f"solar-model-restart-{os.getpid()}"
     restart_file.unlink(missing_ok=True)
+    environment = subprocess_environment() | {"SOLAR_MODEL_RESTART_FILE": str(restart_file)}
+    open_database(load_config().database.path).close()
+    services = start_services(environment)
+    stop = Event()
 
-    def start_processes() -> list[subprocess.Popen]:
-        # Reload configuration before each full application restart. Opening
-        # the database also applies any pending schema migration before either
-        # child begins using it.
-        database = open_database(load_config().database.path)
-        database.close()
-        environment = subprocess_environment() | {"SOLAR_MODEL_RESTART_FILE": str(restart_file)}
-        started = []
-        try:
-            for module in ("solar_model.runtime.collector", "solar_model.dashboard.app"):
-                started.append(subprocess.Popen([sys.executable, "-m", module], env=environment))
-        except BaseException:
-            stop_processes(started)
-            raise
-        return started
+    def shutdown(number: int, frame: FrameType | None) -> None:
+        stop.set()
 
-    def stop_processes(processes: list[subprocess.Popen]) -> None:
-        for process in processes:
-            if process.poll() is None:
-                process.terminate()
-        for process in processes:
-            try:
-                process.wait(timeout=10)
-            except subprocess.TimeoutExpired:
-                process.kill()
-                process.wait()
-
-    processes = start_processes()
-    stopping = False
-
-    def stop(_signal_number: int, _frame: FrameType | None) -> None:
-        nonlocal stopping
-        stopping = True
-        for process in processes:
-            if process.poll() is None:
-                process.terminate()
-
-    signal.signal(signal.SIGTERM, stop)
-    signal.signal(signal.SIGINT, stop)
-
-    exit_code = 0
+    signal.signal(signal.SIGTERM, shutdown)
+    signal.signal(signal.SIGINT, shutdown)
     try:
-        while not stopping:
+        while not stop.is_set():
             if restart_file.exists():
                 restart_file.unlink(missing_ok=True)
-                stop_processes(processes)
-                processes = start_processes()
-                continue
-            stopped_process = next((process for process in processes if process.poll() is not None), None)
-            if stopped_process is not None:
-                exit_code = stopped_process.returncode or 1
-                break
-            time.sleep(0.25)
+                for service in services:
+                    if service.process is not None:
+                        service.process.stop()
+                open_database(load_config().database.path).close()
+                services = start_services(environment)
+            check_services(services, environment)
+            stop.wait(.25)
     finally:
-        stop_processes(processes)
+        for service in services:
+            if service.process is not None:
+                service.process.stop()
         restart_file.unlink(missing_ok=True)
-    return exit_code
+    return 0
 
 
 if __name__ == "__main__":

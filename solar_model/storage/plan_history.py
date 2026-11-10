@@ -11,7 +11,7 @@ import zlib
 from sqlalchemy import inspect, select
 
 from solar_model.storage.connection import create_engine_for_database
-from solar_model.storage.schema import PlanHistory
+from solar_model.storage.schema import DatabaseMetadata, PlanHistory
 
 
 @dataclass(frozen=True)
@@ -20,6 +20,25 @@ class StoredPlan:
     saved_at: datetime
     metadata: dict[str, Any]
     sections: dict[tuple[str, str], dict[str, Any]]
+
+
+def latest_plan_id(database_path: str) -> str | None:
+    table = PlanHistory.__table__
+    with create_engine_for_database(database_path).connect() as connection:
+        return connection.scalar(select(table.c.snapshot_id).where(table.c.view == "metadata").order_by(table.c.saved_at.desc(), table.c.snapshot_id.desc()).limit(1))
+
+
+def write_planner_status(database_path: str, status: dict[str, Any]) -> None:
+    from sqlalchemy.dialects.sqlite import insert
+    statement = insert(DatabaseMetadata).values(key="planning_service_status", value=json.dumps(status))
+    with create_engine_for_database(database_path).begin() as connection:
+        connection.execute(statement.on_conflict_do_update(index_elements=["key"], set_={"value": statement.excluded.value}))
+
+
+def read_planner_status(database_path: str) -> dict[str, Any] | None:
+    with create_engine_for_database(database_path).connect() as connection:
+        value = connection.scalar(select(DatabaseMetadata.value).where(DatabaseMetadata.key == "planning_service_status"))
+    return json.loads(value) if value else None
 
 
 def encode(value: dict[str, Any]) -> bytes:

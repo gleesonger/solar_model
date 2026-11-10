@@ -9,6 +9,7 @@ from sqlalchemy import event, inspect
 
 from solar_model.config import load_config
 from solar_model.services.plan_history import payload_frame, persist_report, read_saved_run
+from solar_model.services.plan_history import frame_payload
 from solar_model.services.planning import PlanReport
 from solar_model.storage.migrations import open_database, DATABASE_VERSION
 from solar_model.storage.plan_history import list_plans, load_plan, save_plan
@@ -122,3 +123,8 @@ def test_upgrade_from_032_does_not_rebuild_existing_telemetry(database, monkeypa
         assert open_database(path).engine is reopened.engine
     finally:
         reopened.close()
+
+
+def test_timestamp_codec_preserves_mixed_fractional_and_clock_aligned_intervals():
+    frame = pd.DataFrame({"starts_at": pd.to_datetime(["2026-11-10T10:05:12.123456Z", "2026-11-10T10:30:00Z"], format="ISO8601", utc=True)})
+    pd.testing.assert_frame_equal(payload_frame(frame_payload(frame)), frame)

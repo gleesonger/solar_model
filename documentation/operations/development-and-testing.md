@@ -73,3 +73,5 @@ Keep verification targeted. Include the legacy-named migration regression when c
 ## Saved-plan checks
 
 Use targeted `tests/storage/test_plan_history.py`, `tests/dashboard/test_plan_history.py`, and `tests/browser/test_plan_history.py`. The storage tests use temporary databases; never run migrations against the installation database for development verification. Browser checks require the separate Playwright/browser installation. The tests use synthetic reports rather than optimiser simulations.
+
+Runtime ownership checks are in `tests/runtime/test_planner.py`. They start real spawned processes with synthetic reports/measurements and temporary databases, test deadline/crash recovery and supervisor isolation, and check platform process-tree cleanup. The integrated Plan browser test is `tests/browser/test_plan_history.py`; it covers historical pinning during real background publication, chart selections and desktop/mobile controls. Live hardware/provider behavior and POSIX process cleanup require their respective environments.

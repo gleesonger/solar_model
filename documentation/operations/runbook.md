@@ -125,3 +125,9 @@ The first startup after the valid-count upgrade rebuilds hourly history once for
 - Stale summaries after tariff changes: confirm raw update and hourly rebuild both completed.
 - Blank forecasts: check pre-midnight history, configured-panel availability, partial requests and adjustment failure.
 - Planning failure: check required metadata/history, interval alignment, HiGHS, and infeasible battery/power limits.
+
+## Independent planning service
+
+The managed supervisor now starts collector, planner and dashboard separately and restarts an unexpectedly exited service with bounded backoff. To run them separately for development, launch `python -m solar_model.runtime.collector`, `python -m solar_model.runtime.planner` and `python -m solar_model.dashboard.app` from the configuration directory with the package installed. `solar-planner` is the installed planner command. Running only the dashboard displays saved plans and supports private demonstrations; it does not generate scheduled plans. The Plan tab reports an unavailable/stale planner while retaining the last saved report. Whole-application Control restarts still use the supervisor marker.
+
+For diagnosis inspect `database_metadata.planning_service_status`: service/worker PIDs, state, UTC heartbeat, last error, last publication ID and last successful completion. A five-second heartbeat is considered stale by the dashboard after 20 seconds. All planning remains report-only.

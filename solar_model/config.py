@@ -190,6 +190,7 @@ class EnergyPlanConfig:
     scenarios: ScenariosConfig
     plan_rerun_frequency_mins: float
     num_visible_projection_hours: int = 24
+    calculation_timeout_seconds: float = 300.
     protection_preference: float = 50.
     minimum_battery_kwh: tuple[TariffRule, ...] = ()
     maximum_battery_kwh: tuple[TariffRule, ...] = ()
@@ -390,6 +391,7 @@ def energy_plan_yaml(settings: EnergyPlanConfig) -> str:
         "num_projection_hours": settings.num_projection_hours,
         "num_visible_projection_hours": settings.num_visible_projection_hours,
         "plan_rerun_frequency_mins": settings.plan_rerun_frequency_mins,
+        "calculation_timeout_seconds": settings.calculation_timeout_seconds,
         "preferred_reserve_kwh": settings.preferred_reserve_kwh,
         "protection_preference": settings.protection_preference,
     }]
@@ -518,6 +520,8 @@ def validate_config(config: Config) -> None:
     energy_plan = config.energy_plan
     if not math.isfinite(energy_plan.plan_rerun_frequency_mins) or energy_plan.plan_rerun_frequency_mins <= 0:
         raise ValueError("energy_plan.plan_rerun_frequency_mins must be finite and greater than zero")
+    if isinstance(energy_plan.calculation_timeout_seconds, bool) or not math.isfinite(energy_plan.calculation_timeout_seconds) or energy_plan.calculation_timeout_seconds <= 0:
+        raise ValueError("energy_plan.calculation_timeout_seconds must be finite and greater than zero")
     if energy_plan.optimiser.model not in ("mix_integer_linear_prog", "dynamic_programming"):
         raise ValueError("energy_plan.optimiser.model must be mix_integer_linear_prog or dynamic_programming")
     dp = energy_plan.optimiser.dynamic_programming

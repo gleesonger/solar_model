@@ -2,7 +2,7 @@
 
 The [runtime implementation guide](../implementation/runtime.md) traces YAML normalisation, dataclass relationships, and which processes/components consume configuration.
 
-Source: [config.yaml](../../config.yaml), [solar_model/config.py](../../solar_model/config.py). Configuration loads at process startup; a managed restart reloads it for both children. The dashboard additionally hot-reloads the energy_plan section for background planning when its startup file changes.
+Source: [config.yaml](../../config.yaml), [solar_model/config.py](../../solar_model/config.py). Configuration loads at process startup; a managed restart reloads it for all three services. The planning service and dashboard additionally hot-reload the energy_plan section when its startup file changes.
 
 ## Sections
 
@@ -107,7 +107,7 @@ These defaults apply when YAML fields or their optional containing blocks are om
 
 ## Planning command preferences
 
-`energy_plan.plan_rerun_frequency_mins` is required and must be finite and positive; omission fails startup/configuration-editor validation. The shipped value is 5. The dashboard checks for newly committed full SigEnergy readings once per second. It starts a background plan when the new reading is at least `max(0, plan_rerun_frequency_mins * 60 - 15)` seconds newer than the reading used by the last successful shared plan. Startup records existing data as a baseline and waits for a newer full reading before the first plan. Changed saved planning settings make the next new reading eligible immediately. Browser-only overrides do not alter this schedule. Save To Disk and external edits hot-reload the energy-plan section, including this interval; other application configuration retains restart semantics. See [Plan tab](dashboard.md#plan-tab).
+`energy_plan.plan_rerun_frequency_mins` is required and must be finite and positive; omission fails startup/configuration-editor validation. The shipped value is 5. The independent planning service checks for newly committed full SigEnergy readings once per second. It starts a background plan when the new reading is at least `max(0, plan_rerun_frequency_mins * 60 - 15)` seconds newer than the reading used by the last successful shared plan. Startup records existing data as a baseline and waits for a newer full reading before the first plan. Changed saved planning settings make the next new reading eligible immediately. Browser-only overrides do not alter this schedule. Save To Disk and external edits hot-reload the energy-plan section, including this interval; other application configuration retains restart semantics. See [Plan tab](dashboard.md#plan-tab).
 
 `energy_plan.min_forced_charge_power_kw` and `energy_plan.min_forced_discharge_power_kw` are finite, strictly positive minimum requested powers in kW, each defaulting to 0.1. Both DP and MILP use them. They are planning preferences, not verified hardware minimums, and actual flows may be lower when limited by SOC stops or physical capability. They do not scale with interval duration. `energy_plan.max_forced_charge_power_kw` and `max_forced_discharge_power_kw` are finite, strictly positive numeric ceilings, both defaulting to 999 kW and explicitly set in the shipped YAML; null is not supported. Each effective ceiling is the smaller of the configured maximum and hardware maximum. A minimum above that ceiling makes the forced mode unavailable; self-consumption remains available.
 
@@ -160,3 +160,5 @@ In DP, `minimum_battery_kwh` and `maximum_battery_kwh` are preferred interval-en
 DP always considers Grid supply and Hold battery alongside self-consumption and forced commands. These passive profiles add no configuration keys and ignore the forced-power preference settings; Grid supply permits charging up to physical battery/equipment capability, while Hold disables both directions.
 
 Solar export first is another always-considered DP candidate with no configuration key or forced rate. Its modelled overflow charging uses physical charge limits and the same soft Min/Max penalty; the mode-5 hardware overflow behaviour remains unverified.
+
+`energy_plan.calculation_timeout_seconds` defaults to 300 and must be finite and positive (booleans rejected). It bounds each scheduled or private demonstration calculation, including cold worker startup. Deadline failure reaps the worker; a later job creates a replacement. Scheduled timeout detection runs once per second. This is separate from the existing five-second performance-experiment limit.

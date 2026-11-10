@@ -19,6 +19,7 @@ numba = ["numba>=0.61,<1"]
 solar-model = "solar_model.runtime.supervisor:main"
 solar-dashboard = "solar_model.dashboard.app:main"
 solar-collect = "solar_model.runtime.collector:main"
+solar-planner = "solar_model.runtime.planner:main"
 solar-plan = "solar_model.tools.plan_as_of:main"
 
 [tool.setuptools.dynamic]

@@ -8,7 +8,7 @@ The managed application launcher starts the minute-resolution electrical and for
 python docker_start.py
 ```
 
-Use this launcher when using the dashboard Control tab: it is what allows tariff recalculation to restart the entire application and reload `config.yaml` for both processes. `solar_model/runtime/collector.py` and `solar_model/dashboard/app.py` may still be launched independently for development, but the Control tab cannot restart an independently launched collector.
+Use this launcher when using the dashboard Control tab: it is what allows tariff recalculation to restart the entire application and reload `config.yaml` for all three services. `solar_model/runtime/collector.py` and `solar_model/dashboard/app.py` may still be launched independently for development, but the Control tab cannot restart an independently launched collector.
 
 `solar_model/runtime/collector.py` synchronizes to the next configured full interval (shipped as 60 seconds), runs Modbus first, and runs Forecast.Solar at its configured interval when due. A failed interval is logged and skipped. The collector modules expose one-pass functions and are not standalone schedulers.
 
@@ -122,3 +122,5 @@ Warning policy is centralised in `solar_model/dashboard/components/warnings.py` 
 Application code is under `solar_model/`, split into planning, services, integrations, storage, dashboard, runtime and tools. See the [code map](documentation/overview/code-map.md). Existing root launch commands continue to work. Install with `python -m pip install -e ".[test]"`; browser checks additionally need `.[browser]` and a Playwright browser installation.
 
 The as-of report command is `python -m solar_model.tools.plan_as_of --database solar.db --as-of "2026-10-24T10:00:00+01:00"`. Its planning API accepts in-memory device/state/scenarios through `solar_model.planning.plan_optimisation_milp.simulate_energy_plan` and returns `SimulationResult`. Planning remains read-only, with shared first controls and the [tariff-scaled cost/protection score](documentation/overview/plan-model.md); hardware command verification and forecast/scenario changes remain separate work.
+
+Scheduled plans are produced by `python -m solar_model.runtime.planner`, independently of the dashboard. The managed launcher starts it automatically. The Plan tab shows latest or selected saved snapshots using blank-by-default date/snapshot controls beside Plan settings.

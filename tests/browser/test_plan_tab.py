@@ -35,12 +35,9 @@ from solar_model.dashboard.tabs.plan import PlanTab
 from solar_model.services.planning import PlanReport
 from tests.dashboard.test_plan import sample_result
 
-async def calculate(callback, *args):
-    if callback.__name__ == "warm_planning_worker":
-        await asyncio.sleep(.3)
-        return 123
-    config, as_of, override = args
-    config = replace(config, energy_plan=override) if override is not None else config
+async def calculate(config):
+    from datetime import datetime, timezone
+    as_of = datetime.now(timezone.utc)
     preference = config.energy_plan.protection_preference
     model = "MILP" if config.energy_plan.optimiser.model == "mix_integer_linear_prog" else "DP"
     assert model in ('MILP', 'DP')
@@ -75,8 +72,9 @@ async def calculate(callback, *args):
         result.lookahead_results[name] = extra
     stamp = result.results['med'].starts_at.iloc[0]
     actuals = pd.DataFrame(dict(timestamp=[stamp - pd.Timedelta(hours=1), stamp], solar=[2.,2.], house_load=[1.,1.], battery=[4.,4.], grid_import=[.3,.4], grid_export=[.1,0.]))
-    return PlanReport(result, actuals, 20., config.energy_plan.scenarios, config.energy_plan.preferred_reserve_kwh, preference, 20.)
-run.cpu_bound = calculate
+    return dict(report=PlanReport(result, actuals, 20., config.energy_plan.scenarios, config.energy_plan.preferred_reserve_kwh, preference, 20.), began_at=as_of, completed_at=as_of)
+import solar_model.dashboard.tabs.plan as plan_module
+plan_module.demonstrate = calculate
 
 @ui.page('/')
 def page():

@@ -141,6 +141,7 @@ forecast:
 
 energy_plan:
   plan_rerun_frequency_mins: 5
+  calculation_timeout_seconds: 300
   num_projection_hours: 48
   num_visible_projection_hours: 24
 

@@ -8,7 +8,7 @@ from typing import Any
 import pandas as pd
 
 from solar_model.config import Config, EnergyPlanConfig, energy_plan_yaml, parse_energy_plan_yaml
-from solar_model.planning.plan_report import advanced_plan_frame, detail_columns, detail_frame, hourly_detail_frame
+from solar_model.planning.plan_report import advanced_plan_frame, detail_columns, detail_frame, hourly_detail_frame, scenario_summary
 from solar_model.planning.types import NextAction, OperatingMode, SimulationResult
 from solar_model.services.planning import PlanReport, generate_plan_report
 from solar_model.storage.plan_history import StoredPlan, load_plan, save_plan
@@ -36,7 +36,7 @@ def frame_payload(frame: pd.DataFrame) -> dict[str, Any]:
 def payload_frame(payload: dict[str, Any]) -> pd.DataFrame:
     frame = pd.DataFrame(payload["data"], columns=payload["columns"])
     for name in payload["timestamps"]:
-        frame[name] = pd.to_datetime(frame[name], utc=True)
+        frame[name] = pd.to_datetime(frame[name], format="ISO8601", utc=True)
     return frame
 
 
@@ -77,6 +77,10 @@ def persist_report(config: Config, report: PlanReport, began_at: datetime, compl
         "original_columns": {name: list(frame.columns) for name, frame in report.simulation.results.items()},
         "visible_counts": {name: len(frame) for name, frame in report.simulation.results.items()},
         "original_actions": {},
+        "summaries": {name: scenario_summary(frame, config.energy_plan.preferred_reserve_kwh) for name, frame in report.simulation.results.items()},
+        "initial_battery_kwh": {name: float(frame.battery_start_kwh.iloc[0]) for name, frame in report.simulation.results.items()},
+        "action_minutes": (next(iter(report.simulation.results.values())).ends_at.iloc[0] - next(iter(report.simulation.results.values())).starts_at.iloc[0]).total_seconds() / 60,
+        "action_solar_export": {name: float(frame.solar_to_grid_kwh.iloc[0]) if "solar_to_grid_kwh" in frame else 0. for name, frame in report.simulation.results.items()},
     }
     for name, visible in report.simulation.results.items():
         hidden = report.simulation.lookahead_results.get(name)
@@ -99,14 +103,14 @@ def generate_saved_plan(config: Config, began_at: datetime) -> str:
     return persist_report(config, report, began_at, datetime.now(timezone.utc))
 
 
-def read_saved_run(config: Config, snapshot_id: str | None = None) -> SavedRun | None:
+def read_saved_run(config: Config, snapshot_id: str | None = None, historical: bool = False) -> SavedRun | None:
     stored = load_plan(config.database.path, snapshot_id)
     if stored is None:
         return None
-    return restore_run(config, stored)
+    return restore_run(config, stored, historical)
 
 
-def restore_run(config: Config, stored: StoredPlan) -> SavedRun:
+def restore_run(config: Config, stored: StoredPlan, historical: bool = False) -> SavedRun:
     """Restore the latest full report; historical tables can load sections directly."""
     metadata = stored.metadata
     settings = parse_energy_plan_yaml(config, metadata["settings"])
@@ -122,8 +126,22 @@ def restore_run(config: Config, stored: StoredPlan) -> SavedRun:
             raw["plan_action"] = metadata["original_actions"][scenario]
         count = metadata["visible_counts"][scenario]
         visible[scenario], hidden[scenario] = raw.iloc[:count].copy(), raw.iloc[count:].reset_index(drop=True)
+    full_resolution = bool(visible)
     if not visible:
-        raise ValueError("Advanced details have expired; load this snapshot through Plan History")
+        for scenario, compact in details["Compact"].items():
+            raw = compact.copy()
+            initial = metadata.get("initial_battery_kwh", {}).get(scenario, float("nan"))
+            raw["battery_start_kwh"] = [initial, *raw.battery_end_kwh.iloc[:-1]]
+            visible[scenario], hidden[scenario] = raw, raw.iloc[:0].copy()
+    actuals = payload_frame(metadata["actuals"]) if metadata.get("actuals") else pd.DataFrame()
+    if historical and metadata.get("actuals") is None:
+        from zoneinfo import ZoneInfo
+        from solar_model.storage.connection import SolarDatabase, create_engine_for_database
+        from solar_model.storage.queries.planning import load_plan_actuals
+        cutoff = datetime.fromisoformat(metadata["began_at"])
+        day_start = cutoff.astimezone(ZoneInfo(metadata["timezone"])).replace(hour=0, minute=0, second=0, microsecond=0)
+        database = SolarDatabase(create_engine_for_database(config.database.path))
+        actuals = load_plan_actuals(database, day_start, cutoff, metadata["battery_capacity_kwh"])
     simulation = SimulationResult(NextAction(**action), visible, hidden)
     for name in ("expected_score", "expected_results", "expected_lookahead_results"):
         if hasattr(simulation, name):
@@ -133,7 +151,7 @@ def restore_run(config: Config, stored: StoredPlan) -> SavedRun:
             object.__setattr__(simulation, name, value)
     report = PlanReport(
         simulation=simulation,
-        actuals=payload_frame(metadata["actuals"]) if metadata.get("actuals") else pd.DataFrame(),
+        actuals=actuals,
         battery_capacity_kwh=metadata["battery_capacity_kwh"],
         scenarios=settings.scenarios,
         preferred_reserve_kwh=metadata["preferred_reserve_kwh"],
@@ -141,5 +159,9 @@ def restore_run(config: Config, stored: StoredPlan) -> SavedRun:
         command_battery_capacity_kwh=metadata["command_battery_capacity_kwh"],
         full_data_at=datetime.fromisoformat(metadata["full_data_at"]),
         details=details,
+        summaries=metadata.get("summaries"),
+        action_minutes=metadata.get("action_minutes"),
+        action_solar_export=metadata.get("action_solar_export"),
+        full_resolution=full_resolution,
     )
     return SavedRun(stored.snapshot_id, report, settings, datetime.fromisoformat(metadata["began_at"]), report.full_data_at, datetime.fromisoformat(metadata["completed_at"]))

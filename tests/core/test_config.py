@@ -4,6 +4,15 @@ from pathlib import Path
 from dataclasses import replace
 
 import pytest
+
+
+@pytest.mark.parametrize("seconds", [0., -1., float("inf"), float("nan"), True])
+def test_calculation_deadline_rejects_invalid_values(seconds):
+    from dataclasses import replace
+    from solar_model.config import load_config, validate_config
+    config = load_config()
+    with pytest.raises(ValueError, match="calculation_timeout_seconds"):
+        validate_config(replace(config, energy_plan=replace(config.energy_plan, calculation_timeout_seconds=seconds)))
 import yaml
 
 from solar_model.config import load_config

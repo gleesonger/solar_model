@@ -316,29 +316,16 @@ def test_scalar_training_does_not_fall_back_when_selected_vintage_lacks_targets(
     assert _training_frames(forecasts, empty_actuals(), date(2026, 1, 4), ZoneInfo("UTC"), pd.Timestamp("2026-01-04T09:00Z")).empty
 
 
-@pytest.mark.parametrize("restart", [False, True])
-@pytest.mark.parametrize("failure_position", [0, 1])
-def test_supervisor_partial_launch_cleans_up_children(monkeypatch, restart, failure_position):
-    import solar_model.runtime.supervisor as docker_start
-    first, second, partial = [Mock() for _ in range(3)]
-    for child in (first, second, partial):
-        child.poll.return_value = None
-    failure = OSError("launch failed")
-    launches = ([first, second] if restart else []) + ([partial] if failure_position else []) + [failure]
-    monkeypatch.setattr(docker_start.subprocess, "Popen", Mock(side_effect=launches))
-    monkeypatch.setattr(docker_start, "open_database", Mock())
-    monkeypatch.setattr(docker_start.signal, "signal", Mock())
-    monkeypatch.setattr(docker_start.Path, "exists", lambda _: True)
-    monkeypatch.setattr(docker_start.Path, "unlink", lambda *args, **kwargs: None)
+@pytest.mark.parametrize("failure_position", [0, 1, 2])
+def test_supervisor_partial_launch_cleans_up_children(monkeypatch, failure_position):
+    from solar_model.runtime import supervisor
+    children = [Mock() for _ in range(failure_position)]
+    launches = children + [OSError("launch failed")]
+    monkeypatch.setattr(supervisor, "OwnedProcess", Mock(side_effect=launches))
     with pytest.raises(OSError, match="launch failed"):
-        docker_start.main()
-    if failure_position:
-        partial.terminate.assert_called_once()
-        partial.wait.assert_called_once_with(timeout=10)
-    if restart:
-        for child in (first, second):
-            child.terminate.assert_called()
-            child.wait.assert_called()
+        supervisor.start_services({})
+    for child in children:
+        child.stop.assert_called_once()
 
 
 def test_model_sql_input_means_and_bounded_training_preserve_scalar_fit(database, monkeypatch):

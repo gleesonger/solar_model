@@ -23,7 +23,7 @@ solar_model/
     tabs/recent.py, analysis.py, plan.py, system_info.py, control.py
     components/charts.py, tables.py, chart_display.py, download_dialog.py, warnings.py
     assets/
-  runtime/supervisor.py, collector.py
+  runtime/supervisor.py, collector.py, planner.py, planning_worker.py, processes.py
   tools/plan_as_of.py, reports.py, evaluate_forecasts.py, evaluate_load.py,
         rebuild_forecasts.py, recalculate_economics.py
 ```
@@ -69,4 +69,4 @@ The experimental `planning.plan_optimisation_dynamic_programming` planner is inv
 
 The [DP code ownership map](../implementation/dynamic-programming.md#code-ownership-map) identifies stage orchestration, input assembly, search, period physics/scoring and reporting functions.
 
-Saved plan preparation lives in `planning/plan_report.py` and `services/plan_history.py`; `storage/plan_history.py` owns atomic persistence/retention. `dashboard/tabs/plan_history.py` browses saved reports and shares `components/plan_detail.py` with the live Plan tab. See [saved plans](../implementation/plan-history.md).
+Saved plan preparation lives in `planning/plan_report.py` and `services/plan_history.py`; `storage/plan_history.py` owns atomic persistence/retention. `dashboard/tabs/plan.py` browses current and saved reports in one screen using `components/plan_detail.py`. The independent `runtime/planner.py` owns the schedule; `runtime/planning_worker.py` owns bounded calculation processes and `runtime/processes.py` owns supervised process trees. See [saved plans](../implementation/plan-history.md).

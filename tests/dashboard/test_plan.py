@@ -572,8 +572,7 @@ def test_infeasible_refresh_reports_message_without_traceback(monkeypatch, caplo
     async def warm():
         pass
 
-    monkeypatch.setattr(plan.run, "cpu_bound", calculate)
-    monkeypatch.setattr(plan, "ensure_planning_worker", warm)
+    monkeypatch.setattr(plan, "demonstrate", calculate)
     monkeypatch.setattr(plan, "notify_error", notices.append)
     asyncio.run(tab.run_demonstration())
     assert notices == ["Unable to calculate plan: unable to find a feasible energy plan on the dynamic-programming grid"]

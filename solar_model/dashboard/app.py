@@ -11,7 +11,7 @@ from solar_model.dashboard.live import LivePowerCollector
 from solar_model.dashboard.snapshot import DashboardSnapshot, DashboardSnapshotStore
 from solar_model.logging_setup import LOGGER, configure_logging
 from solar_model.paths import package_path
-from solar_model.dashboard.planning_worker import ensure_planning_worker
+from solar_model.dashboard.planning_worker import stop_demonstrations
 from solar_model.dashboard.plan_store import PlanStore
 
 def main(config_path: str = "config.yaml") -> None:
@@ -42,11 +42,11 @@ def main(config_path: str = "config.yaml") -> None:
         # Load on demand and pause summaries when no browser is subscribed.
         background_tasks.create(snapshots.run_forever(), name="dashboard snapshot worker")
 
-    app.on_startup(ensure_planning_worker)
+    app.on_shutdown(stop_demonstrations)
     app.on_startup(start_snapshot_worker)
 
     async def start_plan_worker() -> None:
-        background_tasks.create(plans.run_forever(), name="background plan updates")
+        background_tasks.create(plans.run_forever(), name="saved plan updates")
 
     app.on_startup(start_plan_worker)
 

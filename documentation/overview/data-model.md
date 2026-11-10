@@ -16,7 +16,7 @@ For a consolidated comparison of units, signs, missing values, time attribution 
 | `forecast_house_load` | `target_day`, `forecast_time` | One fixed hourly house-load profile per configured-local date; generation timestamp and nullable household kWh |
 | `holiday_period` | integer `id` | Inclusive local-date ranges used by the separate holiday household-load model |
 | `sigenstor_devices` | integer `id` | Append-only valid device-value changes, with variable/name/value/unit and ISO UTC/local timestamps |
-| `plan_history` | snapshot ID, view, scenario | Versioned compressed JSON report sections for live plans and history; UTC completion microseconds and half-hour slots |
+| `plan_history` | snapshot ID, view, scenario | Versioned compressed JSON report sections for live plans and history; UTC completion microseconds and configurable retention slots |
 | `database_metadata` | `key` | Key/value storage including `database_version` and hourly-initialization completion |
 
 ## Units and time

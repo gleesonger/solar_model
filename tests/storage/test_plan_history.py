@@ -7,7 +7,7 @@ import pandas as pd
 import pytest
 from sqlalchemy import event, inspect
 
-from solar_model.config import load_config
+from solar_model.config import PlanHistoryConfig, load_config
 from solar_model.services.plan_history import payload_frame, persist_report, read_saved_run
 from solar_model.services.plan_history import frame_payload
 from solar_model.services.planning import PlanReport
@@ -50,7 +50,7 @@ def test_report_round_trip_keeps_nine_scenarios_precision_and_prepared_views(dat
     assert inspect(db.engine).has_table("plan_history")
 
 
-def test_submission_cleanup_keeps_recent_runs_slot_keepers_and_latest_after_downtime(database):
+def test_submission_cleanup_keeps_complete_slot_snapshots_and_latest_after_downtime(database):
     path, db = database
     start = datetime(2026, 10, 1, tzinfo=timezone.utc)
     sections = {("Compact", "med"): {"value": 1}, ("Advanced", "med"): {"value": 2}}
@@ -60,7 +60,7 @@ def test_submission_cleanup_keeps_recent_runs_slot_keepers_and_latest_after_down
     # Reads do not prune history even if the application has been stopped.
     assert len(list_plans(path)) == 2
     save_plan(path, start + timedelta(minutes=30), meta, sections)
-    assert load_plan(path, intermediate) is not None  # Exactly 30m boundary is retained.
+    assert load_plan(path, intermediate) is None
     next_id = save_plan(path, start + timedelta(minutes=40), meta, sections)
     assert load_plan(path, first) is not None
     assert load_plan(path, intermediate) is None
@@ -68,7 +68,7 @@ def test_submission_cleanup_keeps_recent_runs_slot_keepers_and_latest_after_down
     after_day = save_plan(path, start + timedelta(days=1, minutes=1), meta, sections)
     old = load_plan(path, first)
     assert ("Compact", "med") in old.sections
-    assert ("Advanced", "med") not in old.sections
+    assert ("Advanced", "med") in old.sections
     assert ("Advanced", "med") in load_plan(path, after_day).sections
     save_plan(path, start + timedelta(days=31), meta, sections)
     assert load_plan(path, first) is None
@@ -77,6 +77,21 @@ def test_submission_cleanup_keeps_recent_runs_slot_keepers_and_latest_after_down
     assert latest is not None
     # No timer or read path deletes even the now-old latest plan.
     assert load_plan(path, latest.snapshot_id) is not None
+
+
+def test_frequency_changes_rebucket_existing_history_and_period_controls_expiry(database):
+    path, db = database
+    start = datetime(2026, 10, 1, tzinfo=timezone.utc)
+    sections = {("Compact", "med"): {}, ("Advanced", "med"): {}}
+    first = save_plan(path, start, {"version": 1}, sections)
+    middle = save_plan(path, start + timedelta(minutes=30), {"version": 1}, sections)
+    policy = PlanHistoryConfig(retain_snapshots_frequency_mins=60, retain_snapshots_period_days=1)
+    latest = save_plan(path, start + timedelta(hours=1), {"version": 1}, sections, policy)
+    assert load_plan(path, first) is not None
+    assert load_plan(path, middle) is None
+    assert ("Advanced", "med") in load_plan(path, latest).sections
+    save_plan(path, start + timedelta(days=2), {"version": 1}, sections, policy)
+    assert load_plan(path, latest) is None and load_plan(path, first) is None
 
 
 def test_slot_selection_uses_utc_across_repeated_local_hour(database):

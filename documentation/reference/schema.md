@@ -279,9 +279,11 @@ Primary key: `(snapshot_id, view, scenario)`. Indexes: `idx_plan_history_time(sa
 | `view` | TEXT | metadata, Compact, Advanced, or optional Expected |
 | `scenario` | TEXT | Scenario name; empty for metadata |
 | `saved_at` | INTEGER | Completion UTC epoch microseconds |
-| `slot` | INTEGER | UTC half-hour bucket derived from completion |
+| `slot` | INTEGER | UTC retention bucket derived from completion and the configured interval |
 | `payload` | BLOB | zlib-compressed UTF-8 JSON; full-precision floats and ISO UTC interval timestamps, format version 1 |
 
 All fields are non-null. Metadata retains settings, action, input/capacity information and visible boundaries. Only the latest retains actual chart observations. These payloads do not use measurement scaling. Current database version is `0.3.3`; see [saved-plan contracts](../implementation/plan-history.md).
 
 `database_metadata.planning_service_status` is JSON written by the independent planner: service/worker PIDs, UTC heartbeat/state, last error, last successful completion and saved-plan ID. It is operational status, separate from durable plan snapshots and source-reading timestamps. Plan metadata additionally retains original scenario summaries, first-action duration/PV export and initial battery levels; these are optional format-v1 fields for older reports.
+
+`database_metadata.plan_history_frequency_mins` records the interval used for saved-plan slots. Changing it re-buckets retained rows in the save transaction. Both report views use the configured common retention period; there is no separate Advanced expiration.

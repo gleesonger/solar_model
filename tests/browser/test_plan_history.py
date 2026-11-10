@@ -128,7 +128,7 @@ if __name__ == '__main__':
                     snapshot = page.get_by_role("combobox", name="Snapshot", exact=True)
                     snapshot.click()
                     page.get_by_role("option", name="12:00:00 GMT", exact=True).click()
-                    page.get_by_text("Advanced details have expired", exact=False).wait_for()
+                    page.get_by_test_id("plan-action").get_by_text("12:00", exact=False).wait_for()
                     assert page.get_by_test_id("plan-chart").evaluate("e => echarts.getInstanceByDom(e).getOption().legend[0].selected['Grid Export']") is False
                     caption = page.get_by_test_id("plan-action").inner_text()
                     # The service continues producing while this browser is pinned.
@@ -138,7 +138,7 @@ if __name__ == '__main__':
                         page.get_by_role("button", name="Download Excel", exact=True).click()
                     assert download.value.suggested_filename.endswith('.xlsx')
                     page.get_by_label("Plan date", exact=True).fill("")
-                    page.get_by_text("Advanced details have expired", exact=False).wait_for(state="hidden")
+                    page.get_by_test_id("plan-action").get_by_text("12:00", exact=False).wait_for(state="hidden")
                     page.get_by_role("button", name="Advanced", exact=True).click()
                     page.get_by_role("cell", name="0\u201324h", exact=True).wait_for()
                     page.get_by_text("Waiting for the planning service", exact=False).wait_for(state="hidden")

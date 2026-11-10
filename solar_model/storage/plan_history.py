@@ -10,6 +10,7 @@ import zlib
 
 from sqlalchemy import inspect, select
 
+from solar_model.config import PlanHistoryConfig
 from solar_model.storage.connection import create_engine_for_database
 from solar_model.storage.schema import DatabaseMetadata, PlanHistory
 
@@ -49,10 +50,11 @@ def decode(value: bytes) -> dict[str, Any]:
     return json.loads(zlib.decompress(value))
 
 
-def save_plan(database_path: str, saved_at: datetime, metadata: dict[str, Any], sections: dict[tuple[str, str], dict[str, Any]]) -> str:
+def save_plan(database_path: str, saved_at: datetime, metadata: dict[str, Any], sections: dict[tuple[str, str], dict[str, Any]], retention: PlanHistoryConfig = PlanHistoryConfig()) -> str:
     """Commit all sections and retention together; callers publish only this ID."""
     stamp = int(saved_at.timestamp() * 1_000_000)
-    slot = stamp // 1_800_000_000
+    frequency = retention.retain_snapshots_frequency_mins * 60_000_000
+    slot = stamp // frequency
     snapshot_id = uuid4().hex
     table = PlanHistory.__table__
     records = {("metadata", ""): metadata, **sections}
@@ -61,16 +63,21 @@ def save_plan(database_path: str, saved_at: datetime, metadata: dict[str, Any], 
     with engine.begin() as connection:
         connection.exec_driver_sql("BEGIN IMMEDIATE")
         connection.execute(table.insert(), rows)
-        # Pick the first successful run in each UTC half-hour before deleting.
+        # Re-bucket old rows when settings change, including pre-config snapshots.
+        key = "plan_history_frequency_mins"
+        previous_frequency = connection.scalar(select(DatabaseMetadata.value).where(DatabaseMetadata.key == key))
+        if previous_frequency != str(retention.retain_snapshots_frequency_mins):
+            connection.exec_driver_sql("UPDATE plan_history SET slot = CAST(saved_at / ? AS INTEGER)", (frequency,))
+            connection.exec_driver_sql("INSERT INTO database_metadata (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value", (key, str(retention.retain_snapshots_frequency_mins)))
+        # Pick the first successful run in each configured UTC slot before deleting.
         # Rank in SQL so cleanup does not fetch the full retained history.
         connection.exec_driver_sql(
             "DELETE FROM plan_history WHERE snapshot_id <> ? AND ("
-            "saved_at < ? OR (view IN ('Advanced', 'Expected') AND saved_at < ?) OR "
-            "(saved_at < ? AND snapshot_id NOT IN ("
+            "saved_at < ? OR snapshot_id NOT IN ("
             "SELECT snapshot_id FROM (SELECT snapshot_id, "
             "ROW_NUMBER() OVER (PARTITION BY slot ORDER BY saved_at, snapshot_id) AS position "
-            "FROM plan_history WHERE view = 'metadata') WHERE position = 1)))",
-            (snapshot_id, stamp - 30 * 86_400_000_000, stamp - 86_400_000_000, stamp - 1_800_000_000),
+            "FROM plan_history WHERE view = 'metadata') WHERE position = 1))",
+            (snapshot_id, stamp - retention.retain_snapshots_period_days * 86_400_000_000),
         )
         # Actual minute observations are needed only to restore the current chart.
         # Strip them from old metadata without keeping an extra report copy.

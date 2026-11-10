@@ -162,3 +162,14 @@ DP always considers Grid supply and Hold battery alongside self-consumption and 
 Solar export first is another always-considered DP candidate with no configuration key or forced rate. Its modelled overflow charging uses physical charge limits and the same soft Min/Max penalty; the mode-5 hardware overflow behaviour remains unverified.
 
 `energy_plan.calculation_timeout_seconds` defaults to 300 and must be finite and positive (booleans rejected). It bounds each scheduled or private demonstration calculation, including cold worker startup. Deadline failure reaps the worker; a later job creates a replacement. Scheduled timeout detection runs once per second. This is separate from the existing five-second performance-experiment limit.
+
+## Plan snapshot retention
+
+```yaml
+energy_plan:
+  history:
+    retain_snapshots_frequency_mins: 30
+    retain_snapshots_period_days: 30
+```
+
+Both fields default to 30 and require positive integers. Retain the first successful snapshot per configured UTC slot, with all scenarios and both views, for the configured elapsed days; always protect latest. Cleanup runs only within a successful save. Frequency changes re-bucket surviving snapshots, and cannot restore deleted data. These settings hot-reload with energy_plan and round-trip through the Plan settings editor. See [saved-plan retention](../implementation/plan-history.md#retention-on-successful-submission).

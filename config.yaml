@@ -142,6 +142,9 @@ forecast:
 energy_plan:
   plan_rerun_frequency_mins: 5
   calculation_timeout_seconds: 300
+  history:
+    retain_snapshots_frequency_mins: 30
+    retain_snapshots_period_days: 30
   num_projection_hours: 48
   num_visible_projection_hours: 24
 

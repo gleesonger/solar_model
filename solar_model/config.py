@@ -185,12 +185,19 @@ class OptimiserConfig:
 
 
 @dataclass(frozen=True)
+class PlanHistoryConfig:
+    retain_snapshots_frequency_mins: int = 30
+    retain_snapshots_period_days: int = 30
+
+
+@dataclass(frozen=True)
 class EnergyPlanConfig:
     num_projection_hours: int
     scenarios: ScenariosConfig
     plan_rerun_frequency_mins: float
     num_visible_projection_hours: int = 24
     calculation_timeout_seconds: float = 300.
+    history: PlanHistoryConfig = field(default_factory=PlanHistoryConfig)
     protection_preference: float = 50.
     minimum_battery_kwh: tuple[TariffRule, ...] = ()
     maximum_battery_kwh: tuple[TariffRule, ...] = ()
@@ -395,6 +402,7 @@ def energy_plan_yaml(settings: EnergyPlanConfig) -> str:
         "preferred_reserve_kwh": settings.preferred_reserve_kwh,
         "protection_preference": settings.protection_preference,
     }]
+    sections.append({"history": asdict(settings.history)})
     sections.append({"scenarios": {
         name: {level_name: {"multiplier": level.multiplier, "probability": level.probability} for level_name, level in dimension.items()}
         for name, dimension in (("solar", settings.scenarios.solar), ("house_load", settings.scenarios.house_load))
@@ -522,6 +530,10 @@ def validate_config(config: Config) -> None:
         raise ValueError("energy_plan.plan_rerun_frequency_mins must be finite and greater than zero")
     if isinstance(energy_plan.calculation_timeout_seconds, bool) or not math.isfinite(energy_plan.calculation_timeout_seconds) or energy_plan.calculation_timeout_seconds <= 0:
         raise ValueError("energy_plan.calculation_timeout_seconds must be finite and greater than zero")
+    for name in ("retain_snapshots_frequency_mins", "retain_snapshots_period_days"):
+        value = getattr(energy_plan.history, name)
+        if type(value) is not int or value <= 0:
+            raise ValueError(f"energy_plan.history.{name} must be a positive integer")
     if energy_plan.optimiser.model not in ("mix_integer_linear_prog", "dynamic_programming"):
         raise ValueError("energy_plan.optimiser.model must be mix_integer_linear_prog or dynamic_programming")
     dp = energy_plan.optimiser.dynamic_programming

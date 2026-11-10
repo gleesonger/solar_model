@@ -95,7 +95,7 @@ def persist_report(config: Config, report: PlanReport, began_at: datetime, compl
             sections[("Expected", name)] = frame_payload(value)
         elif value is not None:
             metadata[name] = value
-    return save_plan(config.database.path, completed_at, metadata, sections)
+    return save_plan(config.database.path, completed_at, metadata, sections, config.energy_plan.history)
 
 
 def generate_saved_plan(config: Config, began_at: datetime) -> str:

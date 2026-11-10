@@ -214,3 +214,5 @@ Next: [forecast correction](forecasting.md), [dashboard queries](dashboard-data.
 ## Plan history migration (0.3.3)
 
 `_migrate_plan_history()` creates the single `plan_history` table and publishes database version `0.3.3` under an immediate transaction. Existing `0.3.2` installations skip all telemetry/forecast rebuilds. Saves commit report sections and retention together. Reads do not migrate or prune. See the [schema and retention contract](plan-history.md).
+
+Plan retention uses `energy_plan.history.retain_snapshots_frequency_mins` and `retain_snapshots_period_days` (both default 30). Successful saves retain complete snapshots per configured UTC bucket, plus latest, and expire all sections together. Changing frequency re-buckets surviving rows atomically. See [retention](plan-history.md#retention-on-successful-submission).

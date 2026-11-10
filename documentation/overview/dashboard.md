@@ -66,7 +66,7 @@ Presentation formatting lives in `solar_model/dashboard/formatting.py`; query re
 
 [PlanStore](../../solar_model/dashboard/plan_store.py) is a server-wide cache/subscriber hub for plans committed by the headless planning service. It polls the latest saved ID and service status every second, loads changed reports once, and publishes browser updates. Startup restores the last saved result. The planning service separately detects electrical updates, applies the configured cadence, persists successful plans and runs submission-time retention. See [saved plans](../implementation/plan-history.md).
 
-Plan date and Snapshot selectors sit immediately right of Plan settings, initially blank. A historical selection stays pinned while new actual plans arrive; clearing a selector returns to latest. The existing action, summaries, scenario selectors, chart, tables and exports display the selected snapshot. Advanced expiry changes the retained forecast to Compact hourly resolution; exact saved summaries remain available.
+Plan date and Snapshot selectors sit immediately right of Plan settings, initially blank. A historical selection stays pinned while new actual plans arrive; clearing a selector returns to latest. The existing action, summaries, scenario selectors, chart, tables and exports display the selected snapshot. Both views remain available for the configured retention period; legacy Compact-only snapshots use their saved hourly resolution.
 
 Invalid externally edited configuration retains the last valid live planning settings and logs a warning once for that file revision. Automatic planning continues with those settings until a valid revision is saved.
 

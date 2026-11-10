@@ -1,5 +1,6 @@
 """Schedule forecast collection, calibrate raw snapshots and freeze daily load."""
 from __future__ import annotations
+from typing import TYPE_CHECKING
 
 from datetime import date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
@@ -16,8 +17,11 @@ from solar_model.planning.forecasts.solar import PANEL_IDS, _day_bounds, calcula
 from solar_model.storage.queries.forecasting import load_adjusted_snapshot, load_hourly_house_load, load_operational_inputs
 from solar_model.time_utils import timestamps, utc_now
 
+if TYPE_CHECKING:
+    from solar_model.storage.connection import SolarDatabase
 
-def _recalculate_energy(database, snapshot: pd.Timestamp, timezone: ZoneInfo) -> None:
+
+def _recalculate_energy(database: SolarDatabase, snapshot: pd.Timestamp, timezone: ZoneInfo) -> None:
     """Rebuild cumulative/day Wh from the currently stored adjusted watts."""
     frame = load_adjusted_snapshot(database, snapshot)
     if frame.empty:
@@ -45,7 +49,7 @@ def _recalculate_energy(database, snapshot: pd.Timestamp, timezone: ZoneInfo) ->
             output[target.isoformat()] = fields
     database.save_adjusted_forecasts(snapshot.isoformat(), output)
 
-def refresh_adjusted_forecast(database, as_of: datetime | str | pd.Timestamp, timezone_name: str = "Europe/Dublin", *, models: ForecastModelsConfig | None = None) -> int:
+def refresh_adjusted_forecast(database: SolarDatabase, as_of: datetime | str | pd.Timestamp, timezone_name: str = "Europe/Dublin", *, models: ForecastModelsConfig | None = None) -> int:
     """Write a fresh adjusted forecast to the current raw-collection snapshot.
 
     The calculation always starts from the official pre-midnight raw snapshot,
@@ -74,7 +78,7 @@ def refresh_adjusted_forecast(database, as_of: datetime | str | pd.Timestamp, ti
     _recalculate_energy(database, current_snapshot, timezone)
     return len(values)
 
-def refresh_daily_house_load_forecast(database, as_of: datetime | str | pd.Timestamp, timezone_name: str = "Europe/Dublin", *, models: ForecastModelsConfig | None = None, holiday_periods: list[tuple[str, str]] | None = None, replace_existing: bool = False, generated_at: str | None = None) -> int:
+def refresh_daily_house_load_forecast(database: SolarDatabase, as_of: datetime | str | pd.Timestamp, timezone_name: str = "Europe/Dublin", *, models: ForecastModelsConfig | None = None, holiday_periods: list[tuple[str, str]] | None = None, replace_existing: bool = False, generated_at: str | None = None) -> int:
     """Freeze today's profile once, using history strictly before local midnight."""
     timestamp = pd.Timestamp(as_of)
     if timestamp.tzinfo is None:
@@ -102,7 +106,7 @@ def refresh_daily_house_load_forecast(database, as_of: datetime | str | pd.Times
     return writer(day.isoformat(), generated_at or timestamp.isoformat(), rows)
 
 
-def backfill_daily_house_load_forecasts(database, start: date, end: date, timezone_name: str, *, models: ForecastModelsConfig | None = None) -> tuple[int, int]:
+def backfill_daily_house_load_forecasts(database: SolarDatabase, start: date, end: date, timezone_name: str, *, models: ForecastModelsConfig | None = None) -> tuple[int, int]:
     """Replace daily profiles in date order using only prior-day history."""
     if end < start:
         raise ValueError("End date must not precede start date")
@@ -119,7 +123,7 @@ def backfill_daily_house_load_forecasts(database, start: date, end: date, timezo
 
 
 @heavy_work("solar forecast collection update")
-def collect_once(session: requests.Session, database, arrays: tuple[SolarArrayConfig, ...], endpoint: str, timeout_seconds: float, timezone_name: str, interval_seconds: int, models: ForecastModelsConfig | None = None) -> None:
+def collect_once(session: requests.Session, database: SolarDatabase, arrays: tuple[SolarArrayConfig, ...], endpoint: str, timeout_seconds: float, timezone_name: str, interval_seconds: int, models: ForecastModelsConfig | None = None) -> None:
     now = utc_now()
     try:
         due, last_attempt = database.claim_forecast_collection(now, interval_seconds)

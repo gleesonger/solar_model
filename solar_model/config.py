@@ -8,6 +8,8 @@ import tempfile
 from dataclasses import asdict, dataclass, field, replace
 from datetime import date
 from pathlib import Path
+from collections.abc import Mapping, Sequence
+from typing import Any
 from urllib.parse import urlparse
 from zoneinfo import ZoneInfo
 
@@ -284,7 +286,7 @@ def load_config(path: str | Path = "config.yaml") -> Config:
     return config_from_mapping(raw_config, str(path))
 
 
-def config_from_mapping(raw_config: dict, source: str = "configuration", *, strict: bool = False) -> Config:
+def config_from_mapping(raw_config: dict[str, Any], source: str = "configuration", *, strict: bool = False) -> Config:
     """Normalise and validate a complete configuration mapping."""
     try:
         if isinstance(raw_config, dict) and "scenarios" in raw_config:
@@ -365,18 +367,18 @@ def config_from_mapping(raw_config: dict, source: str = "configuration", *, stri
 class EnergyPlanYamlDumper(yaml.SafeDumper):
     """Use the compact list/map layout of the hand-written configuration."""
 
-    def increase_indent(self, flow=False, indentless=False):
+    def increase_indent(self, flow: bool = False, indentless: bool = False) -> None:
         return super().increase_indent(flow, False)
 
-    def represent_sequence(self, tag, sequence, flow_style=None):
+    def represent_sequence(self, tag: str, sequence: Sequence[Any], flow_style: bool | None = None) -> yaml.SequenceNode:
         inline = all(not isinstance(value, (dict, list, tuple)) for value in sequence)
         return super().represent_sequence(tag, sequence, flow_style=inline)
 
-    def represent_mapping(self, tag, mapping, flow_style=None):
+    def represent_mapping(self, tag: str, mapping: Mapping[Any, Any], flow_style: bool | None = None) -> yaml.MappingNode:
         inline = set(mapping) in ({"multiplier", "probability"}, {"grid_step_percent", "power_divisions", "band_percent"})
         return super().represent_mapping(tag, mapping, flow_style=inline)
 
-    def represent_scalar(self, tag, value, style=None):
+    def represent_scalar(self, tag: str, value: str, style: str | None = None) -> yaml.ScalarNode:
         if tag == "tag:yaml.org,2002:str" and re.fullmatch(r"[0-9]{2}:[0-9]{2}", value):
             style = '"'
         return super().represent_scalar(tag, value, style)
@@ -433,17 +435,17 @@ def collapse_projection_resolutions(resolutions: tuple[int, ...]) -> list[int | 
     return [f"{minutes}*{count}" if count > 1 else minutes for minutes, count in runs]
 
 
-def collapse_scheduled_rules(rules: tuple[TariffRule, ...]) -> list[dict]:
+def collapse_scheduled_rules(rules: tuple[TariffRule, ...]) -> list[dict[str, Any]]:
     """Combine matching schedules across weekdays without changing time windows."""
-    grouped = {}
+    grouped: dict[tuple[str, str, float, str | None], set[str]] = {}
     for rule in rules:
         key = (rule.start_time, rule.end_time, rule.rate, rule.name)
         if key not in grouped:
             grouped[key] = set()
         grouped[key].update(rule.days)
-    result = []
+    result: list[dict[str, Any]] = []
     for (start, end, rate, name), days in grouped.items():
-        entry = {"days": [day for day in WEEKDAYS if day in days]}
+        entry: dict[str, Any] = {"days": [day for day in WEEKDAYS if day in days]}
         if name is not None:
             entry["name"] = name
         entry.update(start_time=start, end_time=end, rate=rate)

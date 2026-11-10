@@ -7,9 +7,10 @@ from enum import StrEnum
 from html import escape
 import json
 from zoneinfo import ZoneInfo
-from typing import Literal
+from typing import Any, Literal
 
 from nicegui import run, ui
+from nicegui.events import ValueChangeEventArguments
 from nicegui.run import SubprocessException
 import pandas as pd
 
@@ -143,7 +144,7 @@ def detail_column(name: str) -> PlanColumn:
                       Aggregation.QUANTITY if name.endswith("_kwh") else Aggregation.SETTING, False, True)
 
 
-def detail_columns(frame: pd.DataFrame, compact: bool) -> list[dict]:
+def detail_columns(frame: pd.DataFrame, compact: bool) -> list[dict[str, Any]]:
     """Build table/export headers from the shared definitions."""
     available = {"t", "plan_action", *frame.columns}
     definitions = [column for column in PLAN_COLUMNS.values() if column.name in available]
@@ -219,7 +220,7 @@ def detail_frame(frame: pd.DataFrame, capacity: float | None) -> pd.DataFrame:
     return frame
 
 
-def detail_rows(frame: pd.DataFrame, timezone_name: str, first_mode: OperatingMode | NextAction | None = None, *, time_format: str = "%H:%M") -> list[dict]:
+def detail_rows(frame: pd.DataFrame, timezone_name: str, first_mode: OperatingMode | NextAction | None = None, *, time_format: str = "%H:%M") -> list[dict[str, Any]]:
     """Keep numeric cells and format local times for the table or Excel export."""
     display = frame.copy()
     if "plan_action" not in display:
@@ -300,9 +301,9 @@ def next_action_description(action: NextAction, solar_export_kwh: float, capacit
     return action.mode.label
 
 
-def detail_totals(frame: pd.DataFrame) -> dict:
+def detail_totals(frame: pd.DataFrame) -> dict[str, str | float | None]:
     """Sum interval energy/costs; leave state levels, limits and rates blank."""
-    totals = {column: None for column in frame.columns}
+    totals: dict[str, str | float | None] = {column: None for column in frame.columns}
     for column in frame.columns:
         aggregation = detail_column(column).aggregation
         if aggregation == Aggregation.START_TIME:
@@ -313,13 +314,13 @@ def detail_totals(frame: pd.DataFrame) -> dict:
     return totals
 
 
-def advanced_detail_totals(frame: pd.DataFrame) -> list[dict]:
+def advanced_detail_totals(frame: pd.DataFrame) -> list[dict[str, str | float | None]]:
     """Summarise elapsed hours 0–24, the remaining horizon and the full plan."""
     starts = pd.to_datetime(frame.starts_at, utc=True)
     ends = pd.to_datetime(frame.ends_at, utc=True)
     boundary = starts.iloc[0] + pd.Timedelta(hours=24)
 
-    def subtotal(begin: pd.Timestamp, end: pd.Timestamp, label: str) -> dict:
+    def subtotal(begin: pd.Timestamp, end: pd.Timestamp, label: str) -> dict[str, str | float | None]:
         overlap = pd.Series([max(0., (min(stop, end) - max(start, begin)).total_seconds()) for start, stop in zip(starts, ends)], index=frame.index)
         fraction = overlap / (ends - starts).dt.total_seconds()
         subset = frame.loc[fraction > 0].copy()
@@ -398,7 +399,7 @@ def detail_decimal_places(column: str) -> int | None:
     return detail_column(column).decimals
 
 
-def plan_chart_options(frame: pd.DataFrame, actuals: pd.DataFrame, timezone_name: str) -> dict:
+def plan_chart_options(frame: pd.DataFrame, actuals: pd.DataFrame, timezone_name: str) -> dict[str, Any]:
     """One legend entry per metric, with solid actuals and dashed scenario forecasts."""
     series = []
     hours = (pd.to_datetime(frame.ends_at) - pd.to_datetime(frame.starts_at)).dt.total_seconds() / 3600
@@ -708,7 +709,7 @@ class PlanTab:
                         ui.label(value).classes("text-sm font-semibold")
         self._render_detail()
 
-    def _detail_view_changed(self, event) -> None:
+    def _detail_view_changed(self, event: ValueChangeEventArguments) -> None:
         self.detail_view = event.value
         self._render_scenario()
 
@@ -750,7 +751,7 @@ class PlanTab:
             mark_final_total_row(table).classes("plan-detail-table")
             ui.element("div").classes("h-16")
 
-    def _download_detail(self, frame: pd.DataFrame, columns: list[dict]) -> None:
+    def _download_detail(self, frame: pd.DataFrame, columns: list[dict[str, Any]]) -> None:
         try:
             columns = [column for column in columns if detail_column(column["name"]).export]
             rows = detail_rows(frame, self.config.timezone, self.result.next_action.mode, time_format="%Y-%m-%d %H:%M:%S")

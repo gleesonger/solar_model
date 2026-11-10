@@ -1,4 +1,5 @@
 from __future__ import annotations
+from typing import TYPE_CHECKING
 from pymodbus.client import ModbusTcpClient
 from solar_model.config import TariffsConfig
 from solar_model.logging_setup import LOGGER, heavy_work
@@ -6,10 +7,13 @@ from solar_model.time_utils import timestamps
 from solar_model.integrations.sigenstor.registers import RegisterBlock
 from solar_model.integrations.sigenstor.client import read_registers
 
+if TYPE_CHECKING:
+    from solar_model.storage.connection import SolarDatabase
+
 @heavy_work("full Modbus data collection update")
 def collect_once(
     client: ModbusTcpClient,
-    database,
+    database: SolarDatabase,
     registers: list[RegisterBlock],
     previous: dict[str, float],
     timezone_name: str,

@@ -84,7 +84,7 @@ def _today_residual(issued: pd.DataFrame, distributions: dict[int, tuple[float, 
     effective = float(weights.sum() ** 2 / np.square(weights).sum())
     return float(np.average(scores, weights=weights)), effective / (effective + prior_strength), len(scores)
 
-def _official_day_frame(forecasts: pd.DataFrame, actuals: pd.DataFrame, day, timezone: ZoneInfo) -> tuple[pd.Timestamp, pd.DataFrame] | None:
+def _official_day_frame(forecasts: pd.DataFrame, actuals: pd.DataFrame, day: date, timezone: ZoneInfo) -> tuple[pd.Timestamp, pd.DataFrame] | None:
     start, end = _day_bounds(day, timezone)
     available = forecasts[forecasts.snapshot <= start]
     if available.empty:
@@ -100,7 +100,7 @@ def _official_day_frame(forecasts: pd.DataFrame, actuals: pd.DataFrame, day, tim
     frame = frame.merge(actuals, on="target_hour", how="left")
     return snapshot, frame
 
-def _training_frames(forecasts: pd.DataFrame, actuals: pd.DataFrame, day, timezone: ZoneInfo, as_of: pd.Timestamp, settings: ForecastModelConfig | None = None) -> pd.DataFrame:
+def _training_frames(forecasts: pd.DataFrame, actuals: pd.DataFrame, day: date, timezone: ZoneInfo, as_of: pd.Timestamp, settings: ForecastModelConfig | None = None) -> pd.DataFrame:
     """Select official vintages only within the scalar lookback, before merging."""
     settings = settings or ForecastModelsConfig().solar_day_ahead
     start, _ = _day_bounds(day, timezone)
@@ -125,7 +125,7 @@ def _training_frames(forecasts: pd.DataFrame, actuals: pd.DataFrame, day, timezo
     candidates = candidates[candidates.snapshot == local_days.map(selected)]
     return candidates.sort_values("target", kind="stable").merge(actuals, on="target_hour", how="left")
 
-def _prediction_fields(frame: pd.DataFrame, scalars, distributions, residual: float, strength: float) -> dict[int, dict[str, float]]:
+def _prediction_fields(frame: pd.DataFrame, scalars: np.ndarray, distributions: dict[int, tuple[float, float]], residual: float, strength: float) -> dict[int, dict[str, float]]:
     values: dict[int, dict[str, float]] = {}
     for row in frame.itertuples():
         raw_watts = {panel: float(getattr(row, f"raw_{panel}_kw", 0) or 0) * 1_000 for panel in PANEL_IDS}
@@ -203,7 +203,7 @@ def calculate_adjusted_forecast(
 def add_adjusted_energy_values(
     forecasts: pd.DataFrame,
     snapshot: pd.Timestamp,
-    local_day,
+    local_day: date,
     timezone: ZoneInfo,
     watt_updates: dict[str, dict[str, float]],
 ) -> dict[str, dict[str, float]]:

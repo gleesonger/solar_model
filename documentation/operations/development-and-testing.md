@@ -19,6 +19,12 @@ python -m venv .venv
 - Existing databases, CSV, Excel, pickle outputs, caches, and virtual environments are ignored by Git. Avoid treating these local artifacts as source.
 - `pyproject.toml` defines the installable package, console scripts, package data and optional `test`, `browser`, `research`, `numba` dependencies. No CI or formatter/type-checker configuration is configured.
 
+## Type annotations
+
+Application functions under `solar_model/` annotate parameters (apart from implicit `self`/`cls`) and return values, including nested callbacks and numerical helpers. Use concrete domain records, NiceGUI event types and SQLAlchemy query/result types where available. Parameterise collections and annotate non-obvious state rather than repeating types that assignments already make clear. `Any` remains appropriate for dynamic YAML/JSON values, UI table metadata, database driver parameters and forwarded solver arguments. Database references that would create import cycles and heavy benchmark dependencies use `TYPE_CHECKING` imports; Numba compilation stays lazy and Python annotations do not specify Numba signatures. There is no configured static type checker; annotations alone do not establish type-checker compliance.
+
+For annotation-only edits, compare parsed syntax trees with annotations/imports excluded and run focused import or regression checks for framework integration. Avoid model simulations or performance benchmarks unless requested.
+
 ## Package verification
 
 For an explicitly requested DP performance comparison, use `python -m solar_model.tools.benchmark_planning --model dp --grid production --cases baseline --dp-backend numba --cap-seconds 120 --output dp-numba.json`, then select `--dp-backend python` for the counterpart. There is no warm-up. Each fresh worker times the first real call, including lazy Numba import/cache loading/compilation, all configured stages and report creation. JSON marks `numba_initialisation_in_timing`. The earlier [performance comparison](../reviews/dp-numba-performance.md) excluded warm-up and is historical.

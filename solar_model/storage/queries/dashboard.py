@@ -7,11 +7,11 @@ from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta, tzinfo
 from math import ceil, floor
 from time import perf_counter
-from typing import Any, cast
+from typing import Any, TypeVar, cast
 from zoneinfo import ZoneInfo
 
 import pandas as pd
-from sqlalchemy import func, or_, select
+from sqlalchemy import Select, func, or_, select
 from sqlalchemy.orm import Session
 
 from solar_model.logging_setup import LOGGER, heavy_work
@@ -32,6 +32,7 @@ from solar_model.storage.queries.types import (
 from solar_model.storage.queries.analysis import ChartRequest
 
 ForecastWattHoursReader = Callable[[ForecastSolarSample], float | None]
+ChartRow = TypeVar("ChartRow")
 
 PV_STRING_POWER_COLUMNS = {
     "pv1": "inverter_pv1_power_kw",
@@ -102,8 +103,11 @@ def _record_chart_step(timings: _CustomChartTimings | None, name: str, started_a
 
 
 def _load_chart_rows(
-    session: Session, statement, timings: _CustomChartTimings | None, name: str,
-) -> list[Any]:
+    session: Session,
+    statement: Select[tuple[ChartRow]],
+    timings: _CustomChartTimings | None,
+    name: str,
+) -> list[ChartRow]:
     started_at = perf_counter()
     result = session.scalars(statement)
     _record_chart_step(timings, f"{name}: execute SELECT and prepare ORM result", started_at)
@@ -117,7 +121,11 @@ def _load_chart_rows(
 
 
 def load_minute_samples(
-    session: Session, statement, purpose: str, *, timings: _CustomChartTimings | None = None,
+    session: Session,
+    statement: Select[tuple[SigenStorModbusSample]],
+    purpose: str,
+    *,
+    timings: _CustomChartTimings | None = None,
 ) -> list[SigenStorModbusSample]:
     """Execute a raw-minute query and log its returned-row count."""
     samples = _load_chart_rows(session, statement, timings, "Minute data")

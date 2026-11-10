@@ -96,7 +96,7 @@ class RecentTab:
     def refresh_recent_tab(self) -> None:
         self.apply_loaded_data(self._load_data())
 
-    def apply_loaded_data(self, loaded_data) -> None:
+    def apply_loaded_data(self, loaded_data: RecentData) -> None:
         day, full_updated_last_local, live_power, recent_daily, recent_monthly = loaded_data
         latest = self._live_table_values(live_power)
         self.warnings.update_full(full_updated_last_local)

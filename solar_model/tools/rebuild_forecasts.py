@@ -6,6 +6,7 @@ day hour by hour.  At each replay time only still-future target hours are
 overwritten, matching the live model's information boundary.
 """
 from __future__ import annotations
+from typing import TYPE_CHECKING
 
 import argparse
 from datetime import date, datetime, time, timedelta
@@ -20,6 +21,9 @@ from solar_model.planning.forecasts.solar import PANEL_IDS
 from solar_model.planning.forecasts.solar import add_adjusted_energy_values, calculate_adjusted_forecast
 from solar_model.storage.queries.forecasting import load_operational_inputs
 
+if TYPE_CHECKING:
+    from solar_model.storage.connection import SolarDatabase
+
 
 def _parse_date(value: str) -> date | None:
     if not value.strip():
@@ -30,7 +34,7 @@ def _parse_date(value: str) -> date | None:
         raise argparse.ArgumentTypeError("date must use YYYY-MM-DD") from error
 
 
-def _inferred_bounds(database, timezone: ZoneInfo) -> tuple[date, date]:
+def _inferred_bounds(database: SolarDatabase, timezone: ZoneInfo) -> tuple[date, date]:
     """Use the available forecast history and actuals when bounds are omitted."""
     with database.engine.connect() as connection:
         earliest_forecast, latest_actual = connection.exec_driver_sql(

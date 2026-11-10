@@ -9,9 +9,11 @@ import sys
 from calendar import monthrange
 from datetime import date, datetime
 from pathlib import Path
+from typing import Any
 from zoneinfo import ZoneInfo
 
 from nicegui import run, ui
+from nicegui.events import GenericEventArguments
 
 from solar_model.paths import subprocess_environment
 from solar_model.config import Config
@@ -81,7 +83,7 @@ def save_holidays(database_path: str, periods: list[tuple[str, str]]) -> list[tu
         database.close()
 
 
-def holiday_periods_from_rows(rows: list[dict]) -> list[tuple[str, str]]:
+def holiday_periods_from_rows(rows: list[dict[str, Any]]) -> list[tuple[str, str]]:
     """Convert edited rows to inclusive ranges, defaulting a missing date to one day."""
     def parse(value: str) -> date:
         day = date.fromisoformat(value)
@@ -155,7 +157,7 @@ class ControlTab:
             self.holiday_grid = grid
             save_lock = asyncio.Lock()
 
-            async def persist_holidays(rows_to_save: list[dict], focus_index: int | None = None) -> None:
+            async def persist_holidays(rows_to_save: list[dict[str, Any]], focus_index: int | None = None) -> None:
                 try:
                     periods = holiday_periods_from_rows(rows_to_save)
                     saved = await run.io_bound(save_holidays, self.config.database.path, periods)
@@ -171,7 +173,7 @@ class ControlTab:
                     index = min(focus_index, len(saved) - 1)
                     ui.timer(0.1, lambda: grid.run_grid_method("ensureIndexVisible", index, "bottom"), once=True)
 
-            async def autosave_holidays(_event) -> None:
+            async def autosave_holidays(_event: GenericEventArguments) -> None:
                 async with save_lock:
                     await persist_holidays(await grid.get_client_data(), _event.args.get("rowIndex"))
 

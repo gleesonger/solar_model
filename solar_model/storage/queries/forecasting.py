@@ -1,10 +1,15 @@
 from __future__ import annotations
+from typing import TYPE_CHECKING
 from datetime import date
 from zoneinfo import ZoneInfo
 import numpy as np
 import pandas as pd
 from pathlib import Path
 import sqlite3
+
+if TYPE_CHECKING:
+    from solar_model.storage.connection import SolarDatabase
+
 PANEL_IDS = (1, 2, 3, 4)
 SCALE = 10_000
 
@@ -42,7 +47,7 @@ def _load_inputs(database_path: str | Path) -> tuple[pd.DataFrame, pd.DataFrame]
     actuals["target_hour"] = pd.to_datetime(actuals["target_hour"], unit="s", utc=True)
     return forecasts, actuals
 
-def load_operational_inputs(database) -> tuple[pd.DataFrame, pd.DataFrame]:
+def load_operational_inputs(database: SolarDatabase) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Load immutable raw forecast and actual inputs for an operational run."""
     return _load_inputs(database.engine.url.database)
 
@@ -72,7 +77,7 @@ def load_hourly_house_load(database_path: str | Path, timezone: ZoneInfo, *, sta
     return frame[["timestamp", "day", "hour", "day_type", "load_kwh"]]
 
 
-def load_adjusted_snapshot(database, snapshot: pd.Timestamp) -> pd.DataFrame:
+def load_adjusted_snapshot(database: SolarDatabase, snapshot: pd.Timestamp) -> pd.DataFrame:
     """Read one saved snapshot in raw scaled units for the energy integration pass."""
     pooled = database.engine.raw_connection()
     try:

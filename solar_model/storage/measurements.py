@@ -6,7 +6,8 @@ from typing import Any, cast
 from zoneinfo import ZoneInfo
 from sqlalchemy import Integer, case, cast as sql_cast, func, inspect, literal, select
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
-from sqlalchemy.engine import Connection
+from sqlalchemy.engine import Connection, CursorResult
+from sqlalchemy.orm import Session
 from solar_model.config import TariffsConfig
 from solar_model.integrations.sigenstor.datasheets import SIGENSTOR_MODEL_SPECIFICATIONS
 from solar_model.tariffs import economic_period_values
@@ -128,7 +129,7 @@ class MeasurementStorage:
             )
 
     @staticmethod
-    def _add_hourly_sample(session, row: dict[str, Any]) -> None:
+    def _add_hourly_sample(session: Session, row: dict[str, Any]) -> None:
         """Atomically add one raw sample to its hourly/tariff aggregate."""
         timestamp = datetime.fromisoformat(cast(str, row["collected_at_utc"]))
         hour_start_utc = int(timestamp.timestamp()) // 3600 * 3600
@@ -237,7 +238,7 @@ class MeasurementStorage:
         self._insert_hourly_rollup(connection, start_epoch, end_epoch)
 
     @staticmethod
-    def _insert_hourly_rollup(connection, start_epoch: int | None = None, end_epoch: int | None = None):
+    def _insert_hourly_rollup(connection: Connection, start_epoch: int | None = None, end_epoch: int | None = None) -> CursorResult[Any]:
         """Insert hourly aggregates from source rows in an optional UTC range."""
         source = SigenStorModbusSample.__table__
         target = SigenStorHourlySample.__table__

@@ -6,6 +6,7 @@ from zoneinfo import ZoneInfo
 
 from nicegui import ui
 from nicegui.elements.column import Column
+from nicegui.events import ValueChangeEventArguments
 
 from solar_model.logging_setup import LOGGER
 from solar_model.config import Config
@@ -49,7 +50,7 @@ class DashboardLayout:
         LOGGER.info("Dashboard page UI loading")
         container.clear()
 
-        def tab_changed(event) -> None:
+        def tab_changed(event: ValueChangeEventArguments) -> None:
             self.state.active_tab = str(event.value)
             if self.state.active_tab == "Analysis" and self.elements.historical_charts is None:
                 with historical_panel:

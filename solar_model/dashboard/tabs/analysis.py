@@ -1,9 +1,15 @@
 from __future__ import annotations
 
 from datetime import date, datetime
+from collections.abc import Callable
+from typing import Any
 from zoneinfo import ZoneInfo
 
 from nicegui import run, ui
+from nicegui.elements.button import Button
+from nicegui.elements.column import Column
+from nicegui.elements.row import Row
+from nicegui.events import GenericEventArguments, ValueChangeEventArguments
 
 from solar_model.logging_setup import LOGGER
 from solar_model.config import Config
@@ -14,6 +20,7 @@ import solar_model.dashboard.components.charts as charts
 import solar_model.storage.queries.dashboard as data
 from solar_model.dashboard.components.download_dialog import show_download_data_dialog
 from solar_model.dashboard.state import DashboardElements, DashboardState
+from solar_model.storage.queries.types import AnalysisRangeData
 
 
 class AnalysisTab:
@@ -31,7 +38,7 @@ class AnalysisTab:
         self.mobile_controls_trigger = None
         self.mobile_controls_drawer = None
 
-    def render_historical_controls(self):
+    def render_historical_controls(self) -> Row | Column:
         self.desktop_controls = self._render_controls(compact=False)
         return self.desktop_controls
 
@@ -43,7 +50,7 @@ class AnalysisTab:
             self._render_controls(compact=True, after_action=drawer.hide)
         self.mobile_controls_drawer = drawer
 
-    def render_mobile_controls_trigger(self):
+    def render_mobile_controls_trigger(self) -> Button:
         self.mobile_controls_trigger = ui.button(icon="menu", on_click=self.mobile_controls_drawer.toggle).props("round flat dense").classes("analysis-mobile-controls-trigger")
         return self.mobile_controls_trigger
 
@@ -60,7 +67,7 @@ class AnalysisTab:
         if not visible and self.mobile_controls_drawer is not None:
             self.mobile_controls_drawer.hide()
 
-    def _render_controls(self, *, compact: bool, after_action=None):
+    def _render_controls(self, *, compact: bool, after_action: Callable[[], None] | None = None) -> Row | Column:
         classes = (
             "analysis-controls analysis-controls-mobile w-full gap-3"
             if compact
@@ -254,7 +261,7 @@ class AnalysisTab:
         preview_spinner = None
         refresh_button = None
         loading = False
-        preview_data: dict | None = None
+        preview_data: dict[str, Any] | None = None
         visible_metrics: set[str] = set()
         visible_splits: set[str] = set()
 
@@ -345,7 +352,7 @@ class AnalysisTab:
                                 value=metric in visible_metrics,
                             ).props("dense").classes("min-w-0")
 
-                        def metric_changed(event, *, selected_metric=metric) -> None:
+                        def metric_changed(event: ValueChangeEventArguments, *, selected_metric: str = metric) -> None:
                             if event.value:
                                 visible_metrics.add(selected_metric)
                             else:
@@ -363,7 +370,7 @@ class AnalysisTab:
                                 )
                                 checkbox = ui.checkbox(split, value=split in visible_splits).props("dense").classes("min-w-0")
 
-                            def split_changed(event, *, selected_split=split) -> None:
+                            def split_changed(event: ValueChangeEventArguments, *, selected_split: str = split) -> None:
                                 if event.value:
                                     visible_splits.add(selected_split)
                                 else:
@@ -453,7 +460,7 @@ class AnalysisTab:
             self._refresh_historical_time_zoom,
         )
 
-    def _update_historical_charts(self, analysis_data, *, refresh_battery: bool = True) -> None:
+    def _update_historical_charts(self, analysis_data: AnalysisRangeData, *, refresh_battery: bool = True) -> None:
         historical = analysis_data.energy
         power = analysis_data.power
         battery = analysis_data.battery
@@ -468,7 +475,7 @@ class AnalysisTab:
         chart_elements.array_energy.update(historical)
         chart_elements.money.update(charts.money_dataframe(historical))
 
-    def _load_historical_data(self):
+    def _load_historical_data(self) -> AnalysisRangeData:
         bounds = data.analysis_range_bounds(
             self.state.historical_as_of,
             self.state.historical_count,
@@ -486,7 +493,7 @@ class AnalysisTab:
             self.state.historical_aggregation.lower(),
         )
 
-    def _refresh_historical_time_zoom(self, event) -> None:
+    def _refresh_historical_time_zoom(self, event: GenericEventArguments) -> None:
         zoom_range = charts.data_zoom_range(event)
         if zoom_range is None or charts.zoom_ranges_match(
             zoom_range,

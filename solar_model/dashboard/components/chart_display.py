@@ -15,6 +15,7 @@ from nicegui import ui
 from solar_model.dashboard.components.tables import mark_final_total_row
 from solar_model.dashboard.components.warnings import notify_success
 from nicegui.elements.echart import EChart
+from nicegui.elements.table import Table
 
 
 class ChartDataDisplay:
@@ -127,7 +128,7 @@ class ChartDataDisplay:
     def _text(value: str | Callable[[], str]) -> str:
         return value() if callable(value) else value
 
-    def _render_table(self):
+    def _render_table(self) -> Table:
         with self.table_container:
             return mark_final_total_row(ui.table(
                 columns=self._table_columns(),

@@ -7,6 +7,7 @@ from typing import Any
 import pandas as pd
 from nicegui import ui
 from nicegui.elements.echart import EChart
+from nicegui.events import ValueChangeEventArguments
 
 from solar_model.config import SolarArrayConfig
 
@@ -335,7 +336,7 @@ def render_historical_charts(
             if column.startswith(IMPORT_COST_TARIFF_PREFIX)
         ]
 
-    async def toggle_import_view(event) -> None:
+    async def toggle_import_view(event: ValueChangeEventArguments) -> None:
         chart_options = await money_display.chart.run_chart_method("getOption")
         legend_options = chart_options.get("legend", []) if isinstance(chart_options, dict) else []
         if isinstance(legend_options, list) and legend_options and isinstance(legend_options[0], dict):

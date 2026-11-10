@@ -4,7 +4,9 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 from sqlalchemy import Column, Index, Integer, String, Table, Text, func
 from sqlalchemy.ext.hybrid import hybrid_property
+from sqlalchemy.engine import Dialect
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+from sqlalchemy.sql.elements import ColumnElement
 from sqlalchemy.types import TypeDecorator
 
 def column_name(metric: str, unit: str) -> str:
@@ -18,10 +20,10 @@ class ScaledInteger(TypeDecorator[float]):
     impl = Integer
     cache_ok = True
 
-    def process_bind_param(self, value: float | None, dialect) -> int | None:
+    def process_bind_param(self, value: float | None, dialect: Dialect) -> int | None:
         return None if value is None else round(value * 10_000)
 
-    def process_result_value(self, value: int | None, dialect) -> float | None:
+    def process_result_value(self, value: int | None, dialect: Dialect) -> float | None:
         return None if value is None else value / 10_000
 
 class EpochSeconds(TypeDecorator[str]):
@@ -30,7 +32,7 @@ class EpochSeconds(TypeDecorator[str]):
     impl = Integer
     cache_ok = True
 
-    def process_bind_param(self, value: str | datetime | int | None, dialect) -> int | None:
+    def process_bind_param(self, value: str | datetime | int | None, dialect: Dialect) -> int | None:
         if value is None:
             return None
         if isinstance(value, int):
@@ -40,7 +42,7 @@ class EpochSeconds(TypeDecorator[str]):
             timestamp = timestamp.replace(tzinfo=ZoneInfo("Europe/Dublin"))
         return round(timestamp.timestamp())
 
-    def process_result_value(self, value: int | None, dialect) -> str | None:
+    def process_result_value(self, value: int | None, dialect: Dialect) -> str | None:
         return None if value is None else datetime.fromtimestamp(value, ZoneInfo("UTC")).isoformat()
 
 Float = ScaledInteger
@@ -59,7 +61,7 @@ class SigenStorModbusSample(Base):
 
     @collected_at_local.expression
     @classmethod
-    def collected_at_local(cls):
+    def collected_at_local(cls) -> ColumnElement[str]:
         return func.strftime("%Y-%m-%dT%H:%M:%S", cls.collected_at_utc, "unixepoch", "localtime")
 
     plant_grid_power_kw: Mapped[float | None] = mapped_column(Float)
@@ -174,7 +176,7 @@ class ForecastSolarSample(Base):
 
     @collected_at_local.expression
     @classmethod
-    def collected_at_local(cls):
+    def collected_at_local(cls) -> ColumnElement[str]:
         return func.strftime("%Y-%m-%dT%H:%M:%S", cls.collected_at_utc, "unixepoch", "localtime")
 
     # ``raw`` is the Forecast.Solar response, exactly as collected.  The

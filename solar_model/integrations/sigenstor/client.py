@@ -1,8 +1,9 @@
 from __future__ import annotations
 from pymodbus.client import ModbusTcpClient
+from pymodbus.pdu import ModbusPDU
 from solar_model.integrations.sigenstor.registers import RegisterBlock, decode_registers, decode_string
 
-def read_block(client: ModbusTcpClient, kind: str, address: int, count: int, device_id: int):
+def read_block(client: ModbusTcpClient, kind: str, address: int, count: int, device_id: int) -> ModbusPDU:
     method = getattr(client, "read_holding_registers" if kind == "holding" else "read_input_registers")
     try:
         return method(address=address, count=count, **{"device_id": device_id})

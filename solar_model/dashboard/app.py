@@ -8,7 +8,7 @@ from solar_model.config import load_config
 from solar_model.storage.migrations import open_database
 from solar_model.dashboard.layout import DashboardLayout, render_dashboard_styles
 from solar_model.dashboard.live import LivePowerCollector
-from solar_model.dashboard.snapshot import DashboardSnapshotStore
+from solar_model.dashboard.snapshot import DashboardSnapshot, DashboardSnapshotStore
 from solar_model.logging_setup import LOGGER, configure_logging
 from solar_model.paths import package_path
 from solar_model.dashboard.planning_worker import ensure_planning_worker
@@ -77,7 +77,7 @@ def main(config_path: str = "config.yaml") -> None:
                 layout.render_dashboard_layout(container, snapshot)
         has_rendered_snapshot = snapshot is not None
 
-        def apply_snapshot(updated_snapshot) -> None:
+        def apply_snapshot(updated_snapshot: DashboardSnapshot) -> None:
             def update_client() -> None:
                 nonlocal has_rendered_snapshot
                 if has_rendered_snapshot:

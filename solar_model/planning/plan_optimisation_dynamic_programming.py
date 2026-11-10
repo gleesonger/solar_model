@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from contextlib import nullcontext
+from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
 from functools import lru_cache
 import math
@@ -353,7 +354,7 @@ def bounded_grids(grid: list[float], capacity: float, bounds: list[tuple[float, 
 
 
 @lru_cache(maxsize=1)
-def get_numba_functions():
+def get_numba_functions() -> tuple[Callable[..., list[list[float]]], Callable[..., list[Step] | None]]:
     """Import Numba locally and cache lazy compiled versions of the same functions."""
     try:
         from numba import njit

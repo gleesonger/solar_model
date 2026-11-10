@@ -12,6 +12,16 @@ import subprocess
 import traceback
 from pathlib import Path
 from time import perf_counter, process_time
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from datetime import datetime
+    from multiprocessing.connection import Connection
+    from multiprocessing.context import BaseContext
+
+    import cvxpy as cp
+
+    from solar_model.config import Config
 
 
 CASES = (
@@ -25,7 +35,7 @@ STEPS = [15, 10, 15, 15] + [15] * 20 + [60] * 18 + [5]
 CAP_SECONDS = 5.0
 
 
-def _worker(connection, case: str, config_path: str, grid: str = "historical", model: str = "lp", grid_step_percent: float | None = None, power_divisions: int | None = None, refine_band_percent: float | None = None, refinement_stages: list[tuple[float, int, float]] | None = None, dp_backend: str | None = None) -> None:
+def _worker(connection: Connection, case: str, config_path: str, grid: str = "historical", model: str = "lp", grid_step_percent: float | None = None, power_divisions: int | None = None, refine_band_percent: float | None = None, refinement_stages: list[tuple[float, int, float]] | None = None, dp_backend: str | None = None) -> None:
     if os.name != "nt":
         os.setsid()  # The deadline controller must also stop nested mode workers.
     # Heavy imports and synthetic inputs are prepared outside the timed budget.
@@ -106,7 +116,7 @@ def _worker(connection, case: str, config_path: str, grid: str = "historical", m
             battery_discharge_cut_off_soc_percent=10., battery_charge_cut_off_soc_percent=100.,
         )
 
-        def historical_intervals(cfg, when):
+        def historical_intervals(cfg: Config, when: datetime) -> list[tuple[datetime, datetime]]:
             intervals = []
             for minutes in STEPS:
                 end = when + timedelta(minutes=minutes)
@@ -123,13 +133,13 @@ def _worker(connection, case: str, config_path: str, grid: str = "historical", m
             periods += [(begin, end) for begin, end in configured if begin >= visible_end]
         steps = [(end - begin).total_seconds() / 60 for begin, end in periods if end <= visible_end]
 
-        def projection_intervals(cfg, when):
+        def projection_intervals(cfg: Config, when: datetime) -> list[tuple[datetime, datetime]]:
             return list(periods)
 
         metrics = {"dp_settings": asdict(config.energy_plan.optimiser.dynamic_programming) if model == "dp" else None, "build_seconds": None, "compile_seconds": None, "highs_solve_seconds": None}
         original_solve = cp.Problem.solve if model == "lp" else None
 
-        def timed_solve(problem, *args, **kwargs):
+        def timed_solve(problem: cp.Problem, *args: Any, **kwargs: Any) -> float:
             metrics["build_seconds"] = perf_counter() - begin
             kwargs["warm_start"] = False
             value = original_solve(problem, *args, **kwargs)
@@ -275,7 +285,7 @@ def _worker(connection, case: str, config_path: str, grid: str = "historical", m
         connection.close()
 
 
-def _run_case(context, case: str, config_path: str, grid: str = "historical", model: str = "lp", cap_seconds: float = CAP_SECONDS, grid_step_percent: float | None = None, power_divisions: int | None = None, refine_band_percent: float | None = None, refinement_stages: list[tuple[float, int, float]] | None = None, dp_backend: str | None = None) -> dict:
+def _run_case(context: BaseContext, case: str, config_path: str, grid: str = "historical", model: str = "lp", cap_seconds: float = CAP_SECONDS, grid_step_percent: float | None = None, power_divisions: int | None = None, refine_band_percent: float | None = None, refinement_stages: list[tuple[float, int, float]] | None = None, dp_backend: str | None = None) -> dict[str, Any]:
     parent, child = context.Pipe()
     process = context.Process(target=_worker, args=(child, case, config_path, grid, model, grid_step_percent, power_divisions, refine_band_percent, refinement_stages, dp_backend))
     process.start()

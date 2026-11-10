@@ -3,6 +3,7 @@ from datetime import date, datetime
 from typing import Any
 from sqlalchemy import or_, select
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+from sqlalchemy.sql.elements import BooleanClauseList
 from solar_model.config import SolarArrayConfig
 from solar_model.time_utils import utc_instant
 
@@ -38,7 +39,7 @@ class ForecastStorage:
                 ForecastHouseLoadSample.target_day == target_day,
             ).limit(1)) is not None
 
-    def save_daily_house_load_forecast(self, target_day: str, collected_at: str, values: list[dict]) -> int:
+    def save_daily_house_load_forecast(self, target_day: str, collected_at: str, values: list[dict[str, str | float | None]]) -> int:
         # Serialize the check and entire profile write. A restart/concurrent
         # collector must never overwrite or partially extend a frozen day.
         with self.engine.connect() as connection:
@@ -51,7 +52,7 @@ class ForecastStorage:
             connection.commit()
             return len(values)
 
-    def replace_daily_house_load_forecast(self, target_day: str, collected_at: str, values: list[dict]) -> int:
+    def replace_daily_house_load_forecast(self, target_day: str, collected_at: str, values: list[dict[str, str | float | None]]) -> int:
         """Replace one day's complete profile in a single write transaction."""
         with self.engine.begin() as connection:
             connection.exec_driver_sql("BEGIN IMMEDIATE")
@@ -83,7 +84,7 @@ class ForecastStorage:
     def save_forecast(
         self,
         array: SolarArrayConfig,
-        payload: dict,
+        payload: dict[str, Any],
         collected: tuple[str, str],
     ) -> int:
         result = payload.get("result", {})
@@ -120,7 +121,7 @@ class ForecastStorage:
         return rows
 
     @staticmethod
-    def _pending_adjusted_condition():
+    def _pending_adjusted_condition() -> BooleanClauseList:
         """Return rows with at least one raw panel still lacking adjustment."""
         return or_(*(
             getattr(ForecastSolarSample, f"panel_{panel_id}_raw_watts").is_not(None)

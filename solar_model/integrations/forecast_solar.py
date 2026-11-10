@@ -1,8 +1,9 @@
 from __future__ import annotations
+from typing import Any
 import requests
 from solar_model.config import SolarArrayConfig
 
-def fetch_array(session: requests.Session, array: SolarArrayConfig, endpoint: str, timeout_seconds: float) -> dict:
+def fetch_array(session: requests.Session, array: SolarArrayConfig, endpoint: str, timeout_seconds: float) -> dict[str, Any]:
     url = (
         f"{endpoint}/{array.latitude}/{array.longitude}/"
         f"{array.declination}/{array.azimuth}/{array.peak_kw}"

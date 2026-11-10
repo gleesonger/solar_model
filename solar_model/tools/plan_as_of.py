@@ -38,7 +38,8 @@ def main() -> None:
         Path(args.output).unlink(missing_ok=True)
         
         LOGGER.info("Loading planning inputs and solving scenarios")
-        plans = plan_as_of(database, config, as_of).results
+        simulation = plan_as_of(database, config, as_of)
+        plans = simulation.results
         for plan in plans.values():
             for column in ("starts_at", "ends_at"):
                 plan[column] = pd.to_datetime(plan[column], utc=True).dt.tz_convert(config.timezone)
@@ -48,7 +49,12 @@ def main() -> None:
                 raise ValueError("--output-timestep-min must be greater than zero")
             plans = {name: group_plan(plan, args.output_timestep_min) for name, plan in plans.items()}
             LOGGER.info("Grouped %d plans into %d-minute start-time buckets", len(plans), args.output_timestep_min)
-        write_workbook(plans, args.output, as_of)
+        expected = simulation.expected_results
+        if expected is not None:
+            expected = expected.copy()
+            for column in ("starts_at", "ends_at"):
+                expected[column] = pd.to_datetime(expected[column], utc=True).dt.tz_convert(config.timezone)
+        write_workbook(plans, args.output, as_of, expected=expected, expected_score=simulation.expected_score)
     finally:
         database.engine.dispose()
     LOGGER.info("Wrote %s", args.output)

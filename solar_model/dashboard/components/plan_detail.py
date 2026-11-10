@@ -38,7 +38,7 @@ def render_detail_table(frame: pd.DataFrame, timezone_name: str, mode: Operating
     return columns
 
 
-def detail_excel(frame: pd.DataFrame, timezone_name: str, mode: OperatingMode, view: str) -> bytes:
+def detail_excel(frame: pd.DataFrame, timezone_name: str, mode: OperatingMode, view: str, *, report_basis: str | None = None) -> bytes:
     columns = [column for column in detail_columns(frame, compact=view == "Compact") if detail_column(column["name"]).export]
     rows = detail_rows(frame, timezone_name, mode, time_format="%Y-%m-%d %H:%M:%S")
     hours = (frame.ends_at - frame.starts_at).dt.total_seconds() / 3600
@@ -46,4 +46,6 @@ def detail_excel(frame: pd.DataFrame, timezone_name: str, mode: OperatingMode, v
     footers = advanced_detail_totals(total_frame) if view == "Advanced" else [detail_totals(total_frame)]
     exported = pd.DataFrame([*rows, *footers]).reindex(columns=[column["name"] for column in columns])
     exported = exported.rename(columns={column["name"]: column["label"].replace("\n", " ") for column in columns})
+    if report_basis is not None:
+        exported["Report basis"] = report_basis
     return excel_bytes(exported, sheet_name="Plan detail")

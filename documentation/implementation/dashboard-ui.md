@@ -1,5 +1,7 @@
 # Dashboard live state, caching, and presentation
 
+`dashboard.tabs.plan.expected_plan_summary()` formats Markov expected visible cost and full-horizon score from dedicated result fields. Selected-scenario details remain stress paths, labelled in the summary and Excel export. Other models retain the existing presentation; see the [Markov consumer contract](markov-dynamic-programming.md#consumers).
+
 Sources: [solar_model/dashboard/app.py](../../solar_model/dashboard/app.py), [layout.py](../../solar_model/dashboard/layout.py), [snapshot.py](../../solar_model/dashboard/snapshot.py), [live.py](../../solar_model/dashboard/live.py), [recent.py](../../solar_model/dashboard/tabs/recent.py), [analysis.py](../../solar_model/dashboard/tabs/analysis.py), [state.py](../../solar_model/dashboard/state.py).
 
 Read [dashboard-data.md](dashboard-data.md) for database queries and dataset columns, and the [styling guide](../overview/styling.md) for visual conventions. This guide covers ownership and the final transformations into user-visible values.

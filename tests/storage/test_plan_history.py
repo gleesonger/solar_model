@@ -239,3 +239,28 @@ def test_upgrade_from_032_does_not_rebuild_existing_telemetry(database, monkeypa
 def test_timestamp_codec_preserves_mixed_fractional_and_clock_aligned_intervals():
     frame = pd.DataFrame({"starts_at": pd.to_datetime(["2026-11-10T10:05:12.123456Z", "2026-11-10T10:30:00Z"], format="ISO8601", utc=True)})
     pd.testing.assert_frame_equal(payload_frame(frame_payload(frame)), frame)
+
+
+def test_markov_expected_frames_survive_publication_separately_from_stress_cases(database):
+    path, db = database
+    config = load_config()
+    config = replace(config, database=replace(config.database, path=path))
+    result = sample_result()
+    expected = pd.DataFrame({"net_cost": [.123456789, -.2]})
+    result = replace(result, expected_score=1.23456789, expected_results=expected, expected_lookahead_results=expected.iloc[:0].copy())
+    stamp = datetime.now(timezone.utc)
+    report = PlanReport(result, pd.DataFrame(), 20., config.energy_plan.scenarios, 3., 50., 20., stamp)
+    snapshot_id = persist_report(config, report, stamp, stamp)
+    saved = read_saved_run(config, snapshot_id)
+    assert saved.report.simulation.expected_score == result.expected_score
+    pd.testing.assert_frame_equal(saved.report.simulation.expected_results, expected)
+    pd.testing.assert_frame_equal(saved.report.simulation.results["med"], result.results["med"])
+    assert load_plan(path, snapshot_id).metadata["expected_visible_net_cost"] == pytest.approx(-.076543211)
+    later = stamp + timedelta(days=2)
+    persist_report(config, report, later, later)
+    historical = read_saved_run(config, snapshot_id, True)
+    pd.testing.assert_frame_equal(historical.report.simulation.expected_results, expected)
+    assert historical.report.simulation.expected_score == result.expected_score
+    assert historical.report.expected_visible_net_cost == pytest.approx(-.076543211)
+    from solar_model.planning.plan_report import expected_plan_summary
+    assert "stress cases" in expected_plan_summary(historical.report.simulation, historical.report.expected_visible_net_cost)

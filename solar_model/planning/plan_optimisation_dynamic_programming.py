@@ -74,7 +74,7 @@ class Action(NamedTuple):
 
 
 def simulate_energy_plan(device_info: DeviceInfo, device_state: DeviceState, scenarios: list[ScenarioData], config: Config, projection_starts_at: datetime, *, grid_step_percent: float | None = None, power_divisions: int | None = None, battery_bounds: list[tuple[float, float]] | dict[str, list[tuple[float, float]]] | None = None) -> SimulationResult:
-    """Run configured coarse-to-fine DP; explicit resolution/bounds select one pass."""
+    """Run Markov full-range DP or the legacy independent-scenario refinements."""
     began_at = perf_counter()
     compilation_seconds = 0.
     try:
@@ -82,11 +82,13 @@ def simulate_energy_plan(device_info: DeviceInfo, device_state: DeviceState, sce
         if not settings.refinement_stages or settings.refinement_stages[0].band_percent is not None:
             raise ValueError("DP stages must begin with a full-range stage")
         initial_stage = settings.refinement_stages[0]
+        if settings.uncertainty_model == "markov" and battery_bounds is not None:
+            raise ValueError("Markov DP requires full-range battery grids; path-based battery_bounds are unsupported")
         single_pass = grid_step_percent is not None or power_divisions is not None or battery_bounds is not None
         if single_pass:
             stages = (DPRefinementConfig(initial_stage.grid_step_percent if grid_step_percent is None else grid_step_percent, initial_stage.power_divisions if power_divisions is None else power_divisions, None),)
         else:
-            stages = settings.refinement_stages
+            stages = (initial_stage,) if settings.uncertainty_model == "markov" else settings.refinement_stages
         LOGGER.info("DP Model Start - num_projection_hours=%d num_time_steps=%d refinement_stages=%d use_numba=%s", config.energy_plan.num_projection_hours, len(projection_intervals(config, projection_starts_at)), len(stages), settings.use_numba)
         if settings.use_numba:
             from numba.core.event import TimingListener, install_listener
@@ -129,7 +131,7 @@ def simulate_energy_plan(device_info: DeviceInfo, device_state: DeviceState, sce
 
 
 def solve_pass(device_info: DeviceInfo, device_state: DeviceState, scenarios: list[ScenarioData], config: Config, projection_starts_at: datetime, *, grid_step_percent: float = 2., power_divisions: int = 5, battery_bounds: list[tuple[float, float]] | dict[str, list[tuple[float, float]]] | None = None) -> SimulationResult:
-    """Compare shared first commands using independent scenario DP tables."""
+    """Prepare validated periods and dispatch the configured uncertainty calculation."""
     began_at = perf_counter()
     
     names = [s.name for s in scenarios]
@@ -201,6 +203,11 @@ def solve_pass(device_info: DeviceInfo, device_state: DeviceState, scenarios: li
         grid.update((min(capacity, max(0., period.minimum)), min(capacity, max(0., period.maximum))))
 
     grid = sorted(grid)
+    if config.energy_plan.optimiser.dynamic_programming.uncertainty_model == "markov":
+        if battery_bounds is not None:
+            raise ValueError("Markov DP requires full-range battery grids; path-based battery_bounds are unsupported")
+        from solar_model.planning.markov import solve_prepared
+        return solve_prepared(device_info, capacity, initial, scenarios, scenario_periods, grid, config, power_divisions, terminal_credit_rate, num_visible_periods)
     if isinstance(battery_bounds, dict) and set(battery_bounds) != set(names):
         raise ValueError("battery bounds must cover exactly the supplied scenario names")
     scenario_grids = []
@@ -289,7 +296,9 @@ def solve_pass(device_info: DeviceInfo, device_state: DeviceState, scenarios: li
 
 
 def result_score(result: SimulationResult, scenarios: list[ScenarioData]) -> float:
-    """Realised full-horizon score with normalised scenario probabilities."""
+    """Markov expectation, or the legacy probability-weighted realised score."""
+    if result.expected_score is not None:
+        return result.expected_score
     return float(sum(s.probability * (result.results[s.name].total_score.sum() + result.lookahead_results[s.name].total_score.sum()) for s in scenarios) / sum(s.probability for s in scenarios))
 
 

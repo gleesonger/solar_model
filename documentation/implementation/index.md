@@ -16,6 +16,7 @@ For a concrete change across these stages, follow [adding a metric](adding-a-met
 | Dashboard queries | [Dashboard data processing](dashboard-data.md) | Which DB fields are loaded, how are datasets transformed, and what do returned frames contain? |
 | Live/UI consumers | [Dashboard state and presentation](dashboard-ui.md) | How do cached/live data become browser tables, charts, exports, and warnings? |
 | Optimisation | [Planning inputs and results](planning.md) | How do stored observations become interval forecasts, solver variables, and workbook rows? |
+| Stochastic optimisation | [Markov dynamic programming](markov-dynamic-programming.md) | How do uncertain solar/load transitions affect command selection and expected reports? |
 | Offline tools | [Maintenance and research](maintenance-research.md) | What do recalculation, replay, evaluation, model training, and tariff experiments consume/produce? |
 
 ## End-to-end map

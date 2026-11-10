@@ -59,6 +59,7 @@ class PlanReport:
     full_resolution: bool = True
     model: str | None = None
     timezone_name: str | None = None
+    expected_visible_net_cost: float | None = None
 
 
 def latest_full_update(database_path: str) -> datetime | None:

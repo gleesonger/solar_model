@@ -29,6 +29,18 @@ def sample_result():
     return SimulationResult(action, {"med": frame, "low_high": frame.assign(net_cost=2.)})
 
 
+def test_markov_summary_uses_expected_fields_not_stress_weights():
+    from solar_model.dashboard.tabs.plan import expected_plan_summary
+    result = sample_result()
+    assert expected_plan_summary(result) == ""
+    expected = pd.DataFrame({"net_cost": [.1, .2]})
+    result = replace(result, expected_results=expected, expected_score=1.25)
+    text = expected_plan_summary(result)
+    assert "€0.300" in text
+    assert "1.250" in text
+    assert "stress cases" in text
+
+
 @pytest.mark.parametrize("model,adjustment", [("MILP", 75.), ("DP", 75.5), ("DP", 0.)])
 @pytest.mark.parametrize("solar,load", [("med", "med"), ("high", "low")])
 @pytest.mark.parametrize("view,abbreviation", [("Compact", "com"), ("Advanced", "adv")])

@@ -10,6 +10,27 @@ Every declared configuration field and containing block must be present in `conf
 
 Nullable values must be written as `null` (including unnamed export/planning rules), and intentionally empty collections as `[]` or `{}`. A nullable type does not make a key optional. Keep the shipped YAML as the complete example when updating a deployed file. New settings must be added explicitly; a newer application must never guess values for an older configuration. Archived energy-plan YAML is displayed unchanged without validation against the current configuration schema. Run Demonstration and Save To Disk validate the editor contents against the current schema and reject missing or obsolete settings; viewing a saved projection does not apply those settings to the running application. Hot reload rejects invalid edits while retaining the previously validated running configuration; it does not apply defaults.
 
+## DP uncertainty mode
+
+`energy_plan.optimiser.dynamic_programming.uncertainty_model` accepts `markov` or `independent_scenarios`. The shipped YAML explicitly selects `markov`; all three uncertainty/transition settings are required, including when selecting independent_scenarios. Unknown mode values are rejected.
+
+Markov uses the current scenario multipliers, requires positive medium multipliers and starts at medium/medium around existing forecasts. Existing scenario probabilities remain relevant to MILP and independent-scenario DP; they do not weight Markov outcomes. Solar and load transitions are independent and use the same configured matrix.
+
+`transition_matrix` and `transition_hours` live under `energy_plan.optimiser.dynamic_programming`, including in the Plan settings YAML editor:
+
+```yaml
+transition_hours: 3
+# Rows and columns: Low, Medium, High. Used for both solar and load.
+transition_matrix:
+  - [0.6, 0.3, 0.1]
+  - [0.2, 0.6, 0.2]
+  - [0.1, 0.3, 0.6]
+```
+
+These values are explicit examples; omitting them is rejected. Duration must be finite and positive. The matrix must be 3-by-3 with finite probabilities in [0,1] and each row summing to one within 1e-10. Identical rows, singular matrices and identity transitions are supported. For each source row, let q be its total off-diagonal probability. The actual interval's exit probability is `1 - (1 - q) ** (interval_hours / transition_hours)`, distributed between destinations in their original off-diagonal proportions; the diagonal is the probability of staying. See the [duration-conversion contract](../implementation/markov-dynamic-programming.md#transition-timing).
+
+Markov uses the first full-range `refinement_stages` entry for grid spacing and power divisions. Later path-based corridors are not run. `use_numba` and the full `projection_resolution_mins` array still apply. Explicit API resolution overrides work; explicit battery search corridors are rejected in this mode.
+
 ## Sections
 
 | Section | Purpose / shipped values |

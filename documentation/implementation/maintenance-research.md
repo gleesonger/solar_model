@@ -1,5 +1,7 @@
 # Maintenance jobs, evaluation, and research data pipelines
 
+The existing `benchmark_planning --model dp` audit explicitly selects `uncertainty_model: independent_scenarios` and records that choice, even when the supplied YAML selects Markov. Its fixed-path checks and refinement experiments are not a Markov benchmark. Markov correctness checks are targeted tests; see the [implementation guide](markov-dynamic-programming.md).
+
 These tools sit outside the managed collection/UI loop. Some mutate history; others only read SQLite and produce reports/artifacts. The [operations guide](../operations/runbook.md) contains invocation examples. This guide explains their function hierarchy and intermediate structures.
 
 ## No Solar Cost conversion

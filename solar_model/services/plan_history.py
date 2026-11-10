@@ -96,6 +96,8 @@ def persist_report(config: Config, report: PlanReport, began_at: datetime, compl
         value = getattr(report.simulation, name, None)
         if isinstance(value, pd.DataFrame):
             sections[("Expected", name)] = frame_payload(value)
+            if name == "expected_results":
+                metadata["expected_visible_net_cost"] = float(value.net_cost.sum())
         elif value is not None:
             metadata[name] = value
     return save_plan(config.database.path, completed_at, metadata, sections, config.energy_plan.history)
@@ -179,6 +181,7 @@ def restore_run(config: Config, stored: StoredPlan, historical: bool = False) ->
         full_resolution=full_resolution,
         model=metadata["model"],
         timezone_name=metadata["timezone"],
+        expected_visible_net_cost=metadata.get("expected_visible_net_cost"),
     )
     report.actuals = read_report_actuals(config, report)
     return SavedRun(stored.snapshot_id, report, settings, datetime.fromisoformat(metadata["began_at"]), report.full_data_at, datetime.fromisoformat(metadata["completed_at"]))

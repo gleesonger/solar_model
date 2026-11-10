@@ -15,6 +15,7 @@ from zoneinfo import ZoneInfo
 
 import yaml
 import dacite
+from solar_model.planning.markov_transitions import DEFAULT_TRANSITION_MATRIX, validate_transition_inputs
 
 @dataclass(frozen=True)
 class LoggingConfig:
@@ -162,6 +163,9 @@ class DPRefinementConfig:
 
 @dataclass(frozen=True)
 class DynamicProgrammingConfig:
+    uncertainty_model: str
+    transition_hours: float
+    transition_matrix: tuple[tuple[float, ...], ...]
     use_numba: bool
     projection_resolution_mins: tuple[int, ...]
     refinement_stages: tuple[DPRefinementConfig, ...]
@@ -436,6 +440,9 @@ def energy_plan_yaml(settings: EnergyPlanConfig) -> str:
         values = {"use_numba": model.use_numba} if name == "dynamic_programming" else {}
         values["projection_resolution_mins"] = collapse_projection_resolutions(model.projection_resolution_mins)
         if name == "dynamic_programming":
+            values["uncertainty_model"] = model.uncertainty_model
+            values["transition_hours"] = model.transition_hours
+            values["transition_matrix"] = [list(row) for row in model.transition_matrix]
             values["refinement_stages"] = [
                 {"grid_step_percent": stage.grid_step_percent, "power_divisions": stage.power_divisions, "band_percent": stage.band_percent}
                 for stage in model.refinement_stages
@@ -555,6 +562,11 @@ def validate_config(config: Config) -> None:
     dp = energy_plan.optimiser.dynamic_programming
     if type(dp.use_numba) is not bool:
         raise ValueError("dynamic_programming.use_numba must be a boolean")
+    if dp.uncertainty_model not in ("markov", "independent_scenarios"):
+        raise ValueError("dynamic_programming.uncertainty_model must be markov or independent_scenarios")
+    validate_transition_inputs(dp.transition_matrix, dp.transition_hours)
+    if dp.uncertainty_model == "markov" and (energy_plan.scenarios.solar.med.multiplier <= 0 or energy_plan.scenarios.house_load.med.multiplier <= 0):
+        raise ValueError("dynamic_programming markov requires positive medium multipliers")
     milp = energy_plan.optimiser.mix_integer_linear_prog
     if not dp.refinement_stages or dp.refinement_stages[0].band_percent is not None:
         raise ValueError("dynamic_programming.refinement_stages must start with a full-range stage using band_percent: null")

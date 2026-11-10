@@ -13,6 +13,9 @@ class SimulationResult:
     next_action: NextAction
     results: dict[str,pd.DataFrame]
     lookahead_results: dict[str, pd.DataFrame] = field(default_factory=dict)
+    expected_score: float | None = None
+    expected_results: pd.DataFrame | None = None
+    expected_lookahead_results: pd.DataFrame | None = None
 
 class NoFeasiblePlanError(ValueError):
     """The planner could not find a feasible plan on its search grid."""

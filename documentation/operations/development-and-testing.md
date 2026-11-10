@@ -15,6 +15,7 @@ python -m venv .venv
 - [requirements.txt](../../requirements.txt) contains runtime ranges rather than a lockfile. Pytest, Playwright and extraction's openpyxl are provided by package extras rather than the runtime list.
 - Planning explicitly requests HiGHS; `highspy` is a declared runtime dependency. Verify with `python -c "import cvxpy; print(cvxpy.installed_solvers())"`.
 - NumPy and Numba are explicit runtime dependencies in `requirements.txt`, also used by package installation through `pyproject.toml` and by the Docker build. DP defaults to Numba; normal installation now includes it. The existing `numba` extra remains supported for older installation commands. Set `energy_plan.optimiser.dynamic_programming.use_numba: false` for Python execution without importing Numba. The numerical functions share named tuples and ordinary/Numba typed lists; DP has no direct NumPy import.
+- Configured Markov transition scaling uses scalar arithmetic outside DP numerical loops. Targeted tests cover configuration/editor round trips, exit-probability scaling, invalid probability inputs, identical rows and identity transitions. It does not require SciPy matrix logarithms.
 - Browser tests require Playwright and Chromium: `python -m pip install playwright`, then `python -m playwright install chromium`. Tests skip if the dependency/browser is absent (they also try installed Chrome).
 - Existing databases, CSV, Excel, pickle outputs, caches, and virtual environments are ignored by Git. Avoid treating these local artifacts as source.
 - `pyproject.toml` defines the installable package, console scripts, package data and optional `test`, `browser`, `research`, `numba` dependencies. No CI or formatter/type-checker configuration is configured.
@@ -42,6 +43,7 @@ Use the [isolated development walkthrough](isolated-development.md) for syntheti
 | Tests | What they cover |
 | --- | --- |
 | [test_dynamic_programming.py](../../tests/planning/test_dynamic_programming.py) | Experimental DP physical transitions, command limits, small exhaustive-search equivalence, nine-scenario passive/forced first-command replay through MILP and audited probability-weighted shared-command selection |
+| [test_markov.py](../../tests/planning/test_markov.py) | Exit-probability scaling, expectation before command selection, exhaustive small-tree comparison, persistence, hard feasibility, cheap charging, Python/Numba parity, expected reporting and off-hour lookahead |
 | [test_next_action.py](../../tests/planning/test_next_action.py) | Shared commands, equipment saturation, command SOC bounds, rejection of unsafe passive/forced responses and export-safe rates across nine scenarios, including early SOC stops |
 | [test_forecast_model_config.py](../../tests/forecasting/test_forecast_model_config.py) | YAML model parsing/defaults/validation, lookback and half-life effects, and model settings passed through collection, refresh and CLI entry points |
 | [test_forecast_influence.py](../../tests/forecasting/test_forecast_influence.py) | Decimal-fraction load/intraday influence, sparse day-type fallback, 100% influence and invalid fractions and old percentage inputs |

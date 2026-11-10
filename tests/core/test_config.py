@@ -42,12 +42,12 @@ def test_legacy_flat_optimiser_settings_require_explicit_migration(tmp_path, nam
 
 def test_missing_dp_section_fails_and_custom_refinement_settings_load(tmp_path):
     raw = yaml.safe_load(Path("config.yaml").read_text(encoding="utf-8"))
-    raw["energy_plan"]["optimiser"].pop("dynamic_programming")
+    original_dp = raw["energy_plan"]["optimiser"].pop("dynamic_programming")
     path = tmp_path / "config.yaml"
     path.write_text(yaml.safe_dump(raw), encoding="utf-8")
     with pytest.raises(ValueError, match="energy_plan.optimiser.dynamic_programming"):
         load_config(path)
-    raw["energy_plan"]["optimiser"]["dynamic_programming"] = {"use_numba": False, "projection_resolution_mins": ["30*96"], "refinement_stages": [{"grid_step_percent": 4., "power_divisions": 3, "band_percent": None}, {"grid_step_percent": .5, "power_divisions": 20, "band_percent": 2.}]}
+    raw["energy_plan"]["optimiser"]["dynamic_programming"] = {**original_dp, "use_numba": False, "projection_resolution_mins": ["30*96"], "refinement_stages": [{"grid_step_percent": 4., "power_divisions": 3, "band_percent": None}, {"grid_step_percent": .5, "power_divisions": 20, "band_percent": 2.}]}
     path.write_text(yaml.safe_dump(raw), encoding="utf-8")
     settings = load_config(path).energy_plan.optimiser.dynamic_programming
     assert settings.use_numba is False
@@ -118,15 +118,15 @@ def test_scenario_levels_load_multiplier_and_probability(tmp_path):
     config = load_config(path)
     assert config.energy_plan.scenarios.solar.low.multiplier == .4
     assert config.energy_plan.scenarios.solar.low.probability == .1
-    assert config.energy_plan.scenarios.house_load.med.probability == .6
+    assert config.energy_plan.scenarios.house_load.med.probability == raw["energy_plan"]["scenarios"]["house_load"]["med"]["probability"]
 
 
 @pytest.mark.parametrize("dimension", ["solar", "house_load"])
 @pytest.mark.parametrize("total", [.97, .98, 1., 1.02, 1.03])
 def test_scenario_probabilities_within_three_percent_are_normalised(tmp_path, dimension, total):
     raw = yaml.safe_load(Path("config.yaml").read_text(encoding="utf-8"))
-    for entry in raw["energy_plan"]["scenarios"][dimension].values():
-        entry["probability"] *= total
+    for name, probability in zip(("low", "med", "high"), (.2, .6, .2)):
+        raw["energy_plan"]["scenarios"][dimension][name]["probability"] = probability * total
     path = tmp_path / "config.yaml"
     path.write_text(yaml.safe_dump(raw), encoding="utf-8")
     loaded = getattr(load_config(path).energy_plan.scenarios, dimension)

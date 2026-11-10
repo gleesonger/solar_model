@@ -61,6 +61,11 @@ def _worker(connection: Connection, case: str, config_path: str, grid: str = "hi
         )
 
         config = load_config(Path(config_path))
+        # This harness audits fixed-scenario rollouts and their weighted objective.
+        # Markov expectations have a different report contract; do not mislabel them.
+        if model == "dp":
+            settings = replace(config.energy_plan.optimiser.dynamic_programming, uncertainty_model="independent_scenarios")
+            config = replace(config, energy_plan=replace(config.energy_plan, optimiser=replace(config.energy_plan.optimiser, dynamic_programming=settings)))
         if model == "dp" and dp_backend is not None:
             settings = replace(config.energy_plan.optimiser.dynamic_programming, use_numba=dp_backend == "numba")
             config = replace(config, energy_plan=replace(config.energy_plan, optimiser=replace(config.energy_plan.optimiser, dynamic_programming=settings)))
@@ -137,6 +142,8 @@ def _worker(connection: Connection, case: str, config_path: str, grid: str = "hi
             return list(periods)
 
         metrics = {"dp_settings": asdict(config.energy_plan.optimiser.dynamic_programming) if model == "dp" else None, "build_seconds": None, "compile_seconds": None, "highs_solve_seconds": None}
+        if model == "dp":
+            metrics["uncertainty_model"] = "independent_scenarios"
         original_solve = cp.Problem.solve if model == "lp" else None
 
         def timed_solve(problem: cp.Problem, *args: Any, **kwargs: Any) -> float:

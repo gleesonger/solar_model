@@ -11,7 +11,7 @@ def group_plan(plan: pd.DataFrame, output_timestep_mins: int) -> pd.DataFrame:
         f"{output_timestep_mins}min", ambiguous=starts.map(lambda value: value.fold == 0).to_numpy(),
         nonexistent="shift_forward",
     )
-    sum_columns = {column for column in plan.columns if column.endswith("_kwh") or column in {"import_cost", "export_revenue", "net_cost"}}
+    sum_columns = {column for column in plan.columns if column.endswith(("_kwh", "_score")) or column in {"import_cost", "export_revenue", "net_cost"}}
     sum_columns -= {"minimum_battery_kwh", "maximum_battery_kwh", "battery_start_kwh", "battery_end_kwh", "limit_battery_export_rate_to_grid_kw"}
     rows = []
     for _, group in grouped_plan.groupby("_output_start", sort=True):
@@ -34,9 +34,13 @@ def group_plan(plan: pd.DataFrame, output_timestep_mins: int) -> pd.DataFrame:
         rows.append(row)
     return pd.DataFrame(rows, columns=plan.columns)
 
-def write_workbook(plans: dict[str, pd.DataFrame], output: Path, as_of: datetime) -> None:
+def write_workbook(plans: dict[str, pd.DataFrame], output: Path, as_of: datetime, *, expected: pd.DataFrame | None = None, expected_score: float | None = None) -> None:
     """Write one plan worksheet per scenario and a side-by-side summary."""
     summary = pd.DataFrame({name: {"As of": as_of.isoformat(), "Periods": len(plan), "Total import cost": plan["import_cost"].sum(), "Total export revenue": plan["export_revenue"].sum(), "Total net cost": plan["net_cost"].sum()} for name, plan in plans.items()}).rename_axis("item").reset_index()
+    if expected is not None:
+        summary.loc[len(summary)] = ["Report basis", *["Fixed-condition stress case" for _ in plans]]
+        summary.loc[len(summary)] = ["Expected visible net cost", *[float(expected.net_cost.sum()) for _ in plans]]
+        summary.loc[len(summary)] = ["Expected full-horizon score", *[expected_score for _ in plans]]
     with pd.ExcelWriter(output, engine="xlsxwriter", datetime_format="yyyy-mm-dd hh:mm") as writer:
         summary.to_excel(writer, sheet_name="Summary", index=False)
         workbook = writer.book
@@ -49,6 +53,11 @@ def write_workbook(plans: dict[str, pd.DataFrame], output: Path, as_of: datetime
         summary_sheet.set_row(0, None, workbook.add_format({"bold": True, "bg_color": "#D9EAF7"}))
         for row in range(3, 6):
             summary_sheet.set_row(row, None, money_format)
+        if expected is not None:
+            expected = expected.copy()
+            for column in ("starts_at", "ends_at"):
+                expected[column] = pd.to_datetime(expected[column]).dt.tz_localize(None)
+            expected.to_excel(writer, sheet_name="Expected visible", index=False)
         for name, plan in plans.items():
             plan = plan.copy()
             for column in ("starts_at", "ends_at"):

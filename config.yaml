@@ -179,6 +179,13 @@ energy_plan:
   
     dynamic_programming:
       use_numba: true
+      uncertainty_model: markov
+      transition_hours: 3
+      # Rows: from Low/Medium/High. Columns: to Low/Medium/High. Applies to solar and load.
+      transition_matrix:
+        - [0.6, 0.3, 0.1]
+        - [0.2, 0.6, 0.2]
+        - [0.1, 0.3, 0.6]
       projection_resolution_mins: [15*96, 60*24]
       refinement_stages:
         - {grid_step_percent: 2, power_divisions: 5, band_percent: null}

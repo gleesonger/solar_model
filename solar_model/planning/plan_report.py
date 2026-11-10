@@ -11,7 +11,7 @@ import pandas as pd
 from solar_model.config import ScenariosConfig
 from solar_model.planning.plan_optimisation_milp import battery_protection_score
 from solar_model.planning.scenarios import scenario_probabilities
-from solar_model.planning.types import NextAction, OperatingMode
+from solar_model.planning.types import NextAction, OperatingMode, SimulationResult
 from solar_model.utils import table_to_object_list
 
 class Aggregation(StrEnum):
@@ -163,6 +163,14 @@ def scenario_cost_summary(results: dict[str, pd.DataFrame], selected_scenario: s
     values = [(float(results[selected_scenario].net_cost.sum()), 3), (min(costs), 2), (max(costs), 2)]
     selected, minimum, maximum = [f"{'-' if value < 0 else ''}\u20ac{abs(value):.{precision}f}" for value, precision in values]
     return f"{selected} ({minimum} to {maximum})"
+
+
+def expected_plan_summary(result: SimulationResult, visible_cost: float | None = None) -> str:
+    if result.expected_score is None:
+        return ""
+    cost = float(result.expected_results.net_cost.sum()) if result.expected_results is not None else visible_cost
+    prefix = f"Expected visible net cost: \u20ac{cost:.3f}; " if cost is not None else ""
+    return f"{prefix}expected full-horizon score: {result.expected_score:.3f}. Scenario details are stress cases."
 
 
 def scenario_summary(frame: pd.DataFrame, reserve: float) -> dict[str, float]:

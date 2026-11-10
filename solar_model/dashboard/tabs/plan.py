@@ -31,6 +31,7 @@ from solar_model.planning.plan_report import (
     detail_columns,
     scenario_average_cost,
     scenario_cost_summary,
+    expected_plan_summary,
     scenario_summary,
     table_detail_frame,
     detail_frame,
@@ -487,9 +488,11 @@ class PlanTab:
         self.chart.run_chart_method("setOption", {"series": series}, {"replaceMerge": ["series"]})
         self.summary_output.clear()
         with self.summary_output:
+            if self.result.expected_score is not None:
+                ui.label(expected_plan_summary(self.result, self.report.expected_visible_net_cost)).classes("text-sm font-semibold")
             with ui.element("div").classes("grid w-full grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 rounded border"):
                 for label, value in (
-                    ("Net cost", cost_text),
+                    ("Stress-case net cost" if self.result.expected_score is not None else "Net cost", cost_text),
                     ("Solar / House Load", f"{summary['solar']:.2f} / {summary['load']:.2f} kWh"),
                     ("Grid import / export", f"{summary['import']:.2f} / {summary['export']:.2f} kWh"),
                     ("Minimum / ending battery", f"{summary['minimum']:.2f} / {summary['ending']:.2f} kWh"),
@@ -539,7 +542,8 @@ class PlanTab:
 
     def _download_detail(self, frame: pd.DataFrame, columns: list[dict[str, Any]]) -> None:
         try:
-            content = detail_excel(frame, self.config.timezone, self.result.next_action.mode, self.detail_view)
+            basis = "Fixed-condition stress case; not a Markov expectation" if self.result.expected_score is not None else None
+            content = detail_excel(frame, self.config.timezone, self.result.next_action.mode, self.detail_view, report_basis=basis)
             start = pd.Timestamp(frame.starts_at.iloc[0]).tz_convert(self.timezone)
             view = "com" if self.detail_view == "Compact" else "adv"
             ui.download(content, filename=f"plan-{self.applied_model}-{view}-protection-{self.applied_adjustment:g}-solar-{self.solar_scenario.value}-load-{self.load_scenario.value}-{start:%Y%m%d-%H%M}.xlsx",

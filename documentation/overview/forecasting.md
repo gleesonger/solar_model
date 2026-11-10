@@ -52,7 +52,7 @@ Source: [solar_model/storage/queries/dashboard.py](../../solar_model/storage/que
 - [evaluate_forecasts.py](../../solar_model/tools/evaluate_forecasts.py): MAE/RMSE/bias and improvement, overall and by lead band; compares stored vintages with hourly actuals and excludes collections after target time and hours not completed by `--as-of` (default now). Sparse completed hours remain eligible.
 - [evaluate_load.py](../../solar_model/tools/evaluate_load.py): report-only evaluation of the production 42-day/14-day-half-life weekday/weekend profile shrunk toward all-day hourly means. Planning now uses this same prediction helper.
 
-The three model blocks use the same names: `lookback`, `halflife`, and `prior_effective_observations`. The last field is the decimal fraction of influence after one unit of evidence, despite its retained name. Defaults are:
+The three model blocks use the same names: `lookback`, `halflife`, and `prior_effective_observations`. The last field is the decimal fraction of influence after one unit of evidence, despite its retained name. The baseline numerical-model values are:
 
 | `forecast.solar.model_calibration_parameters` (day_ahead/intraday) and `forecast.load.model_calibration_parameters` (house load) block | `lookback` | `halflife` | `prior_effective_observations` |
 | --- | --- | --- | --- |
@@ -60,8 +60,10 @@ The three model blocks use the same names: `lookback`, `halflife`, and `prior_ef
 | `solar_intraday` | `null` (earlier completed hours today) | 1 hour | one-third (YAML: `0.3333`) |
 | `load` | 42 days | 14 days | `0.2` (20%) |
 
-A numeric intraday `lookback` imposes an additional limit in hours, within today's completed observations. Day-ahead/load time settings use days. Code derives `prior_strength = 1 / prior_effective_observations - 1`, giving strength 4 for load and approximately 2 for the shipped intraday fraction. Fractions must be finite, greater than 0 and at most 1, with no rounding of derived strengths. The code default of exact one-third retains intraday strength 2 when model settings are omitted. Load evidence is the sum of recency weights; solar intraday evidence is effective sample size (`sum(weights)^2 / sum(weights^2)`). Missing model blocks retain the original defaults for existing YAML files. The collector, load-profile CLI and operational rebuild all consume the model settings; restart managed processes after changing YAML. Planning uses the same house-load helper and `forecast.load.model_calibration_parameters` tuning block; the unused legacy `energy_plan` history fields have been removed.
+A numeric intraday `lookback` imposes an additional limit in hours, within today's completed observations. Day-ahead/load time settings use days. Code derives `prior_strength = 1 / prior_effective_observations - 1`, giving strength 4 for load and approximately 2 for the shipped intraday fraction. Fractions must be finite, greater than 0 and at most 1, with no rounding of derived strengths. The code default of exact one-third retains intraday strength 2 when model settings are omitted. Load evidence is the sum of recency weights; solar intraday evidence is effective sample size (`sum(weights)^2 / sum(weights^2)`). Missing model blocks or fields are rejected; every production YAML setting must be supplied explicitly. The collector, load-profile CLI and operational rebuild all consume the model settings; restart managed processes after changing YAML. Planning uses the same house-load helper and `forecast.load.model_calibration_parameters` tuning block; the unused legacy `energy_plan` history fields have been removed.
 
 Commands and write effects are in [operations.md](../operations/runbook.md).
 
 Production load prediction and solar correction live in `planning/forecasts/house_load.py` and `planning/forecasts/solar.py`; evaluation uses `tools/evaluate_load.py` and `tools/evaluate_forecasts.py`.
+
+Production configuration must explicitly supply every forecast model block and its three fields, including nullable values. Shipped calibration values are not filled in when omitted. See [explicit configuration](configuration.md#explicit-configuration-is-mandatory).

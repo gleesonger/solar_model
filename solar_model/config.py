@@ -5,11 +5,11 @@ import math
 import re
 import os
 import tempfile
-from dataclasses import asdict, dataclass, field, replace
+from dataclasses import asdict, dataclass, field, fields, is_dataclass, replace
 from datetime import date
 from pathlib import Path
 from collections.abc import Mapping, Sequence
-from typing import Any
+from typing import Any, get_args, get_origin, get_type_hints
 from urllib.parse import urlparse
 from zoneinfo import ZoneInfo
 
@@ -83,8 +83,8 @@ class ForecastModelsConfig:
 
 @dataclass(frozen=True)
 class SolarForecastModelsConfig:
-    day_ahead: ForecastModelConfig = field(default_factory=lambda: ForecastModelConfig(56., 21., None))
-    intraday: ForecastModelConfig = field(default_factory=lambda: ForecastModelConfig(None, 1., 1.0 / 3.0))
+    day_ahead: ForecastModelConfig
+    intraday: ForecastModelConfig
 
 
 @dataclass(frozen=True)
@@ -93,18 +93,18 @@ class SolarForecastConfig:
     timeout_seconds: float
     endpoint: str
     arrays: tuple[SolarArrayConfig, ...]
-    model_calibration_parameters: SolarForecastModelsConfig = field(default_factory=SolarForecastModelsConfig)
+    model_calibration_parameters: SolarForecastModelsConfig
 
 
 @dataclass(frozen=True)
 class LoadForecastConfig:
-    model_calibration_parameters: ForecastModelConfig = field(default_factory=lambda: ForecastModelConfig(42., 14., 0.2))
+    model_calibration_parameters: ForecastModelConfig
 
 
 @dataclass(frozen=True)
 class ForecastConfig:
     solar: SolarForecastConfig
-    load: LoadForecastConfig = field(default_factory=LoadForecastConfig)
+    load: LoadForecastConfig
 
     @property
     def models(self) -> ForecastModelsConfig:
@@ -162,32 +162,27 @@ class DPRefinementConfig:
 
 @dataclass(frozen=True)
 class DynamicProgrammingConfig:
-    use_numba: bool = True
-    projection_resolution_mins: tuple[int, ...] = (15,) * 96 + (60,) * 24
-    refinement_stages: tuple[DPRefinementConfig, ...] = (
-        DPRefinementConfig(2., 5, None),
-        DPRefinementConfig(1., 10, 5.),
-        DPRefinementConfig(1., 20, 3.),
-        DPRefinementConfig(1., 40, 1.),
-    )
+    use_numba: bool
+    projection_resolution_mins: tuple[int, ...]
+    refinement_stages: tuple[DPRefinementConfig, ...]
 
 
 @dataclass(frozen=True)
 class MixedIntegerLinearProgrammingConfig:
-    projection_resolution_mins: tuple[int, ...] = (15,) * 4 + (60,) * 23 + (240,) * 6
+    projection_resolution_mins: tuple[int, ...]
 
 
 @dataclass(frozen=True)
 class OptimiserConfig:
-    model: str = "mix_integer_linear_prog"
-    mix_integer_linear_prog: MixedIntegerLinearProgrammingConfig = field(default_factory=MixedIntegerLinearProgrammingConfig)
-    dynamic_programming: DynamicProgrammingConfig = field(default_factory=DynamicProgrammingConfig)
+    model: str
+    mix_integer_linear_prog: MixedIntegerLinearProgrammingConfig
+    dynamic_programming: DynamicProgrammingConfig
 
 
 @dataclass(frozen=True)
 class PlanHistoryConfig:
-    retain_snapshots_frequency_mins: int = 30
-    retain_snapshots_period_days: int = 30
+    retain_snapshots_frequency_mins: int
+    retain_snapshots_period_days: int
 
 
 @dataclass(frozen=True)
@@ -195,19 +190,19 @@ class EnergyPlanConfig:
     num_projection_hours: int
     scenarios: ScenariosConfig
     plan_rerun_frequency_mins: float
-    num_visible_projection_hours: int = 24
-    calculation_timeout_seconds: float = 300.
-    history: PlanHistoryConfig = field(default_factory=PlanHistoryConfig)
-    protection_preference: float = 50.
-    minimum_battery_kwh: tuple[TariffRule, ...] = ()
-    maximum_battery_kwh: tuple[TariffRule, ...] = ()
-    limit_battery_export_rate_to_grid_kw: tuple[TariffRule, ...] = ()
-    preferred_reserve_kwh: float = 4.0
-    min_forced_charge_power_kw: float = 0.1
-    min_forced_discharge_power_kw: float = 0.1
-    max_forced_charge_power_kw: float = 999.
-    max_forced_discharge_power_kw: float = 999.
-    optimiser: OptimiserConfig = field(default_factory=OptimiserConfig)
+    num_visible_projection_hours: int
+    calculation_timeout_seconds: float
+    history: PlanHistoryConfig
+    protection_preference: float
+    minimum_battery_kwh: tuple[TariffRule, ...]
+    maximum_battery_kwh: tuple[TariffRule, ...]
+    limit_battery_export_rate_to_grid_kw: tuple[TariffRule, ...]
+    preferred_reserve_kwh: float
+    min_forced_charge_power_kw: float
+    min_forced_discharge_power_kw: float
+    max_forced_charge_power_kw: float
+    max_forced_discharge_power_kw: float
+    optimiser: OptimiserConfig
 
 
 @dataclass(frozen=True)
@@ -231,7 +226,7 @@ class TariffRule:
     start_time: str
     end_time: str
     rate: float
-    name: str | None = None
+    name: str | None
 
     @property
     def start_minutes(self) -> int:
@@ -294,21 +289,33 @@ def load_config(path: str | Path = "config.yaml") -> Config:
     return config_from_mapping(raw_config, str(path))
 
 
+def require_config_values(schema: type[Any], values: Any, path: str = "") -> None:
+    """Require explicit values even for nullable fields and nested list entries."""
+    if not isinstance(values, dict):
+        raise ValueError(f"{path or 'configuration'} must be a mapping")
+    hints = get_type_hints(schema)
+    for definition in fields(schema):
+        name = definition.name
+        label = "import" if name == "import_" else name
+        location = f"{path}.{label}" if path else label
+        if name not in values:
+            raise ValueError(f"missing required configuration value: {location}")
+        annotation = hints[name]
+        if is_dataclass(annotation):
+            require_config_values(annotation, values[name], location)
+        elif get_origin(annotation) in (tuple, list) and isinstance(values[name], (tuple, list)):
+            item_type = get_args(annotation)[0]
+            if is_dataclass(item_type):
+                for index, item in enumerate(values[name]):
+                    require_config_values(item_type, item, f"{location}[{index}]")
+
+
 def config_from_mapping(raw_config: dict[str, Any], source: str = "configuration", *, strict: bool = False) -> Config:
     """Normalise and validate a complete configuration mapping."""
     try:
         if isinstance(raw_config, dict) and "scenarios" in raw_config:
             raise ValueError("move scenarios under energy_plan.scenarios")
         energy_plan_data = raw_config.get("energy_plan") if isinstance(raw_config, dict) else None
-        scenario_data = energy_plan_data.get("scenarios") if isinstance(energy_plan_data, dict) else None
-        if isinstance(scenario_data, dict):
-            for name in ("solar", "house_load"):
-                levels = scenario_data.get(name)
-                if not isinstance(levels, dict) or set(levels) != {"low", "med", "high"}:
-                    raise ValueError(f"energy_plan.scenarios.{name} requires exactly low, med, high entries")
-                for level in levels.values():
-                    if not isinstance(level, dict) or set(level) != {"multiplier", "probability"}:
-                        raise ValueError(f"energy_plan.scenarios.{name} entries require multiplier and probability")
         if isinstance(energy_plan_data, dict):
             if "optimiser_specific" in energy_plan_data:
                 raise ValueError("rename energy_plan.optimiser_specific to energy_plan.optimiser")
@@ -358,6 +365,16 @@ def config_from_mapping(raw_config: dict[str, Any], source: str = "configuration
             for period in tariff_data["periods"]:
                 if isinstance(period, dict) and "import" in period:
                     period["import_"] = period.pop("import")
+        require_config_values(Config, raw_config)
+        scenario_data = energy_plan_data.get("scenarios") if isinstance(energy_plan_data, dict) else None
+        if isinstance(scenario_data, dict):
+            for name in ("solar", "house_load"):
+                levels = scenario_data.get(name)
+                if not isinstance(levels, dict) or set(levels) != {"low", "med", "high"}:
+                    raise ValueError(f"energy_plan.scenarios.{name} requires exactly low, med, high entries")
+                for level in levels.values():
+                    if not isinstance(level, dict) or set(level) != {"multiplier", "probability"}:
+                        raise ValueError(f"energy_plan.scenarios.{name} entries require multiplier and probability")
         config = dacite.from_dict(
             data_class=Config,
             data=raw_config,
@@ -456,8 +473,7 @@ def collapse_scheduled_rules(rules: tuple[TariffRule, ...]) -> list[dict[str, An
     result: list[dict[str, Any]] = []
     for (start, end, rate, name), days in grouped.items():
         entry: dict[str, Any] = {"days": [day for day in WEEKDAYS if day in days]}
-        if name is not None:
-            entry["name"] = name
+        entry["name"] = name
         entry.update(start_time=start, end_time=end, rate=rate)
         result.append(entry)
     return result

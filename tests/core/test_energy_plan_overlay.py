@@ -93,7 +93,7 @@ def test_source_yaml_and_formatted_yaml_deserialise_to_the_same_settings():
     assert "days: [Mon, Tue, Wed, Thu, Fri, Sat, Sun]" in text
     assert 'start_time: "00:00"' in text
     assert 'end_time: "24:00"' in text
-    assert "name: null" not in text
+    assert "name: null" in text
     assert "\n\nscenarios:" in text
     assert parse_energy_plan_yaml(config, text) == settings
     assert energy_plan_yaml(parse_energy_plan_yaml(config, text)) == text
@@ -161,7 +161,7 @@ def test_empty_optional_schedules_round_trip_as_empty_lists():
 ])
 def test_partial_battery_schedules_round_trip_and_use_default(field, default, rate, tmp_path):
     config = load_config()
-    rule = TariffRule(WEEKDAYS, "02:00", "06:00", rate)
+    rule = TariffRule(WEEKDAYS, "02:00", "06:00", rate, name=None)
     settings = replace(config.energy_plan, **{field: (rule,)})
     text = energy_plan_yaml(settings)
     restored = parse_energy_plan_yaml(config, text)
@@ -191,7 +191,7 @@ def test_tariff_schedules_still_require_full_coverage(direction):
 
 def test_partial_overnight_schedule_uses_starting_weekday():
     config = load_config()
-    rule = TariffRule(("Mon",), "22:00", "06:00", 0.)
+    rule = TariffRule(("Mon",), "22:00", "06:00", 0., name=None)
     settings = replace(config.energy_plan, limit_battery_export_rate_to_grid_kw=(rule,))
     schedule = parse_energy_plan_yaml(config, energy_plan_yaml(settings)).limit_battery_export_rate_to_grid_kw
     assert tariff_rule_rate(schedule, datetime(2026, 11, 2, 23), 999.) == 0.
@@ -200,7 +200,7 @@ def test_partial_overnight_schedule_uses_starting_weekday():
 
 
 def test_default_does_not_hide_invalid_rule():
-    rule = TariffRule(WEEKDAYS, "invalid", "06:00", 0.)
+    rule = TariffRule(WEEKDAYS, "invalid", "06:00", 0., name=None)
     with pytest.raises(ValueError, match="tariff time"):
         tariff_rule_rate((rule,), datetime(2026, 11, 2), 999.)
 

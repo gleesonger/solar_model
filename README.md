@@ -124,3 +124,5 @@ Application code is under `solar_model/`, split into planning, services, integra
 The as-of report command is `python -m solar_model.tools.plan_as_of --database solar.db --as-of "2026-10-24T10:00:00+01:00"`. Its planning API accepts in-memory device/state/scenarios through `solar_model.planning.plan_optimisation_milp.simulate_energy_plan` and returns `SimulationResult`. Planning remains read-only, with shared first controls and the [tariff-scaled cost/protection score](documentation/overview/plan-model.md); hardware command verification and forecast/scenario changes remain separate work.
 
 Scheduled plans are produced by `python -m solar_model.runtime.planner`, independently of the dashboard. The managed launcher starts it automatically. The Plan tab shows latest or selected saved snapshots using blank-by-default date/snapshot controls beside Plan settings.
+
+All configuration settings are required. Update deployed YAML from the complete `config.yaml` example when settings are added; missing values stop startup rather than selecting defaults. Nullable settings still require an explicit `null`.

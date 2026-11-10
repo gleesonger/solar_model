@@ -55,22 +55,22 @@ def test_submission_cleanup_keeps_complete_slot_snapshots_and_latest_after_downt
     start = datetime(2026, 10, 1, tzinfo=timezone.utc)
     sections = {("Compact", "med"): {"value": 1}, ("Advanced", "med"): {"value": 2}}
     meta = {"version": 1}
-    first = save_plan(path, start, meta, sections)
-    intermediate = save_plan(path, start + timedelta(minutes=5), meta, sections)
+    first = save_plan(path, start, meta, sections, PlanHistoryConfig(30, 30))
+    intermediate = save_plan(path, start + timedelta(minutes=5), meta, sections, PlanHistoryConfig(30, 30))
     # Reads do not prune history even if the application has been stopped.
     assert len(list_plans(path)) == 2
-    save_plan(path, start + timedelta(minutes=30), meta, sections)
+    save_plan(path, start + timedelta(minutes=30), meta, sections, PlanHistoryConfig(30, 30))
     assert load_plan(path, intermediate) is None
-    next_id = save_plan(path, start + timedelta(minutes=40), meta, sections)
+    next_id = save_plan(path, start + timedelta(minutes=40), meta, sections, PlanHistoryConfig(30, 30))
     assert load_plan(path, first) is not None
     assert load_plan(path, intermediate) is None
     assert load_plan(path, next_id) is not None
-    after_day = save_plan(path, start + timedelta(days=1, minutes=1), meta, sections)
+    after_day = save_plan(path, start + timedelta(days=1, minutes=1), meta, sections, PlanHistoryConfig(30, 30))
     old = load_plan(path, first)
     assert ("Compact", "med") in old.sections
     assert ("Advanced", "med") in old.sections
     assert ("Advanced", "med") in load_plan(path, after_day).sections
-    save_plan(path, start + timedelta(days=31), meta, sections)
+    save_plan(path, start + timedelta(days=31), meta, sections, PlanHistoryConfig(30, 30))
     assert load_plan(path, first) is None
     latest = load_plan(path)
     assert len(list_plans(path)) >= 1
@@ -83,8 +83,8 @@ def test_frequency_changes_rebucket_existing_history_and_period_controls_expiry(
     path, db = database
     start = datetime(2026, 10, 1, tzinfo=timezone.utc)
     sections = {("Compact", "med"): {}, ("Advanced", "med"): {}}
-    first = save_plan(path, start, {"version": 1}, sections)
-    middle = save_plan(path, start + timedelta(minutes=30), {"version": 1}, sections)
+    first = save_plan(path, start, {"version": 1}, sections, PlanHistoryConfig(30, 30))
+    middle = save_plan(path, start + timedelta(minutes=30), {"version": 1}, sections, PlanHistoryConfig(30, 30))
     policy = PlanHistoryConfig(retain_snapshots_frequency_mins=60, retain_snapshots_period_days=1)
     latest = save_plan(path, start + timedelta(hours=1), {"version": 1}, sections, policy)
     assert load_plan(path, first) is not None
@@ -97,15 +97,15 @@ def test_frequency_changes_rebucket_existing_history_and_period_controls_expiry(
 def test_slot_selection_uses_utc_across_repeated_local_hour(database):
     path, db = database
     stamps = [datetime(2026, 10, 25, 0, 5, tzinfo=timezone.utc), datetime(2026, 10, 25, 1, 5, tzinfo=timezone.utc)]
-    ids = [save_plan(path, stamp, {"version": 1}, {("Compact", "med"): {}}) for stamp in stamps]
-    save_plan(path, stamps[-1] + timedelta(hours=1), {"version": 1}, {("Compact", "med"): {}})
+    ids = [save_plan(path, stamp, {"version": 1}, {("Compact", "med"): {}}, PlanHistoryConfig(30, 30)) for stamp in stamps]
+    save_plan(path, stamps[-1] + timedelta(hours=1), {"version": 1}, {("Compact", "med"): {}}, PlanHistoryConfig(30, 30))
     assert all(load_plan(path, snapshot_id) is not None for snapshot_id in ids)
 
 
 def test_failed_retention_rolls_back_new_snapshot_and_preserves_old(database):
     path, db = database
     start = datetime(2026, 10, 1, tzinfo=timezone.utc)
-    original = save_plan(path, start, {"version": 1}, {("Compact", "med"): {}})
+    original = save_plan(path, start, {"version": 1}, {("Compact", "med"): {}}, PlanHistoryConfig(30, 30))
 
     def fail_delete(connection, cursor, statement, parameters, context, executemany):
         if statement.startswith("DELETE FROM plan_history"):
@@ -114,7 +114,7 @@ def test_failed_retention_rolls_back_new_snapshot_and_preserves_old(database):
     event.listen(db.engine, "before_cursor_execute", fail_delete)
     try:
         with pytest.raises(RuntimeError, match="cleanup failure"):
-            save_plan(path, start + timedelta(days=31), {"version": 1}, {("Compact", "med"): {}})
+            save_plan(path, start + timedelta(days=31), {"version": 1}, {("Compact", "med"): {}}, PlanHistoryConfig(30, 30))
     finally:
         event.remove(db.engine, "before_cursor_execute", fail_delete)
     assert [item.snapshot_id for item in list_plans(path)] == [original]

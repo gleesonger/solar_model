@@ -50,7 +50,7 @@ def decode(value: bytes) -> dict[str, Any]:
     return json.loads(zlib.decompress(value))
 
 
-def save_plan(database_path: str, saved_at: datetime, metadata: dict[str, Any], sections: dict[tuple[str, str], dict[str, Any]], retention: PlanHistoryConfig = PlanHistoryConfig()) -> str:
+def save_plan(database_path: str, saved_at: datetime, metadata: dict[str, Any], sections: dict[tuple[str, str], dict[str, Any]], retention: PlanHistoryConfig) -> str:
     """Commit all sections and retention together; callers publish only this ID."""
     stamp = int(saved_at.timestamp() * 1_000_000)
     frequency = retention.retain_snapshots_frequency_mins * 60_000_000

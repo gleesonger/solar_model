@@ -52,6 +52,7 @@ tariffs:
           rate: 0.2003
       export:
         - days: [Mon, Tue, Wed, Thu, Fri, Sat, Sun]
+          name: null
           start_time: "00:00"
           end_time: "24:00"
           rate: 0.195
@@ -95,6 +96,7 @@ tariffs:
           rate: 0.2146
       export:
         - days: [Mon, Tue, Wed, Thu, Fri, Sat, Sun]
+          name: null
           start_time: "00:00"
           end_time: "24:00"
           rate: 0.1716
@@ -191,12 +193,14 @@ energy_plan:
   
   maximum_battery_kwh:
     - days: [Mon, Tue, Wed, Thu, Fri, Sat, Sun]
+      name: null
       start_time: "00:00"
       end_time: "24:00"
       rate: 999
   
   limit_battery_export_rate_to_grid_kw:
     - days: [Mon, Tue, Wed, Thu, Fri, Sat, Sun]
+      name: null
       start_time: "02:00"
       end_time: "06:00"
       rate: 0

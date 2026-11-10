@@ -4,6 +4,9 @@ from pathlib import Path
 from dataclasses import replace
 
 import pytest
+import yaml
+
+from solar_model.config import load_config
 
 
 @pytest.mark.parametrize("seconds", [0., -1., float("inf"), float("nan"), True])
@@ -13,9 +16,6 @@ def test_calculation_deadline_rejects_invalid_values(seconds):
     config = load_config()
     with pytest.raises(ValueError, match="calculation_timeout_seconds"):
         validate_config(replace(config, energy_plan=replace(config.energy_plan, calculation_timeout_seconds=seconds)))
-import yaml
-
-from solar_model.config import load_config
 
 
 def test_optimiser_sections_load_independently(tmp_path):
@@ -40,15 +40,13 @@ def test_legacy_flat_optimiser_settings_require_explicit_migration(tmp_path, nam
         load_config(path)
 
 
-def test_dp_defaults_and_custom_refinement_settings_load(tmp_path):
+def test_missing_dp_section_fails_and_custom_refinement_settings_load(tmp_path):
     raw = yaml.safe_load(Path("config.yaml").read_text(encoding="utf-8"))
     raw["energy_plan"]["optimiser"].pop("dynamic_programming")
     path = tmp_path / "config.yaml"
     path.write_text(yaml.safe_dump(raw), encoding="utf-8")
-    settings = load_config(path).energy_plan.optimiser.dynamic_programming
-    assert settings.use_numba is True
-    assert settings.projection_resolution_mins == (15,) * 96 + (60,) * 24
-    assert [(s.grid_step_percent, s.power_divisions, s.band_percent) for s in settings.refinement_stages] == [(2., 5, None), (1., 10, 5.), (1., 20, 3.), (1., 40, 1.)]
+    with pytest.raises(ValueError, match="energy_plan.optimiser.dynamic_programming"):
+        load_config(path)
     raw["energy_plan"]["optimiser"]["dynamic_programming"] = {"use_numba": False, "projection_resolution_mins": ["30*96"], "refinement_stages": [{"grid_step_percent": 4., "power_divisions": 3, "band_percent": None}, {"grid_step_percent": .5, "power_divisions": 20, "band_percent": 2.}]}
     path.write_text(yaml.safe_dump(raw), encoding="utf-8")
     settings = load_config(path).energy_plan.optimiser.dynamic_programming
@@ -83,17 +81,14 @@ def test_invalid_dp_settings_are_rejected(tmp_path, changes):
         load_config(path)
 
 
-def test_forced_command_minimums_default_and_load_separately(tmp_path):
+def test_forced_command_preferences_are_required_and_load_separately(tmp_path):
     raw = yaml.safe_load(Path("config.yaml").read_text(encoding="utf-8"))
     for name in ("min_forced_charge_power_kw", "min_forced_discharge_power_kw", "max_forced_charge_power_kw", "max_forced_discharge_power_kw"):
         raw["energy_plan"].pop(name, None)
     path = tmp_path / "config.yaml"
     path.write_text(yaml.safe_dump(raw), encoding="utf-8")
-    settings = load_config(path).energy_plan
-    assert settings.min_forced_charge_power_kw == .1
-    assert settings.min_forced_discharge_power_kw == .1
-    assert settings.max_forced_charge_power_kw == 999.
-    assert settings.max_forced_discharge_power_kw == 999.
+    with pytest.raises(ValueError, match="min_forced_charge_power_kw"):
+        load_config(path)
     raw["energy_plan"].update(min_forced_charge_power_kw=.7, min_forced_discharge_power_kw=1.2, max_forced_charge_power_kw=3., max_forced_discharge_power_kw=4.)
     path.write_text(yaml.safe_dump(raw), encoding="utf-8")
     settings = load_config(path).energy_plan
@@ -208,72 +203,16 @@ def test_load_config_parses_minimum_battery_backup_rules_and_ignores_comment(
     tmp_path: Path,
 ) -> None:
     config_path = tmp_path / "config.yaml"
-    config_path.write_text(
-        """
-timezone: Europe/Dublin
-logging: {level: INFO}
-database: {path: solar.db}
-forecast:
-  solar:
-    interval_seconds: 3600
-    timeout_seconds: 10
-    endpoint: https://api.forecast.solar/estimate
-    arrays: [{panel_id: 1, name: East, latitude: 0, longitude: 0, declination: 0, azimuth: 0, peak_kw: 1}]
-dashboard: {host: 127.0.0.1, port: 8090, actuals_to_forecast: {pv1: East}}
-additional_device_info: {inverter_ac_to_dc_efficiency: 0.97, inverter_dc_to_ac_efficiency: 0.974, battery_charge_efficiency: 0.95, battery_discharge_efficiency: 0.95}
-energy_plan:
-  plan_rerun_frequency_mins: 5
-  scenarios:
-    solar:
-      low: {multiplier: 0.5, probability: 0.2}
-      med: {multiplier: 1, probability: 0.6}
-      high: {multiplier: 1.5, probability: 0.2}
-    house_load:
-      low: {multiplier: 0.5, probability: 0.2}
-      med: {multiplier: 1, probability: 0.6}
-      high: {multiplier: 1.5, probability: 0.2}
-  num_projection_hours: 24
-  optimiser:
-    mix_integer_linear_prog:
-      projection_resolution_mins: [15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15]
-  protection_preference: 10
-  limit_battery_export_rate_to_grid_kw:
-    - days: [Mon, Tue, Wed, Thu, Fri, Sat, Sun]
-      start_time: "00:00"
-      end_time: "24:00"
-      rate: 5.5
-  minimum_battery_kwh:
-    comment: Retain this much energy for an outage.
-    rules:
-      - days: [Mon, Tue, Wed, Thu, Fri, Sat, Sun]
-        start_time: "00:00"
-        end_time: "24:00"
-        rate: 4.5
-  maximum_battery_kwh:
-    - days: [Mon, Tue, Wed, Thu, Fri, Sat, Sun]
-      start_time: "00:00"
-      end_time: "24:00"
-      rate: 18
-tariffs:
-  periods:
-    - effective_from: "2000-01-01"
-      import:
-        - days: [Mon, Tue, Wed, Thu, Fri, Sat, Sun]
-          name: day
-          start_time: "00:00"
-          end_time: "24:00"
-          rate: 0.4
-      export:
-        - days: [Mon, Tue, Wed, Thu, Fri, Sat, Sun]
-          start_time: "00:00"
-          end_time: "24:00"
-          rate: 0.2
-actuals:
-  data_retrival_schedule: {live_update_interval_seconds: 1, full_updated_interval_seconds: 60}
-  modbus: {host: localhost, port: 502, timeout_seconds: 5, default_device_id: 1}
-""".strip(),
-        encoding="utf-8",
-    )
+    raw = yaml.safe_load(Path("config.yaml").read_text(encoding="utf-8"))
+    days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+    raw["dashboard"]["actuals_to_forecast"] = {"pv1": "East"}
+    raw["energy_plan"]["minimum_battery_kwh"] = {
+        "comment": "Retain this much energy for an outage.",
+        "rules": [{"days": days, "name": None, "start_time": "00:00", "end_time": "24:00", "rate": 4.5}],
+    }
+    raw["energy_plan"]["maximum_battery_kwh"] = [{"days": days, "name": None, "start_time": "00:00", "end_time": "24:00", "rate": 18}]
+    raw["energy_plan"]["limit_battery_export_rate_to_grid_kw"] = [{"days": days, "name": None, "start_time": "00:00", "end_time": "24:00", "rate": 5.5}]
+    config_path.write_text(yaml.safe_dump(raw), encoding="utf-8")
 
     config = load_config(config_path)
 
@@ -338,12 +277,13 @@ def test_invalid_projection_repetitions_are_rejected(tmp_path, entry):
         load_config(path)
 
 
-def test_protection_adjustment_defaults_to_50_and_accepts_values_above_100(tmp_path):
+def test_protection_adjustment_is_required_and_accepts_values_above_100(tmp_path):
     raw = yaml.safe_load(Path("config.yaml").read_text(encoding="utf-8"))
     del raw["energy_plan"]["protection_preference"]
     path = tmp_path / "config.yaml"
     path.write_text(yaml.safe_dump(raw), encoding="utf-8")
-    assert load_config(path).energy_plan.protection_preference == 50.
+    with pytest.raises(ValueError, match="energy_plan.protection_preference"):
+        load_config(path)
     raw["energy_plan"]["protection_preference"] = 200.
     path.write_text(yaml.safe_dump(raw), encoding="utf-8")
     assert load_config(path).energy_plan.protection_preference == 200.

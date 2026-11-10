@@ -16,7 +16,7 @@ def run_plan(monkeypatch):
     start = datetime(2026, 10, 29, 2, tzinfo=timezone.utc)
     end = start + timedelta(hours=1)
     config = load_config()
-    rule = TariffRule(("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"), "00:00", "24:00", .0859)
+    rule = TariffRule(("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"), "00:00", "24:00", .0859, name=None)
     tariffs = TariffsConfig((TariffPeriod("2000-01-01", (rule,), (replace(rule, rate=.1716),)),))
     config = replace(config, tariffs=tariffs, energy_plan=replace(config.energy_plan, num_projection_hours=25, num_visible_projection_hours=1,
         optimiser=replace(config.energy_plan.optimiser, mix_integer_linear_prog=replace(config.energy_plan.optimiser.mix_integer_linear_prog, projection_resolution_mins=((15,) * 4) + (240,) * 6)), protection_preference=0.))

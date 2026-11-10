@@ -81,7 +81,7 @@ def test_tariff_recalculation_keeps_house_load_basis(tmp_path, monkeypatch):
     config = load_config()
     days = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
     rules = TariffsConfig((TariffPeriod("2000-01-01", (TariffRule(days, "00:00", "24:00", .6, "fixed"),),
-                                       (TariffRule(days, "00:00", "24:00", .2),)),))
+                                       (TariffRule(days, "00:00", "24:00", .2, name=None),)),))
     monkeypatch.setattr(recalc, "load_config", lambda _: replace(config, timezone="UTC", tariffs=rules,
                        database=replace(config.database, path=str(path))))
     assert recalc.main(["--from", "2026-10-26", "--to", "2026-10-26"]) == 0

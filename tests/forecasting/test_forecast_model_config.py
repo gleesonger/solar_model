@@ -24,7 +24,7 @@ def write_config(tmp_path, data):
     return path
 
 
-def test_nested_yaml_model_settings_and_omitted_defaults(tmp_path, config_data):
+def test_nested_yaml_model_settings_and_missing_blocks_are_rejected(tmp_path, config_data):
     custom = ForecastModelsConfig(
         solar_day_ahead=ForecastModelConfig(7., 2., None),
         solar_intraday=ForecastModelConfig(2., 0.5, 0.5),
@@ -37,10 +37,8 @@ def test_nested_yaml_model_settings_and_omitted_defaults(tmp_path, config_data):
     assert config.forecast.load.model_calibration_parameters.prior_strength == 3.
     del config_data["forecast"]["solar"]["model_calibration_parameters"]
     del config_data["forecast"]["load"]["model_calibration_parameters"]
-    legacy = load_config(write_config(tmp_path, config_data)).forecast.models
-    assert legacy == ForecastModelsConfig()
-    assert legacy.load.prior_strength == 4.
-    assert legacy.solar_intraday.prior_strength == 2.
+    with pytest.raises(ValueError, match="model_calibration_parameters"):
+        load_config(write_config(tmp_path, config_data))
 
 
 @pytest.mark.parametrize("model,key,value", [

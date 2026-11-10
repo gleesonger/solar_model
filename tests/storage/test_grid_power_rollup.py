@@ -22,7 +22,7 @@ def tariffs(split=False):
         (TariffRule(days, "00:00", "10:01", .4, "a"), TariffRule(days, "10:01", "24:00", .4, "b"))
         if split else (TariffRule(days, "00:00", "24:00", .4, "fixed"),)
     )
-    return TariffsConfig((TariffPeriod("2020-01-01", imports, (TariffRule(days, "00:00", "24:00", .2),)),))
+    return TariffsConfig((TariffPeriod("2020-01-01", imports, (TariffRule(days, "00:00", "24:00", .2, name=None),)),))
 
 
 def record(database, previous, stamp, power, rules):

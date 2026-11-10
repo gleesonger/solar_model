@@ -6,14 +6,15 @@ import pytest
 from solar_model.config import PlanHistoryConfig, energy_plan_yaml, load_config, parse_energy_plan_yaml, validate_config
 
 
-def test_history_settings_round_trip_and_compatibility_defaults():
+def test_history_settings_round_trip_and_missing_section_fails():
     config = load_config()
     assert config.energy_plan.history == PlanHistoryConfig(30, 30)
     settings = replace(config.energy_plan, history=PlanHistoryConfig(60, 7))
     assert parse_energy_plan_yaml(config, energy_plan_yaml(settings)) == settings
     text = energy_plan_yaml(config.energy_plan)
     start, end = text.index("history:"), text.index("scenarios:")
-    assert parse_energy_plan_yaml(config, text[:start] + text[end:]).history == PlanHistoryConfig()
+    with pytest.raises(ValueError, match="energy_plan.history"):
+        parse_energy_plan_yaml(config, text[:start] + text[end:])
 
 
 @pytest.mark.parametrize("name", ["retain_snapshots_frequency_mins", "retain_snapshots_period_days"])

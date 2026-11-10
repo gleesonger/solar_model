@@ -98,3 +98,5 @@ Advanced Plan detail keeps full descriptive column names alongside its wider col
 Plan table t is elapsed row duration in hours and shows two decimals. Cost, Protection and Limit Score cells show hourly rates to two decimals; Terminal and Total Score cells show period contributions. Advanced has lightly shaded first/second 24-hour subtotals and a grey bold full Total. Footer scores sum original contributions, rather than hourly rates. This presentation does not change other interval totals or Excel score contributions.
 
 The Plan date and Snapshot controls sit immediately right of Plan settings, initially blank for latest. They wrap in that order on mobile. Current and historical reports reuse the same action, chart, summaries and table styling; there is no separate Plan History tab.
+
+Plan charts use a continuous solid stroke between recorded actual readings, including across missing minute samples, and dashed forecasts. Missing values remain null in the source data. Each metric retains one legend entry controlling both lines.

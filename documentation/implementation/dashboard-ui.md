@@ -294,3 +294,7 @@ Mode 5 at zero discharge allows surplus solar to charge in the model; that insta
 ## Database-backed shared plans
 
 The worker now prepares and commits both detail views before returning a plan ID. The server reads the committed report once and notifies clients using the existing subscriber mechanism. Startup restores the latest saved report. The Plan tab includes date/snapshot selection to the right of settings, blank by default for latest. Historical selection uses the same action, summaries, chart, table and export and remains pinned during new publications. See the [full saved-plan contract](plan-history.md).
+
+Plan Settings initially displays the archived energy-plan YAML of the displayed snapshot unchanged. Loading a report does not validate that YAML against the current model configuration. Run Demonstration and Save To Disk validate the draft against the current schema and report incompatible or missing settings. Load Global explicitly replaces the draft with the current live configuration.
+
+Plan snapshots store projection data and settings without chart actuals. Latest and historical charts query telemetry separately through the earlier of now and the projection horizon. Displayed charts refresh actuals every minute without rerunning the optimiser or replacing a pinned forecast. One legend entry per metric controls both solid actual and dashed forecast lines at overlapping timestamps. Legacy embedded actuals are ignored. See [saved-plan contracts](plan-history.md).

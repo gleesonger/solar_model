@@ -130,6 +130,22 @@ def test_aggregation_uses_metadata_instead_of_column_units(monkeypatch):
     assert hourly.solar_kwh.sum() == pytest.approx(frame.solar_kwh.sum())
 
 
+def test_actual_lines_stay_solid_across_missing_samples_and_forecasts_stay_dashed():
+    frame = sample_result().results["med"]
+    start = frame.starts_at.iloc[0]
+    actuals = pd.DataFrame({
+        "timestamp": [start, start + timedelta(minutes=1), start + timedelta(minutes=2)],
+        **{name: [1., float("nan"), 2.] for name in ("solar", "house_load", "battery", "grid_import", "grid_export")},
+    })
+    options = plan_chart_options(frame, actuals, "Europe/Dublin")
+    assert len(options["legend"]["data"]) == 5
+    for actual, forecast in zip(options["series"][::2], options["series"][1::2]):
+        assert actual["name"] == forecast["name"]
+        assert actual["lineStyle"]["type"] == "solid" and actual["connectNulls"]
+        assert forecast["lineStyle"]["type"] == "dashed" and not forecast["connectNulls"]
+        assert actual["data"][1][1] is None
+
+
 def test_summary_and_chart_use_duration_weighting_and_consistent_units():
     from solar_model.planning.plan_optimisation_milp import battery_protection_score
     frame = sample_result().results["med"]

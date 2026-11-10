@@ -22,7 +22,7 @@ from solar_model.storage.plan_history import latest_plan_id, read_planner_status
 @dataclass(frozen=True)
 class PlanRun:
     report: PlanReport
-    settings: EnergyPlanConfig
+    settings: EnergyPlanConfig | str
     began_at: datetime
     full_data_at: datetime
     completed_at: datetime

@@ -79,14 +79,6 @@ def save_plan(database_path: str, saved_at: datetime, metadata: dict[str, Any], 
             "FROM plan_history WHERE view = 'metadata') WHERE position = 1))",
             (snapshot_id, stamp - retention.retain_snapshots_period_days * 86_400_000_000),
         )
-        # Actual minute observations are needed only to restore the current chart.
-        # Strip them from old metadata without keeping an extra report copy.
-        previous = connection.execute(select(table.c.snapshot_id, table.c.payload).where(table.c.view == "metadata", table.c.snapshot_id != snapshot_id).order_by(table.c.saved_at.desc()).limit(1)).all()
-        for old_id, payload in previous:
-            value = decode(payload)
-            if value.get("actuals") is not None:
-                value["actuals"] = None
-                connection.execute(table.update().where(table.c.snapshot_id == old_id, table.c.view == "metadata").values(payload=encode(value)))
     return snapshot_id
 
 

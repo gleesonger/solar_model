@@ -57,6 +57,8 @@ class PlanReport:
     action_minutes: float | None = None
     action_solar_export: dict[str, float] | None = None
     full_resolution: bool = True
+    model: str | None = None
+    timezone_name: str | None = None
 
 
 def latest_full_update(database_path: str) -> datetime | None:
@@ -65,7 +67,7 @@ def latest_full_update(database_path: str) -> datetime | None:
     return load_latest_full_update(database, datetime.now(timezone.utc))
 
 
-def generate_plan_report(config: Config, as_of: datetime, energy_plan_override: EnergyPlanConfig | None = None) -> PlanReport:
+def generate_plan_report(config: Config, as_of: datetime, energy_plan_override: EnergyPlanConfig | None = None, *, include_actuals: bool = True) -> PlanReport:
     """Generate a UI report using an optional request-local energy_plan overlay."""
     if energy_plan_override is not None:
         config = replace(config, energy_plan=energy_plan_override)
@@ -81,13 +83,15 @@ def generate_plan_report(config: Config, as_of: datetime, energy_plan_override: 
         day_start = as_of.astimezone(ZoneInfo(config.timezone)).replace(hour=0, minute=0, second=0, microsecond=0)
         return PlanReport(
             simulation=result,
-            actuals=load_plan_actuals(database, day_start, as_of, capacity),
+            actuals=load_plan_actuals(database, day_start, as_of, capacity) if include_actuals else pd.DataFrame(),
             battery_capacity_kwh=capacity,
             scenarios=config.energy_plan.scenarios,
             preferred_reserve_kwh=config.energy_plan.preferred_reserve_kwh,
             protection_preference=config.energy_plan.protection_preference,
             command_battery_capacity_kwh=command_capacity,
             full_data_at=full_data_at,
+            model=config.energy_plan.optimiser.model,
+            timezone_name=config.timezone,
         )
     finally:
         database.close()

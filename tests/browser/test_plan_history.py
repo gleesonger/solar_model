@@ -1,5 +1,6 @@
 """One Plan screen reads headless publications and pins historical snapshots."""
 from pathlib import Path
+import re
 import socket
 import sys
 import time
@@ -36,6 +37,9 @@ from solar_model.dashboard.plan_store import PlanStore
 from solar_model.dashboard.planning_worker import stop_demonstrations
 from solar_model.services.plan_history import persist_report
 from solar_model.storage.migrations import open_database
+from solar_model.storage.plan_history import load_plan, encode
+from solar_model.storage.connection import create_engine_for_database
+import yaml
 from tests.runtime.helpers import collect, serve_planner, report
 
 if __name__ == '__main__':
@@ -45,6 +49,15 @@ if __name__ == '__main__':
     old = old.replace(hour=12, minute=0, second=0, microsecond=0)
     original = report(config, old)
     historical_id = persist_report(config, original, old, old)
+    stored = load_plan(config.database.path, historical_id)
+    archived = yaml.safe_load(stored.metadata['settings'])
+    archived.pop('history')
+    archived_text = '# Historical settings preserved exactly\\n' + yaml.safe_dump(archived, sort_keys=False)
+    stored.metadata['settings'] = archived_text
+    with create_engine_for_database(config.database.path).begin() as connection:
+        connection.exec_driver_sql("UPDATE plan_history SET payload = ? WHERE snapshot_id = ? AND view = 'metadata'", (encode(stored.metadata), historical_id))
+        for offset in (-15, 15, 30):
+            connection.exec_driver_sql("INSERT INTO sigenstor (collected_at_utc, plant_pv_power_kw, plant_load_power_kw, plant_battery_soc_percent, plant_grid_power_kw) VALUES (?, 20000, 15000, 250000, -4000)", (int((old + timedelta(minutes=offset)).timestamp()),))
     later = datetime.now(timezone.utc) - timedelta(minutes=10)
     persist_report(config, report(config, later), later, later)
     context = get_context('spawn')
@@ -66,7 +79,7 @@ if __name__ == '__main__':
     app.on_shutdown(shutdown)
     @app.get('/test/state')
     def state():
-        return dict(version=store.version, latest=store.current.snapshot_id if store.current else None, historical=historical_id, collector=collector.pid, planner=planner.pid)
+        return dict(version=store.version, latest=store.current.snapshot_id if store.current else None, historical=historical_id, archived_text=archived_text, collector=collector.pid, planner=planner.pid)
     @ui.page('/')
     def page():
         client = ui.context.client
@@ -131,6 +144,33 @@ if __name__ == '__main__':
                     page.get_by_test_id("plan-action").get_by_text("12:00", exact=False).wait_for()
                     assert page.get_by_test_id("plan-chart").evaluate("e => echarts.getInstanceByDom(e).getOption().legend[0].selected['Grid Export']") is False
                     caption = page.get_by_test_id("plan-action").inner_text()
+                    comparison = page.get_by_test_id("plan-chart").evaluate("""e => {
+                        const o = echarts.getInstanceByDom(e).getOption();
+                        const pair = o.series.filter(s => s.name === 'House Load');
+                        return {legend: o.legend[0].data, count: pair.length, styles: pair.map(s => s.lineStyle.type),
+                            connectActuals: pair[0].connectNulls, connectForecast: pair[1].connectNulls,
+                            overlap: pair[0].data.some(a => a[1] !== null && pair[1].data.some(f => f[0] === a[0]))};
+                    }""")
+                    assert len(comparison['legend']) == 5 and comparison['count'] == 2
+                    assert comparison['styles'] == ['solid', 'dashed'] and comparison['overlap']
+                    assert comparison['connectActuals'] and not comparison['connectForecast']
+                    assert page.get_by_test_id("plan-chart").evaluate("""e => {
+                        const c = echarts.getInstanceByDom(e);
+                        c.dispatchAction({type:'legendUnSelect',name:'House Load'});
+                        const m = c.getModel();
+                        return m.getSeriesByName('House Load').every(s => m.isSeriesFiltered(s));
+                    }""")
+                    page.get_by_test_id("plan-chart").evaluate("e => echarts.getInstanceByDom(e).dispatchAction({type:'legendSelect',name:'House Load'})")
+                    page.get_by_role("button", name="Plan settings", exact=True).click()
+                    assert page.get_by_label("YAML", exact=True).input_value() == state['archived_text']
+                    page.get_by_role("button", name="Run Demonstration", exact=True).click()
+                    page.get_by_text("missing required configuration value: energy_plan.history", exact=False).wait_for()
+                    assert page.get_by_label("YAML", exact=True).input_value() == state['archived_text']
+                    page.get_by_role("button", name="Save To Disk", exact=True).click()
+                    page.get_by_text("missing required configuration value: energy_plan.history", exact=False).wait_for()
+                    page.get_by_role("button", name="Load Global", exact=True).click()
+                    playwright.expect(page.get_by_label("YAML", exact=True)).to_have_value(re.compile(r"[\s\S]*history:[\s\S]*"))
+                    page.get_by_role("button", name="Cancel", exact=True).click()
                     # The service continues producing while this browser is pinned.
                     page.wait_for_function("async v => (await (await fetch('/test/state')).json()).version > v", arg=state['version'])
                     assert page.get_by_test_id("plan-action").inner_text() == caption

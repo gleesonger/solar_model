@@ -358,11 +358,13 @@ if __name__ == '__main__':
                 settings.click()
                 editor = page.get_by_role("textbox", name="YAML", exact=True)
                 valid_text = editor.input_value()
+                # Failed demonstrations retain the displayed report and its settings.
+                assert "protection_preference: 25" in valid_text
                 editor.fill("unknown_setting: 12")
                 page.get_by_role("button", name="Run Demonstration", exact=True).click()
                 page.get_by_text(re.compile("invalid configuration in energy_plan editor")).wait_for()
                 assert page.get_by_role("dialog").is_visible()
-                editor.fill(valid_text.replace("protection_preference: 99", "protection_preference: 123"))
+                editor.fill(valid_text.replace("protection_preference: 25", "protection_preference: 123"))
                 page.set_viewport_size({"width": 1440, "height": 1100})
                 save = page.get_by_role("button", name="Save To Disk", exact=True)
                 apply_button = page.get_by_role("button", name="Run Demonstration", exact=True)
@@ -392,7 +394,7 @@ if __name__ == '__main__':
                 playwright.expect(editor).to_have_value(re.compile(r"protection_preference: 50"))
                 page.get_by_role("button", name="Cancel", exact=True).click()
                 settings.click()
-                assert "protection_preference: 99" in page.get_by_role("textbox", name="YAML", exact=True).input_value()
+                assert "protection_preference: 25" in page.get_by_role("textbox", name="YAML", exact=True).input_value()
                 page.get_by_role("button", name="Cancel", exact=True).click()
                 # A second browser page has no overlay; saving never mutated the running global config.
                 other = browser.new_page()

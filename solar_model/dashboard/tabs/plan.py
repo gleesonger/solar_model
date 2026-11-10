@@ -20,7 +20,7 @@ from solar_model.dashboard.components.plan_detail import detail_excel, render_de
 from solar_model.logging_setup import LOGGER
 from solar_model.planning.types import NextAction, NoFeasiblePlanError, OperatingMode, SimulationResult
 from solar_model.services.planning import PlanReport, generate_plan_report
-from solar_model.services.plan_history import read_saved_run
+from solar_model.services.plan_history import read_saved_run, read_report_actuals
 from solar_model.storage.plan_history import list_plans
 
 
@@ -50,6 +50,8 @@ from solar_model.planning.plan_report import (
 def plan_chart_options(frame: pd.DataFrame, actuals: pd.DataFrame, timezone_name: str) -> dict[str, Any]:
     """One legend entry per metric, with solid actuals and dashed scenario forecasts."""
     series = []
+    if not actuals.empty:
+        actuals = actuals[actuals.timestamp <= frame.ends_at.max()]
     hours = (pd.to_datetime(frame.ends_at) - pd.to_datetime(frame.starts_at)).dt.total_seconds() / 3600
     starts = [pd.Timestamp(value).timestamp() * 1000 for value in frame.starts_at]
     ends = [pd.Timestamp(value).timestamp() * 1000 for value in frame.ends_at]
@@ -75,7 +77,7 @@ def plan_chart_options(frame: pd.DataFrame, actuals: pd.DataFrame, timezone_name
             series.append({
                 "id": f"{column}_{kind}",
                 "name": label, "type": "line", "data": data, "yAxisIndex": axis,
-                "showSymbol": False, "connectNulls": False, "color": color,
+                "showSymbol": False, "connectNulls": kind == "actual", "color": color,
                 "step": "end" if stepped else False,
                 "smooth": 0.2 if kind == "forecast" and not stepped else False,
                 "smoothMonotone": "x",
@@ -104,6 +106,8 @@ class PlanTab:
         self.demonstration = False
         self.run_metadata: PlanRun | None = None
         self.energy_plan_override: EnergyPlanConfig | None = None
+        self.settings_text: str | None = None
+        self.override_text: str | None = None
         self.report = None
         self.timezone = ZoneInfo(config.timezone)
         self.result: SimulationResult | None = None
@@ -117,6 +121,7 @@ class PlanTab:
         self.historical_id: str | None = None
         self._history_request = 0
         self._date_request = 0
+        self._actuals_running = False
 
     def render_plan_tab(self) -> None:
         with ui.row().classes("w-full items-end gap-4 flex-wrap"):
@@ -130,6 +135,27 @@ class PlanTab:
         self.status = ui.label("Waiting for a new full SigEnergy reading to calculate the plan." if self.plan_store else "Run a demonstration using the latest available data.").classes("text-sm text-gray-600")
         self.output = ui.column().classes("w-full min-w-0 gap-4")
         self.apply_shared_plan()
+        if self.plan_store is not None:
+            ui.timer(60, self.refresh_actuals, immediate=False)
+
+    async def refresh_actuals(self) -> None:
+        if self.report is None or self._actuals_running:
+            return
+        report = self.report
+        request = self._history_request
+        self._actuals_running = True
+        try:
+            actuals = await run.io_bound(read_report_actuals, self.live_config, report)
+            if self.report is not report or request != self._history_request:
+                return
+            self.actuals = actuals
+            series = plan_chart_options(self._scenario_frame(), actuals, self.config.timezone)["series"]
+            self.chart.options["series"] = series
+            self.chart.run_chart_method("setOption", {"series": series}, {"replaceMerge": ["series"]})
+        except Exception:
+            LOGGER.exception("Unable to refresh plan chart actuals")
+        finally:
+            self._actuals_running = False
 
     async def _load_snapshot_options(self) -> None:
         self._date_request += 1
@@ -191,12 +217,14 @@ class PlanTab:
         self.run_metadata = completed
         self._show_report(completed.report, completed.settings, completed.demonstration)
 
-    def _show_report(self, report: PlanReport, settings: EnergyPlanConfig, demonstration: bool) -> None:
+    def _show_report(self, report: PlanReport, settings: EnergyPlanConfig | str, demonstration: bool) -> None:
         self.report = report
         self.result, self.actuals = report.simulation, report.actuals
         self.battery_capacity_kwh = report.battery_capacity_kwh
-        self.applied_model = "MILP" if settings.optimiser.model == "mix_integer_linear_prog" else "DP"
-        self.applied_adjustment = report.protection_preference if report.protection_preference is not None else settings.protection_preference
+        self.settings_text = settings if isinstance(settings, str) else (self.override_text if demonstration and self.override_text is not None else energy_plan_yaml(settings))
+        model = report.model or (settings.optimiser.model if isinstance(settings, EnergyPlanConfig) else "unknown")
+        self.applied_model = {"mix_integer_linear_prog": "MILP", "dynamic_programming": "DP"}.get(model, model)
+        self.applied_adjustment = report.protection_preference if report.protection_preference is not None else (settings.protection_preference if isinstance(settings, EnergyPlanConfig) else None)
         self.demonstration = demonstration
         if not report.full_resolution:
             self.detail_view = "Compact"
@@ -225,7 +253,7 @@ class PlanTab:
         with ui.dialog() as dialog, ui.card().classes("w-full").style("width: 938px; max-width: calc(100vw - 48px)"):
             ui.label("Energy plan settings").classes("text-lg font-semibold")
             ui.label("Run Demonstration creates a demonstration for this browser. Save To Disk applies settings to the background plan after the next full SigEnergy update.").classes("text-sm text-gray-600")
-            editor = ui.textarea("YAML", value=energy_plan_yaml(self.energy_plan_override or self.live_config.energy_plan)).props("outlined rows=20 input-class=font-mono").classes("w-full").style("max-height: 60vh; overflow: auto")
+            editor = ui.textarea("YAML", value=self.settings_text if self.settings_text is not None else energy_plan_yaml(self.energy_plan_override or self.live_config.energy_plan)).props("outlined rows=20 input-class=font-mono").classes("w-full").style("max-height: 60vh; overflow: auto")
             error_label = ui.label().classes("text-negative whitespace-pre-wrap")
 
             async def apply() -> None:
@@ -281,9 +309,11 @@ class PlanTab:
             self.energy_plan_override = None
         else:
             save_energy_plan_yaml(self.config_path, self.config, text)
+        self.override_text = None
 
     def apply_plan_settings(self, text: str) -> None:
         self.energy_plan_override = parse_energy_plan_yaml(self.live_config, text)
+        self.override_text = text
 
     async def run_demonstration(self) -> None:
         if self.running:

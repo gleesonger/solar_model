@@ -144,14 +144,16 @@ forecast:
 energy_plan:
   plan_rerun_frequency_mins: 5
   calculation_timeout_seconds: 300
+
+  num_projection_hours: 48
+  num_visible_projection_hours: 24
+  
+  preferred_reserve_kwh: 3
+  protection_preference: 50
+  
   history:
     retain_snapshots_frequency_mins: 30
     retain_snapshots_period_days: 30
-  num_projection_hours: 48
-  num_visible_projection_hours: 24
-
-  preferred_reserve_kwh: 3
-  protection_preference: 50
   
   scenarios:
     solar:
@@ -160,8 +162,8 @@ energy_plan:
       high: {multiplier: 1.5, probability: 0.2}
     house_load:
       low: {multiplier: 0.7, probability: 0.2}
-      med: {multiplier: 1.0, probability: 0.6}
-      high: {multiplier: 1.5, probability: 0.2}
+      med: {multiplier: 1.0, probability: 0.5}
+      high: {multiplier: 1.5, probability: 0.3}
   
   min_forced_charge_power_kw: 0.1
   min_forced_discharge_power_kw: 0.1

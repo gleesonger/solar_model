@@ -69,3 +69,7 @@ Keep verification targeted. Include the legacy-named migration regression when c
 - Forecast changes: exercise the operational model and chronological replay, including cold start, missing panels, future-data exclusion, and DST boundaries.
 - Planning changes: test energy conservation, efficiency losses, feasible/infeasible limits, scenario independence, and interval coverage. `solar_model.tools.plan_as_of` is a report tool; planning API regressions live in `tests/planning/`.
 - UI changes: check actual desktop/mobile rendering, live updates, preserved selections, reconnect/resume, missing data, and export failures. Unit tests alone do not establish visual correctness.
+
+## Saved-plan checks
+
+Use targeted `tests/storage/test_plan_history.py`, `tests/dashboard/test_plan_history.py`, and `tests/browser/test_plan_history.py`. The storage tests use temporary databases; never run migrations against the installation database for development verification. Browser checks require the separate Playwright/browser installation. The tests use synthetic reports rather than optimiser simulations.

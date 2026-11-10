@@ -26,6 +26,7 @@ import sys
 sys.path.insert(0, {str(repo)!r})
 import cvxpy
 import asyncio
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 import pandas as pd
 from nicegui import app, background_tasks, run, ui
@@ -34,10 +35,14 @@ from solar_model.dashboard import plan_store
 from solar_model.dashboard.layout import render_dashboard_styles
 from solar_model.dashboard.tabs.plan import PlanTab
 from solar_model.services.planning import PlanReport
+from solar_model.services.plan_history import persist_report
+from solar_model.storage.migrations import open_database
 from solar_model.planning.types import NoFeasiblePlanError
 from tests.dashboard.test_plan import sample_result
 
 config = load_config({str(config_path)!r})
+config = replace(config, database=replace(config.database, path={str(tmp_path / 'plans.db')!r}))
+open_database(config.database.path).close()
 store = plan_store.PlanStore(config, {str(config_path)!r})
 marker = datetime(2026, 10, 27, 10, tzinfo=timezone.utc)
 failure = False
@@ -48,7 +53,7 @@ async def calculate(callback, *args):
     global calls
     if callback.__name__ == 'warm_planning_worker':
         return 123
-    configured, cutoff, override = args
+    configured, cutoff = args[:2]
     stamp = marker
     calls += 1
     await asyncio.sleep(.7 if configured.energy_plan.protection_preference == 80 else .15)
@@ -59,8 +64,9 @@ async def calculate(callback, *args):
         for solar in ['low', 'med', 'high']:
             name = 'med' if load == solar == 'med' else load + '_' + solar
             result.results[name] = result.results['med'].copy()
-    return PlanReport(result, pd.DataFrame(), 20., configured.energy_plan.scenarios,
+    report = PlanReport(result, pd.DataFrame(), 20., configured.energy_plan.scenarios,
         configured.energy_plan.preferred_reserve_kwh, configured.energy_plan.protection_preference, 20., stamp)
+    return persist_report(configured, report, cutoff, datetime.now(timezone.utc)) if callback.__name__ == 'generate_saved_plan' else report
 run.cpu_bound = calculate
 
 async def start():

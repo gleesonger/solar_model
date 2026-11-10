@@ -25,6 +25,7 @@ def setup_store(tmp_path, monkeypatch):
     store = plan_store.PlanStore(config, str(path))
     clock = SimpleNamespace(latest=datetime(2026, 11, 5, 12, tzinfo=timezone.utc), calls=[], failure=False)
     monkeypatch.setattr(plan_store, "latest_full_update", lambda path: clock.latest)
+    monkeypatch.setattr(plan_store, "read_saved_run", lambda *args: None)
 
     async def io_bound(callback, *args):
         return callback(*args)

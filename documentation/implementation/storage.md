@@ -210,3 +210,7 @@ Next: [forecast correction](forecasting.md), [dashboard queries](dashboard-data.
 ## No Solar Cost migration (0.3.1)
 
 `_migrate_no_solar_cost()` overwrites every raw `no_solar_battery_import_cost_period` with `ROUND(house_load_kwh_period * import_rate / 10000.0)` in stored units, using each reading's recorded historical import tariff. Missing house energy or tariff produces null, including intervals skipped by house integration; zero remains zero. It replaces hourly aggregates and publishes `database_version = 0.3.1` in the same `BEGIN IMMEDIATE` transaction. A failure rolls back raw values, hourly rows and version; repeat opening skips the completed migration. Other raw costs, tariff fields and measurements are unchanged. Collection derives house energy before calculating economics; later tariff recalculation uses the same house-load basis.
+
+## Plan history migration (0.3.3)
+
+`_migrate_plan_history()` creates the single `plan_history` table and publishes database version `0.3.3` under an immediate transaction. Existing `0.3.2` installations skip all telemetry/forecast rebuilds. Saves commit report sections and retention together. Reads do not migrate or prune. See the [schema and retention contract](plan-history.md).

@@ -9,7 +9,7 @@ solar_model/
   config.py, tariffs.py, time_utils.py, logging_setup.py, paths.py, utils.py
   planning/
     types.py, scenarios.py, plan_optimisation_milp.py, system.py,
-    plan_optimisation_dynamic_programming.py, projection_grid.py
+    plan_optimisation_dynamic_programming.py, plan_report.py, projection_grid.py
     forecasts/solar.py, house_load.py
   services/collection.py, forecasting.py, planning.py
   integrations/
@@ -68,3 +68,5 @@ For a metric change, follow [adding a metric](../implementation/adding-a-metric.
 The experimental `planning.plan_optimisation_dynamic_programming` planner is invoked by `tools.benchmark_planning --model dp`; it is not the dashboard/service default. See the [DP model contract](plan-model.md#25-experimental-dynamic-programming).
 
 The [DP code ownership map](../implementation/dynamic-programming.md#code-ownership-map) identifies stage orchestration, input assembly, search, period physics/scoring and reporting functions.
+
+Saved plan preparation lives in `planning/plan_report.py` and `services/plan_history.py`; `storage/plan_history.py` owns atomic persistence/retention. `dashboard/tabs/plan_history.py` browses saved reports and shares `components/plan_detail.py` with the live Plan tab. See [saved plans](../implementation/plan-history.md).

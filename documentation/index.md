@@ -87,3 +87,5 @@ Keep concise explanations in `overview/`, detailed code/data contracts in `imple
 - Use source paths and symbol names for implementation links. The workspace can include uncommitted changes; Git HEAD alone does not establish the implementation being described.
 - Run the checks in [development and testing](operations/development-and-testing.md) for the revision being assessed. Old test counts and review revisions do not establish its status.
 - The [Modbus protocol PDF](reference/Sigenergy%20Modbus%20Protocol%20EN_V2.9.pdf) describes vendor contracts; installed-firmware behavior still requires device verification. See [verification scope](reviews/verification.md).
+
+[Saved plans and Plan History](implementation/plan-history.md): worker publication, one-table storage, submission-time retention and browser retrieval.

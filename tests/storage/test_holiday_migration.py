@@ -27,7 +27,7 @@ def test_open_database_migrates_existing_version_and_preserves_forecasts(tmp_pat
     try:
         assert inspect(migrated.engine).has_table("holiday_period")
         with migrated.engine.connect() as connection:
-            assert connection.exec_driver_sql("SELECT value FROM database_metadata WHERE key='database_version'").scalar() == "0.3.2"
+            assert connection.exec_driver_sql("SELECT value FROM database_metadata WHERE key='database_version'").scalar() == "0.3.3"
             assert connection.exec_driver_sql("SELECT load_kwh FROM forecast_house_load").scalar() == 12500
         if existing_holidays:
             assert migrated.list_holiday_periods() == [("2026-12-24", "2026-12-25")]

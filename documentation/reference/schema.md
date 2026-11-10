@@ -253,7 +253,7 @@ Declared indexes:
 
 Primary key: `key`.
 
-`database_version` is `0.3.2` after creating `holiday_period`; `0.3.1` introduced No Solar Cost conversion to House Load; `0.3.0` introduced house-forecast replacement; `0.1.0` or absent versions first run the house-energy backfill to `0.2.0`. `hourly_rollup_initialized_v3` remains a separate hourly-readiness marker.
+`database_version` is `0.3.3` after creating `plan_history`; `0.3.2` created `holiday_period`; `0.3.1` introduced No Solar Cost conversion to House Load; `0.3.0` introduced house-forecast replacement; `0.1.0` or absent versions first run the house-energy backfill to `0.2.0`. `hourly_rollup_initialized_v3` remains a separate hourly-readiness marker.
 
 | Field | SQL type | ORM API | Nullable |
 | --- | --- | --- | --- |
@@ -268,3 +268,18 @@ Primary key: `key`.
 - It records `hourly_rollup_initialized_v3 = "1"` atomically with completed hourly creation/recovery; this readiness marker is not a schema-version record.
 - `forecast_last_attempt_utc` stores an aware UTC ISO timestamp reserved before a due external forecast scan. The scheduler also checks the latest saved collection for compatibility with databases lacking this key. Failed attempts retain the marker.
 - Column inventory is generated from `Base.metadata.tables`; it describes the current declared schema, not every possible legacy column remaining in a user database.
+
+## `plan_history` (0.3.3)
+
+Primary key: `(snapshot_id, view, scenario)`. Indexes: `idx_plan_history_time(saved_at)` and `idx_plan_history_slot(slot, saved_at)`. One row holds one report section's chronological interval arrays, not one telemetry measurement.
+
+| Field | SQL type | Meaning |
+| --- | --- | --- |
+| `snapshot_id` | TEXT | UUID shared by all sections of a completed run |
+| `view` | TEXT | metadata, Compact, Advanced, or optional Expected |
+| `scenario` | TEXT | Scenario name; empty for metadata |
+| `saved_at` | INTEGER | Completion UTC epoch microseconds |
+| `slot` | INTEGER | UTC half-hour bucket derived from completion |
+| `payload` | BLOB | zlib-compressed UTF-8 JSON; full-precision floats and ISO UTC interval timestamps, format version 1 |
+
+All fields are non-null. Metadata retains settings, action, input/capacity information and visible boundaries. Only the latest retains actual chart observations. These payloads do not use measurement scaling. Current database version is `0.3.3`; see [saved-plan contracts](../implementation/plan-history.md).

@@ -356,7 +356,7 @@ Scoring checks cover preference endpoints, zero-based reserve, non-positive refe
 | Objective | Tariff-scaled, duration-weighted diminishing protection reward minus net cost across visible and hidden periods, with normalised scenario probabilities |
 | Bounds | Configured interval-end minimum/maximum are hard constraints; preferred reserve is a soft scoring input |
 | Output | `SimulationResult` contains `NextAction`/`OperatingMode` and scenario DataFrames, including post-scaling score contributions; separate lookahead_results retains hidden rows; CLI exports visible reports |
-| Dashboard service | `generate_plan_report` accepts an optional browser-local energy-plan overlay and returns simulation/actuals/capacity plus presentation metadata; plans are not persisted, and settings reach disk only through the explicit UI save action |
+| Dashboard service | `generate_plan_report` accepts an optional browser-local energy-plan overlay and returns simulation/actuals/capacity plus presentation metadata; shared background reports are persisted by `generate_saved_plan`; demonstrations remain private, and runtime configuration changes reach disk only through the explicit UI save action |
 | Execution | Report-only; no controller, battery commands or automatic replanning |
 
 CLI grouping currently retains only the first score contribution per output bucket rather than summing it; this is a [tracked reporting defect](../reviews/findings.md). Use original simulation periods or Advanced dashboard/Excel for score totals until that path is corrected.

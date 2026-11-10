@@ -67,3 +67,5 @@ flowchart TD
 ## Maintenance and limitations
 
 These guides describe implementation contracts, including limitations; examples do not define new requirements. Keep them synchronized with source changes under [AGENTS.md](../../AGENTS.md). Consult [findings](../reviews/findings.md) for unresolved issues and [verification scope](../reviews/verification.md) for checks that still require integration testing. Source links may refer to uncommitted workspace changes; no single historical revision certifies the entire guide.
+
+[Saved plans and Plan History](plan-history.md): worker publication, one-table storage, submission-time retention and browser retrieval.

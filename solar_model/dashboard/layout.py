@@ -14,6 +14,7 @@ from solar_model.config import Config
 from solar_model.dashboard.tabs.analysis import AnalysisTab
 from solar_model.dashboard.tabs.control import ControlTab
 from solar_model.dashboard.tabs.plan import PlanTab
+from solar_model.dashboard.tabs.plan_history import PlanHistoryTab
 from solar_model.dashboard.live import LivePowerCollector
 from solar_model.dashboard.state import DashboardElements, DashboardState
 from solar_model.dashboard.tabs.recent import RecentTab
@@ -45,6 +46,7 @@ class DashboardLayout:
         self.system_info_tab = SystemInfoTab(config, self.elements)
         self.control_tab = ControlTab(config)
         self.plan_tab = PlanTab(config, config_path, plan_store)
+        self.plan_history_tab = PlanHistoryTab(config)
 
     def render_dashboard_layout(self, container: Column, snapshot: DashboardSnapshot) -> None:
         LOGGER.info("Dashboard page UI loading")
@@ -57,6 +59,8 @@ class DashboardLayout:
                     self.historical_tab.render_historical_tab()
             if self.state.active_tab == "Control":
                 ui.timer(0.1, self.control_tab.show_latest_holiday, once=True)
+            if self.state.active_tab == "Plan History":
+                ui.timer(0.01, self.plan_history_tab.activate, once=True)
             self.historical_tab.set_controls_visibility(self.state.active_tab == "Analysis")
 
         with container:
@@ -69,6 +73,7 @@ class DashboardLayout:
                         recent = ui.tab("Recent")
                         historical = ui.tab("Analysis")
                         plan = ui.tab("Plan")
+                        plan_history = ui.tab("Plan History")
                         system_info = ui.tab("System Info")
                         control = ui.tab("Control")
                     self.historical_tab.render_mobile_controls_trigger()
@@ -78,6 +83,7 @@ class DashboardLayout:
                 "Recent": recent,
                 "Analysis": historical,
                 "Plan": plan,
+                "Plan History": plan_history,
                 "Historical": historical,
                 "System Info": system_info,
                 "Control": control,
@@ -93,6 +99,8 @@ class DashboardLayout:
                     self.system_info_tab.render_system_info_tab(snapshot.device_information)
                 with ui.tab_panel(plan).classes("p-0 min-w-0"):
                     self.plan_tab.render_plan_tab()
+                with ui.tab_panel(plan_history).classes("p-0 min-w-0"):
+                    self.plan_history_tab.render()
                 with ui.tab_panel(control).classes("p-0"):
                     self.control_tab.render_control_tab()
                     if self.state.active_tab == "Control":

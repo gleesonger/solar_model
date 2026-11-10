@@ -2,7 +2,7 @@ from __future__ import annotations
 import re
 from datetime import datetime
 from zoneinfo import ZoneInfo
-from sqlalchemy import Column, Index, Integer, String, Table, Text, func
+from sqlalchemy import Column, Index, Integer, LargeBinary, String, Table, Text, func
 from sqlalchemy.ext.hybrid import hybrid_property
 from sqlalchemy.engine import Dialect
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
@@ -49,6 +49,19 @@ Float = ScaledInteger
 
 class Base(DeclarativeBase):
     pass
+
+
+class PlanHistory(Base):
+    """One compressed, versioned report section per snapshot/view/scenario."""
+
+    __tablename__ = "plan_history"
+    snapshot_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    view: Mapped[str] = mapped_column(Text, primary_key=True)
+    scenario: Mapped[str] = mapped_column(Text, primary_key=True)
+    saved_at: Mapped[int] = mapped_column(Integer, nullable=False)
+    slot: Mapped[int] = mapped_column(Integer, nullable=False)
+    payload: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    __table_args__ = (Index("idx_plan_history_time", "saved_at"), Index("idx_plan_history_slot", "slot", "saved_at"))
 
 class SigenStorModbusSample(Base):
     __tablename__ = "sigenstor"

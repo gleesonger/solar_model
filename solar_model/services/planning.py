@@ -52,6 +52,7 @@ class PlanReport:
     protection_preference: float | None = None
     command_battery_capacity_kwh: float | None = None
     full_data_at: datetime | None = None
+    details: dict[str, dict[str, pd.DataFrame]] | None = None
 
 
 def latest_full_update(database_path: str) -> datetime | None:

@@ -16,6 +16,7 @@ from solar_model.dashboard.planning_worker import ensure_planning_worker
 from solar_model.logging_setup import LOGGER
 from solar_model.planning.types import NoFeasiblePlanError
 from solar_model.services.planning import PlanReport, generate_plan_report, latest_full_update
+from solar_model.services.plan_history import generate_saved_plan, read_saved_run
 
 
 @dataclass(frozen=True)
@@ -26,6 +27,7 @@ class PlanRun:
     full_data_at: datetime
     completed_at: datetime
     demonstration: bool = False
+    snapshot_id: str | None = None
 
 
 class PlanStore:
@@ -86,6 +88,12 @@ class PlanStore:
     async def _calculate(self, config: Config, demonstration: bool = False) -> PlanRun:
         began_at = datetime.now(timezone.utc)
         await ensure_planning_worker()
+        if not demonstration:
+            snapshot_id = await run.cpu_bound(generate_saved_plan, config, began_at)
+            saved = await run.io_bound(read_saved_run, config, snapshot_id)
+            if saved is None:
+                raise RuntimeError("The saved plan could not be read")
+            return PlanRun(saved.report, saved.settings, saved.began_at, saved.full_data_at, saved.completed_at, snapshot_id=saved.snapshot_id)
         report = await run.cpu_bound(generate_plan_report, config, began_at, None)
         if report is None or report.full_data_at is None:
             raise RuntimeError("The plan calculation did not return a full-data timestamp")
@@ -125,6 +133,11 @@ class PlanStore:
         await self.reload_settings()
         latest = await run.io_bound(latest_full_update, self.config.database.path)
         if not self._baseline_established:
+            saved = await run.io_bound(read_saved_run, self.config)
+            if saved is not None:
+                self.current = PlanRun(saved.report, saved.settings, saved.began_at, saved.full_data_at, saved.completed_at, snapshot_id=saved.snapshot_id)
+                self.version += 1
+                self._publish()
             self._observed_data_at = latest
             self._baseline_established = True
             LOGGER.info("Background plan waiting for a new full SigEnergy reading: latest_full_data_at=%s", latest)

@@ -16,6 +16,7 @@ For a consolidated comparison of units, signs, missing values, time attribution 
 | `forecast_house_load` | `target_day`, `forecast_time` | One fixed hourly house-load profile per configured-local date; generation timestamp and nullable household kWh |
 | `holiday_period` | integer `id` | Inclusive local-date ranges used by the separate holiday household-load model |
 | `sigenstor_devices` | integer `id` | Append-only valid device-value changes, with variable/name/value/unit and ISO UTC/local timestamps |
+| `plan_history` | snapshot ID, view, scenario | Versioned compressed JSON report sections for live plans and history; UTC completion microseconds and half-hour slots |
 | `database_metadata` | `key` | Key/value storage including `database_version` and hourly-initialization completion |
 
 ## Units and time
@@ -46,10 +47,14 @@ For a consolidated comparison of units, signs, missing values, time attribution 
 
 - Version `0.3.1` overwrites No Solar Cost using stored House Load × recorded import rate, rebuilds hourly history, and updates the version atomically. Missing inputs stay null; existing Load counters are never a fallback. Startup applies the migration once, or use the existing migration CLI.
 
-- Version `0.3.2` creates `holiday_period` and advances the version in one transaction without rewriting measurements or forecasts. Version `0.3.0` creates `forecast_house_load` and drops the undeployed `forecast_load` table and its local predictions. The version update and forecast-table replacement share a transaction. Version `0.2.0` databases retain their already-backfilled house energy without another raw/hourly rebuild. Current startup version is `0.3.2`.
+- Version `0.3.2` creates `holiday_period` and advances the version in one transaction without rewriting measurements or forecasts. Version `0.3.0` creates `forecast_house_load` and drops the undeployed `forecast_load` table and its local predictions. The version update and forecast-table replacement share a transaction. Version `0.2.0` databases retain their already-backfilled house energy without another raw/hourly rebuild. Current startup version is `0.3.3`; it adds `plan_history` without rewriting telemetry or forecasts.
 
 - `database_metadata.database_version` advances from `0.1.0` (or absent) to `0.2.0` when the house-load historical backfill and hourly rebuild commit together. Missing columns are added before the backfill; an interrupted backfill retains the old version and retries. Versions `0.2.0`, `0.3.0`, `0.3.1` and `0.3.2` skip this energy backfill; unsupported versions are rejected before schema changes. Normal startup runs migration, or run `python -m solar_model.tools.migrate_database <database-copy.db>` explicitly.
 - `open_database()` renames legacy forecast fields to `_raw_`, renames battery availability to the plant-level name, creates tables, adds missing columns, and drops legacy JSON columns.
 - Conflicting duplicate raw/legacy forecast values cause migration refusal rather than silent data loss.
 - Initial hourly creation/rebuild and `hourly_rollup_initialized_v3` commit together. Older v1/v2 or unmarked history rebuilds once to populate valid counts; interrupted initialization retries. Later marked opens skip the scan. Adding unrelated columns alone does not trigger another rebuild.
 - Schema opening can write substantial data. Back up before deployment; additive schema changes do not automatically derive historical values for new metrics.
+
+## Saved planning reports
+
+The `plan_history` payload is a versioned compressed JSON report, not a scaled measurement record. It retains full-precision plan values, full interval timestamps and original settings. Saves and age-based cleanup share one transaction; reads never delete old reports. See the [plan-history implementation](../implementation/plan-history.md) for retention and publication contracts.

@@ -48,7 +48,8 @@ def test_excel_filename_uses_applied_model_adjustment_scenario_and_plan_date(mon
         exported_frames.append(frame)
         return b"workbook"
 
-    monkeypatch.setattr(plan, "excel_bytes", capture_workbook)
+    from solar_model.dashboard.components import plan_detail
+    monkeypatch.setattr(plan_detail, "excel_bytes", capture_workbook)
     monkeypatch.setattr(plan.ui, "download", lambda content, **kwargs: downloads.append(kwargs))
     frame = tab.result.results[tab.scenario_name].assign(limit_score=[-2., -3.], plan_action=["Force discharge", "Force charge"])
     tab._download_detail(frame, plan.detail_columns(frame, compact=view == "Compact"))

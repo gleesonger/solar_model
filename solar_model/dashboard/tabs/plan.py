@@ -166,7 +166,7 @@ class PlanTab:
     def render_plan_tab(self) -> None:
         with ui.row().classes("w-full items-end gap-4 flex-wrap"):
             self.settings_button = ui.button("Plan settings", icon="settings", on_click=self.open_plan_settings)
-            self.history_date = ui.input("Plan date", value="", on_change=self._load_snapshot_options).props("type=date clearable outlined dense").classes("w-40")
+            self.history_date = ui.input("Plan date", value=datetime.now(self.timezone).date().isoformat(), on_change=self._load_snapshot_options).props("type=date clearable outlined dense").classes("w-40")
             self.history_snapshot = ui.select({}, value=None, label="Snapshot", on_change=self._select_snapshot).props("clearable outlined dense").classes("w-64 max-w-full")
             with ui.row().classes("items-center gap-2") as self.loading:
                 ui.spinner(size="sm")
@@ -175,6 +175,7 @@ class PlanTab:
         self.status = ui.label("Waiting for a new full SigEnergy reading to calculate the plan." if self.plan_store else "Run a demonstration using the latest available data.").classes("text-sm text-gray-600")
         self.output = ui.column().classes("w-full min-w-0 gap-4")
         self.apply_shared_plan()
+        ui.timer(0, self._load_snapshot_options, once=True)
         if self.plan_store is not None:
             ui.timer(60, self.refresh_actuals, immediate=False)
 
@@ -488,7 +489,7 @@ class PlanTab:
         with self.summary_output:
             with ui.element("div").classes("grid w-full grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 rounded border"):
                 for label, value in (
-                    ("Stress-case net cost" if self.result.expected_score is not None else "Net cost", cost_text),
+                    ("Net cost", cost_text),
                     ("Solar / House Load", f"{summary['solar']:.2f} / {summary['load']:.2f} kWh"),
                     ("Grid import / export", f"{summary['import']:.2f} / {summary['export']:.2f} kWh"),
                     ("Minimum / ending battery", f"{summary['minimum']:.2f} / {summary['ending']:.2f} kWh"),

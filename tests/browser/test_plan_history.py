@@ -57,7 +57,7 @@ if __name__ == '__main__':
         connection.exec_driver_sql("UPDATE plan_history SET payload = ? WHERE snapshot_id = ? AND view = 'metadata'", (encode(stored.metadata), historical_id))
         for offset in (-15, 15, 30):
             connection.exec_driver_sql("INSERT INTO sigenstor (collected_at_utc, plant_pv_power_kw, plant_load_power_kw, plant_battery_soc_percent, plant_grid_power_kw) VALUES (?, 20000, 15000, 250000, -4000)", (int((old + timedelta(minutes=offset)).timestamp()),))
-    later = datetime.now(timezone.utc) - timedelta(minutes=10)
+    later = datetime.now(timezone.utc)
     persist_report(config, report(config, later), later, later)
     context = get_context('spawn')
     stop = context.Event()
@@ -128,7 +128,10 @@ if __name__ == '__main__':
                     page.get_by_test_id("plan-chart").wait_for()
                     assert page.get_by_role("tab", name="Plan History", exact=True).count() == 0
                     assert page.get_by_role("tab", name="Plan", exact=True).count() == 1
-                    assert page.get_by_label("Plan date", exact=True).input_value() == ""
+                    assert page.get_by_label("Plan date", exact=True).input_value() == datetime.now(ZoneInfo('Europe/Dublin')).date().isoformat()
+                    page.get_by_role("combobox", name="Snapshot", exact=True).click()
+                    page.get_by_role("option").first.wait_for()
+                    page.keyboard.press("Escape")
                     if width == 1440:
                         settings = page.get_by_role("button", name="Plan settings", exact=True).bounding_box()
                         date_box = page.get_by_label("Plan date", exact=True).bounding_box()

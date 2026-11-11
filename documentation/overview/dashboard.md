@@ -14,7 +14,7 @@ Plan detail column metadata lives in the insertion-ordered `PLAN_COLUMNS` dictio
 
 - **Recent:** Live/Today table; latest kW, daily meters, latest/BoD/raw forecast totals; past 7 days and past 12 months energy/economics.
 - **Analysis:** lazily loaded energy, power, battery, per-array and money charts; range/grouping/Sum–Average controls; custom chart builder and downloads.
-- **Plan:** latest or selected saved plan in one screen: blank date/snapshot controls follow latest; selecting a saved snapshot pins its action, summaries, scenarios, chart and detail table. Private demonstrations and settings remain available.
+- **Plan:** latest or selected saved plan in one screen: today's date preloads today's snapshot choices while a blank Snapshot follows latest; selecting a saved snapshot pins its action, summaries, scenarios, chart and detail table. Private demonstrations and settings remain available.
 - **System Info:** newest valid metadata value per variable.
 - **Control:** automatically saved holiday date ranges with an inclusive day count (a single entered date creates a one-day period), household-load forecast recalculation by selected months, confirmed tariff recalculation and managed restart actions.
 
@@ -68,7 +68,7 @@ Presentation formatting lives in `solar_model/dashboard/formatting.py`; query re
 
 [PlanStore](../../solar_model/dashboard/plan_store.py) is a server-wide cache/subscriber hub for plans committed by the headless planning service. It polls the latest saved ID and service status every second, loads changed reports once, and publishes browser updates. Startup restores the last saved result. The planning service separately detects electrical updates, applies the configured cadence, persists successful plans and runs submission-time retention. See [saved plans](../implementation/plan-history.md).
 
-Plan date and Snapshot selectors sit immediately right of Plan settings, initially blank. A historical selection stays pinned while new actual plans arrive; clearing a selector returns to latest. The existing action, summaries, scenario selectors, chart, tables and exports display the selected snapshot. Both views remain available for the configured retention period; legacy Compact-only snapshots use their saved hourly resolution.
+Plan date and Snapshot selectors sit immediately right of Plan settings. On first load, Plan date is today in the configured timezone and today's snapshot choices load automatically; Snapshot stays blank to follow latest. The date remains editable and clearable. A historical selection stays pinned while new actual plans arrive; clearing a selector returns to latest. The existing action, summaries, scenario selectors, chart, tables and exports display the selected snapshot. Both views remain available for the configured retention period; legacy Compact-only snapshots use their saved hourly resolution.
 
 Invalid externally edited configuration retains the last valid live planning settings and logs a warning once for that file revision. Automatic planning continues with those settings until a valid revision is saved.
 

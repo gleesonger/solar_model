@@ -19,7 +19,7 @@ def test_plan_refresh_scenarios_loading_and_failure(tmp_path):
         sock.bind(("127.0.0.1", 0))
         port = sock.getsockname()[1]
     config_path = tmp_path / "config.yaml"
-    config_path.write_text((repo / "config.yaml").read_text(encoding="utf-8"), encoding="utf-8")
+    config_path.write_text((repo / "config.yaml").read_text(encoding="utf-8").replace("path: solar.db", f"path: {tmp_path.as_posix()}/solar.db"), encoding="utf-8")
     script = tmp_path / "plan_app.py"
     script.write_text(f'''
 import sys
@@ -86,7 +86,7 @@ def page():
                     ui.tab(name)
         with ui.tab_panels(tabs, value='Plan').classes('w-full'):
             with ui.tab_panel('Plan').classes('p-0 min-w-0'):
-                config = load_config()
+                config = load_config({str(config_path)!r})
                 config = replace(config, energy_plan=replace(config.energy_plan, scenario_multiplier=replace(config.energy_plan.scenario_multiplier,
                     house_load=replace(config.energy_plan.scenario_multiplier.house_load,
                         low=.5,

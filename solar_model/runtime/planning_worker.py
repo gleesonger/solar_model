@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from multiprocessing import get_context
 from multiprocessing.connection import Connection
 from multiprocessing.process import BaseProcess
+import os
 from threading import Lock
 from time import monotonic, sleep
 from typing import Any
@@ -17,7 +18,10 @@ def calculate(operation: str, config: Config) -> dict[str, Any]:
     # Capture the cutoff after the worker receives the job, never before queuing.
     from solar_model.services.planning import generate_plan_report
     from solar_model.services.plan_history import generate_saved_plan
+    from solar_model.logging_setup import LOGGER, configure_logging
+    configure_logging(config.logging.level)
     began_at = datetime.now(timezone.utc)
+    LOGGER.info("Planning calculation started - operation=%s worker_pid=%d", operation, os.getpid())
     if operation == "shared":
         return {"snapshot_id": generate_saved_plan(config, began_at)}
     if operation != "demonstration":

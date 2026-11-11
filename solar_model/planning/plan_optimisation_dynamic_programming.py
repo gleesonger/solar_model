@@ -1,7 +1,6 @@
 """Markov planner input preparation, physical transitions and report assembly."""
 from __future__ import annotations
 
-from contextlib import nullcontext
 from datetime import datetime, timedelta, timezone
 import math
 from time import perf_counter
@@ -13,6 +12,7 @@ import pandas as pd
 from solar_model.config import Config, EnergyPlanConfig
 from solar_model.logging_setup import LOGGER
 from solar_model.planning.projection_grid import projection_intervals as build_projection_intervals
+from solar_model.planning.native_compilation import track_native_compilation
 from solar_model.planning.types import DeviceInfo, DeviceState, NextAction, NoFeasiblePlanError, OperatingMode, ScenarioData, SimulationResult
 from solar_model.planning.system import allocate_energy_routes, system_limits
 from solar_model.tariffs import BATTERY_EXPORT_LIMIT_KW_DEFAULT, MAXIMUM_BATTERY_KWH_DEFAULT, MINIMUM_BATTERY_KWH_DEFAULT, tariff_rule, tariff_rule_rate, tariff_rules_for_timestamp
@@ -75,17 +75,12 @@ def simulate_energy_plan(device_info: DeviceInfo, device_state: DeviceState, sce
     """Run the Markov policy over the full battery range."""
     began_at = perf_counter()
     settings = config.energy_plan.optimiser
-    timer = None
     try:
         LOGGER.info("Markov DP Model Start - num_projection_hours=%d num_time_steps=%d grid_step_percent=%g power_divisions=%d compile_model_to_native_code=%s", config.energy_plan.num_projection_hours, len(projection_intervals(config, projection_starts_at)), settings.grid_step_percent, settings.power_divisions, settings.compile_model_to_native_code)
-        if settings.compile_model_to_native_code:
-            from numba.core.event import TimingListener, install_listener
-            timer = TimingListener()
-        with install_listener("numba:compile", timer) if timer is not None else nullcontext():
+        with track_native_compilation(settings.compile_model_to_native_code) as native:
             result = solve_pass(device_info, device_state, scenarios, config, projection_starts_at, grid_step_percent=grid_step_percent, power_divisions=power_divisions)
-        compiled = timer.duration if timer is not None and timer.done else 0.
         elapsed = perf_counter() - began_at
-        LOGGER.info("Markov DP Project end - elapsed_seconds=%.3f compile_seconds=%.3f projection_seconds=%.3f expected_score=%.9f", elapsed, compiled, elapsed - compiled, result.expected_score)
+        LOGGER.info("Markov DP Project end - elapsed_seconds=%.3f compile_seconds=%.3f support_compile_seconds=%.3f projection_seconds=%.3f native_cache=%s cache_hits=%d cache_misses=%d expected_score=%.9f", elapsed, native.model_seconds, native.support_seconds, max(0., elapsed - native.model_seconds - native.support_seconds), native.cache, native.disk_hits, native.disk_misses, result.expected_score)
         return result
     except NoFeasiblePlanError as error:
         LOGGER.warning("Markov DP unable to calculate a plan - %s - elapsed_seconds=%.3f", error, perf_counter() - began_at)

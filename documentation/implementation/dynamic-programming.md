@@ -2,7 +2,7 @@
 
 Markov DP is the only energy-plan optimiser. The MILP and independent-scenario DP implementations, selectors, staged corridors and solver dependencies have been removed. See the [Markov implementation](markov-dynamic-programming.md) for the recurrence, information assumptions, transitions, expected reporting and stress-case contracts.
 
-The public entry point is `planning.plan_optimisation_dynamic_programming.simulate_energy_plan()`. It prepares UTC-aligned periods, tariffs, schedules, physical limits and the complete battery grid, then calls `markov.solve_prepared()`. Python and Numba run the same numerical functions. Compilation remains lazy and is reported separately from projection time.
+The public entry point is `planning.plan_optimisation_dynamic_programming.simulate_energy_plan()`. It prepares UTC-aligned periods, tariffs, schedules, physical limits and the complete battery grid, then calls `markov.solve_prepared()`. Python and Numba run the same numerical functions. Compilation remains lazy. Logs separate model-kernel compilation from Numba support compilation and report model cache hits/misses; see [native compilation diagnostics](markov-dynamic-programming.md#python-and-numba).
 
 Required settings live directly in `energy_plan.optimiser`: `compile_model_to_native_code`, `transition_hours`, `transition_matrix` (separate required `solar` and `house_load` matrices), `projection_resolution_mins`, `grid_step_percent` and `power_divisions`. There is one full-range solve. No model selector, uncertainty selector, nested solver blocks or refinement stages remain. Missing values fail validation; legacy keys are rejected, not migrated or defaulted.
 

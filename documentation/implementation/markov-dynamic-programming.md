@@ -105,7 +105,12 @@ The `benchmark_planning` tool benchmarks only Markov in an isolated worker with 
 
 `compile_model_to_native_code` selects Python or lazily compiled versions of the same `backward_values()` and `forward_distribution()` functions. Shared helpers are registered for compilation. Periods, choices, grids, transitions and selected policy indices are converted to typed lists only for the compiled path. Native dispatchers are cached across calls; no synthetic warm-up, parallel loops or relaxed arithmetic are used.
 
-Initial lazy compilation is included in the existing stage/total timing accounting. Markov solves report one full-range stage, plus an INFO summary containing the expected objective and identifying stress detail. The older DEBUG independent-scenario phase breakdown does not describe Markov phases.
+The model dispatchers are retained in memory by `compiled_functions()` and use Numba's disk cache. Scheduled calculations reuse one persistent worker. Demonstrations use another persistent worker, so their first request must initialise that process even when the model kernels load from disk. Numba's Python typed-list adapters (`_make_list`, `_append`, etc.) compile separately in each process and are not the model kernel cache.
+
+`planning.native_compilation.track_native_compilation()` observes compile events without a warm-up or projection. The INFO completion log separates `compile_seconds` (Markov backward/forward kernels, including their nested compilation) from `support_compile_seconds` (remaining Numba support compilation). Nested events are not added twice. `projection_seconds` excludes both compilation totals but still includes input/report setup, cache loading and numerical execution. `native_cache` reports `compiled`, `disk`, `memory`, `mixed` or `python`; `cache_hits` and `cache_misses` are per-run disk-cache counter changes for the two model kernels. An enabled context that never reaches a kernel can report `unused`.
+
+The runtime logs `Planning calculation started` with `operation` and `worker_pid` so scheduled runs and demonstrations can be distinguished. An initial demonstration can correctly report a disk cache hit, zero model compilation and non-zero support compilation. After that, the same worker normally reuses both. Worker recreation after a deadline/crash or application restart has the same initialisation requirement. Source/Numba/signature changes and non-persistent or unavailable disk caches can require legitimate model compilation again.
+
 
 ## Approximation and remaining limits
 

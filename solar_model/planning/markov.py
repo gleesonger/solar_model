@@ -108,7 +108,7 @@ def solve_prepared(
             target = max(first_ends) / capacity * 100
         elif first_action.mode == OperatingMode.DISCHARGE_PV_FIRST:
             target = min(first_ends) / capacity * 100
-    LOGGER.info("Markov DP - layers=9 transition_hours=%g expected_score=%.9f; detail paths are stress illustrations", settings.transition_hours, expected_score)
+    LOGGER.info("Markov DP - transition_hours=%g expected_score=%.9f", settings.transition_hours, expected_score)
     return SimulationResult(
         next_action=dp.command(first_action, device, target),
         results={name: frame.iloc[:visible_count].copy() for name, frame in frames.items()},

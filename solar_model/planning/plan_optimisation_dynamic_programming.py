@@ -1,10 +1,8 @@
-"""Experimental discrete-action planner with an interpolated battery value grid."""
+"""Markov planner input preparation, physical transitions and report assembly."""
 from __future__ import annotations
 
 from contextlib import nullcontext
-from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
-from functools import lru_cache
 import math
 from time import perf_counter
 from typing import NamedTuple
@@ -12,7 +10,7 @@ from zoneinfo import ZoneInfo
 
 import pandas as pd
 
-from solar_model.config import Config, DPRefinementConfig, EnergyPlanConfig
+from solar_model.config import Config, EnergyPlanConfig
 from solar_model.logging_setup import LOGGER
 from solar_model.planning.projection_grid import projection_intervals as build_projection_intervals
 from solar_model.planning.types import DeviceInfo, DeviceState, NextAction, NoFeasiblePlanError, OperatingMode, ScenarioData, SimulationResult
@@ -73,73 +71,39 @@ class Action(NamedTuple):
     rate_kw: float
 
 
-def simulate_energy_plan(device_info: DeviceInfo, device_state: DeviceState, scenarios: list[ScenarioData], config: Config, projection_starts_at: datetime, *, grid_step_percent: float | None = None, power_divisions: int | None = None, battery_bounds: list[tuple[float, float]] | dict[str, list[tuple[float, float]]] | None = None) -> SimulationResult:
-    """Run Markov full-range DP or the legacy independent-scenario refinements."""
+def simulate_energy_plan(device_info: DeviceInfo, device_state: DeviceState, scenarios: list[ScenarioData], config: Config, projection_starts_at: datetime, *, grid_step_percent: float | None = None, power_divisions: int | None = None) -> SimulationResult:
+    """Run the Markov policy over the full battery range."""
     began_at = perf_counter()
-    compilation_seconds = 0.
+    settings = config.energy_plan.optimiser
+    timer = None
     try:
-        settings = config.energy_plan.optimiser.dynamic_programming
-        if not settings.refinement_stages or settings.refinement_stages[0].band_percent is not None:
-            raise ValueError("DP stages must begin with a full-range stage")
-        initial_stage = settings.refinement_stages[0]
-        if settings.uncertainty_model == "markov" and battery_bounds is not None:
-            raise ValueError("Markov DP requires full-range battery grids; path-based battery_bounds are unsupported")
-        single_pass = grid_step_percent is not None or power_divisions is not None or battery_bounds is not None
-        if single_pass:
-            stages = (DPRefinementConfig(initial_stage.grid_step_percent if grid_step_percent is None else grid_step_percent, initial_stage.power_divisions if power_divisions is None else power_divisions, None),)
-        else:
-            stages = (initial_stage,) if settings.uncertainty_model == "markov" else settings.refinement_stages
-        LOGGER.info("DP Model Start - num_projection_hours=%d num_time_steps=%d refinement_stages=%d use_numba=%s", config.energy_plan.num_projection_hours, len(projection_intervals(config, projection_starts_at)), len(stages), settings.use_numba)
-        if settings.use_numba:
+        LOGGER.info("Markov DP Model Start - num_projection_hours=%d num_time_steps=%d grid_step_percent=%g power_divisions=%d compile_model_to_native_code=%s", config.energy_plan.num_projection_hours, len(projection_intervals(config, projection_starts_at)), settings.grid_step_percent, settings.power_divisions, settings.compile_model_to_native_code)
+        if settings.compile_model_to_native_code:
             from numba.core.event import TimingListener, install_listener
-        capacity = system_limits(device_info, 1.).capacity_kwh
-        result, best_score = None, -math.inf
-        for index, stage in enumerate(stages):
-            stage_at = began_at if index == 0 else perf_counter()
-            bounds = battery_bounds if single_pass else None
-            if stage.band_percent is not None:
-                bounds = {}
-                for scenario in scenarios:
-                    energies = [*result.results[scenario.name].battery_end_kwh, *result.lookahead_results[scenario.name].battery_end_kwh]
-                    bounds[scenario.name] = [(max(0., energy / capacity - stage.band_percent / 100), min(1., energy / capacity + stage.band_percent / 100)) for energy in energies]
-            timer = TimingListener() if settings.use_numba else None
-            try:
-                with install_listener("numba:compile", timer) if settings.use_numba else nullcontext():
-                    refined = solve_pass(device_info, device_state, scenarios, config, projection_starts_at, grid_step_percent=stage.grid_step_percent, power_divisions=stage.power_divisions, battery_bounds=bounds)
-            except NoFeasiblePlanError:
-                if result is None:
-                    raise
-                LOGGER.warning("DP Refinement Stage #%d infeasible - retaining previous result", index + 1)
-                refined = None
-            score = -math.inf if refined is None else result_score(refined, scenarios)
-            accepted = score > best_score
-            if accepted:
-                result, best_score = refined, score
-            compiled = timer.duration if timer is not None and timer.done else 0.
-            elapsed = perf_counter() - stage_at - compiled
-            compilation_seconds += compiled
-            LOGGER.info("DP Refinement Stage #%d complete - compilation_seconds=%.3f projection_seconds=%.3f score=%.9f accepted=%s", index + 1, compiled, elapsed, best_score, accepted)
+            timer = TimingListener()
+        with install_listener("numba:compile", timer) if timer is not None else nullcontext():
+            result = solve_pass(device_info, device_state, scenarios, config, projection_starts_at, grid_step_percent=grid_step_percent, power_divisions=power_divisions)
+        compiled = timer.duration if timer is not None and timer.done else 0.
         elapsed = perf_counter() - began_at
-        LOGGER.info("DP Project end - elapsed_seconds=%.3f compile_seconds=%.3f projection_seconds=%.3f score=%.9f", elapsed, compilation_seconds, elapsed - compilation_seconds, best_score)
+        LOGGER.info("Markov DP Project end - elapsed_seconds=%.3f compile_seconds=%.3f projection_seconds=%.3f expected_score=%.9f", elapsed, compiled, elapsed - compiled, result.expected_score)
         return result
     except NoFeasiblePlanError as error:
-        LOGGER.warning("DP unable to calculate a plan - %s - elapsed_seconds=%.3f", error, perf_counter() - began_at)
+        LOGGER.warning("Markov DP unable to calculate a plan - %s - elapsed_seconds=%.3f", error, perf_counter() - began_at)
         raise
     except Exception:
-        LOGGER.exception("DP Project failed - elapsed_seconds=%.3f", perf_counter() - began_at)
+        LOGGER.exception("Markov DP Project failed - elapsed_seconds=%.3f", perf_counter() - began_at)
         raise
 
 
-def solve_pass(device_info: DeviceInfo, device_state: DeviceState, scenarios: list[ScenarioData], config: Config, projection_starts_at: datetime, *, grid_step_percent: float = 2., power_divisions: int = 5, battery_bounds: list[tuple[float, float]] | dict[str, list[tuple[float, float]]] | None = None) -> SimulationResult:
-    """Prepare validated periods and dispatch the configured uncertainty calculation."""
-    began_at = perf_counter()
-    
+def solve_pass(device_info: DeviceInfo, device_state: DeviceState, scenarios: list[ScenarioData], config: Config, projection_starts_at: datetime, *, grid_step_percent: float | None = None, power_divisions: int | None = None) -> SimulationResult:
+    """Prepare validated periods and run the sole Markov calculation."""
+    settings = config.energy_plan.optimiser
+    grid_step_percent = settings.grid_step_percent if grid_step_percent is None else grid_step_percent
+    power_divisions = settings.power_divisions if power_divisions is None else power_divisions
     names = [s.name for s in scenarios]
 
     if not scenarios or any(not name.strip() for name in names) or len(set(names)) != len(names):
         raise ValueError("scenario names must be non-empty and unique")
-    if any(not math.isfinite(s.probability) or s.probability < 0 for s in scenarios) or sum(s.probability for s in scenarios) <= 0:
-        raise ValueError("scenario probabilities must be finite, non-negative and have a positive total")
     if not math.isfinite(grid_step_percent) or not 0 < grid_step_percent <= 100:
         raise ValueError("grid step must be between 0 and 100 percent")
     
@@ -153,28 +117,24 @@ def solve_pass(device_info: DeviceInfo, device_state: DeviceState, scenarios: li
     if not math.isfinite(initial) or not 0 <= initial <= capacity:
         raise ValueError("initial battery energy must be within physical capacity")
 
-    validated_at = perf_counter()
 
     start = utc_instant(projection_starts_at)
     intervals = projection_intervals(config, start)
 
     visible_end = start + timedelta(hours=config.energy_plan.num_visible_projection_hours)
     num_visible_periods = sum(end <= visible_end for _, end in intervals)
-    num_hidden_periods = len(intervals) - num_visible_periods
 
     total_hours = sum((end - begin).total_seconds() / 3600 for begin, end in intervals)
     protection_reward_value = protection_value(config, start, total_hours)
     terminal_credit_rate = terminal_rate(config, intervals[-1][1]) * device_info.battery_discharge_efficiency * device_info.inverter_dc_to_ac_efficiency
     
     zone = ZoneInfo(config.timezone)
-    setup_at = perf_counter()
 
     scenario_periods = []
     for scenario in scenarios:
         periods = []
         for begin_utc, end_utc in intervals:
             begin_local  = begin_utc.astimezone(zone)
-            end_local = end_utc.astimezone(zone)
 
             imports, exports = tariff_rules_for_timestamp(config.tariffs, begin_local)
             buy, sell = tariff_rule(imports, begin_local), tariff_rule(exports, begin_local)
@@ -193,7 +153,6 @@ def solve_pass(device_info: DeviceInfo, device_state: DeviceState, scenarios: li
             periods.append(Period(begin_utc.timestamp(), end_utc.timestamp(), float(forecast.solar_kwh), float(forecast.load_kwh), float(buy.rate), float(sell.rate), buy.name, float(minimum), float(maximum), float(export_limit), hours, protection_reward_value * hours / total_hours / 100, float(reserve)))
 
         scenario_periods.append(periods)
-    periods_at = perf_counter()
 
     # Include exact schedule boundaries and the measured state alongside the SOC grid.
     grid = {capacity * min(100., i * grid_step_percent) / 100 for i in range(math.ceil(100 / grid_step_percent) + 1)}
@@ -203,109 +162,15 @@ def solve_pass(device_info: DeviceInfo, device_state: DeviceState, scenarios: li
         grid.update((min(capacity, max(0., period.minimum)), min(capacity, max(0., period.maximum))))
 
     grid = sorted(grid)
-    if config.energy_plan.optimiser.dynamic_programming.uncertainty_model == "markov":
-        if battery_bounds is not None:
-            raise ValueError("Markov DP requires full-range battery grids; path-based battery_bounds are unsupported")
-        from solar_model.planning.markov import solve_prepared
-        return solve_prepared(device_info, capacity, initial, scenarios, scenario_periods, grid, config, power_divisions, terminal_credit_rate, num_visible_periods)
-    if isinstance(battery_bounds, dict) and set(battery_bounds) != set(names):
-        raise ValueError("battery bounds must cover exactly the supplied scenario names")
-    scenario_grids = []
-    for scenario in scenarios:
-        bounds = battery_bounds.get(scenario.name) if isinstance(battery_bounds, dict) else battery_bounds
-        if bounds is None:
-            bounds = [(0., 1.)] * len(intervals)
-        elif len(bounds) == num_visible_periods:
-            bounds = [*bounds, *[(0., 1.) for _ in range(num_hidden_periods)]]
-        if len(bounds) != len(intervals):
-            raise ValueError("battery bounds need one pair per visible period or per full-horizon period")
-        scenario_grids.append(bounded_grids(grid, capacity, bounds))
-    choices = actions(device_info, config.energy_plan, power_divisions)
-    
-    use_numba = config.energy_plan.optimiser.dynamic_programming.use_numba
-    calculation_device = DeviceParameters(*(float(getattr(device_info, field)) for field in DeviceParameters._fields))
+    from solar_model.planning.markov import solve_prepared
+    return solve_prepared(device_info, capacity, initial, scenarios, scenario_periods, grid, config, power_divisions, terminal_credit_rate, num_visible_periods)
 
-    if use_numba:
-        backward, forward = get_numba_functions()
-        # Convert lists to numba lists
-        from numba.typed import List
-        calculation_periods = [List(periods) for periods in scenario_periods]
-        calculation_grids = [List([List(grid) for grid in grids]) for grids in scenario_grids]
-        calculation_choices = List(choices)
-    else:
-        backward, forward = backward_values, forward_projection
-        calculation_periods, calculation_grids, calculation_choices = scenario_periods, scenario_grids, choices
-
-    grid_at = perf_counter()
-
-    tables = [backward(calculation_device, capacity, periods, grids, calculation_choices, terminal_credit_rate) for periods, grids in zip(calculation_periods, calculation_grids)]
-
-    if use_numba:
-        tables = [List([List(row) for row in table]) for table in tables]
-
-    backward_at = perf_counter()
-
-    # Select using actual feasible rollouts, rather than interpolated scores alone.
-    best_score, best_action, best_paths = -math.inf, None, None
-    scoring_seconds = 0.
-    for action in choices:
-        paths = []
-        score = 0.
-        for scenario, periods, grids, values in zip(scenarios, calculation_periods, calculation_grids, tables):
-            path = forward(calculation_device, capacity, periods, grids, values, calculation_choices, initial, action)
-            if path is None:
-                break
-            paths.append(path)
-            scoring_at = perf_counter()
-            score += scenario.probability * (sum(step.score for step in path) + terminal_credit_rate * path[-1].battery_end)
-            scoring_seconds += perf_counter() - scoring_at
-        if len(paths) == len(scenarios) and score > best_score:
-            best_score, best_action, best_paths = score, action, paths
-    if best_paths is None:
-        raise NoFeasiblePlanError("unable to find a feasible energy plan on the dynamic-programming grid")
-    forward_at = perf_counter()
-
-    frames = {s.name: result_frame(device_info, periods, path, initial, terminal_credit_rate) for s, periods, path in zip(scenarios, scenario_periods, best_paths)}
-    first_ends = [path[0].battery_end for path in best_paths]
-    target = None
-    if best_action.mode == OperatingMode.CHARGE_PV_FIRST and best_action.rate_kw > 0:
-        target = max(first_ends) / capacity * 100
-    elif best_action.mode == OperatingMode.DISCHARGE_PV_FIRST and best_action.rate_kw > 0:
-        target = min(first_ends) / capacity * 100
-    result = SimulationResult(
-        next_action=command(best_action, device_info, target),
-        results={name: frame.iloc[:num_visible_periods].copy() for name, frame in frames.items()},
-        lookahead_results={name: frame.iloc[num_visible_periods:].reset_index(drop=True) for name, frame in frames.items()},
-    )
-    finished_at = perf_counter()
-    LOGGER.debug(
-        "dp_model timings: validation_seconds=%.3f setup_seconds=%.3f periods_seconds=%.3f "
-        "grid_actions_seconds=%.3f backward_seconds=%.3f forward_seconds=%.3f scoring_seconds=%.3f "
-        "reports_seconds=%.3f elapsed_seconds=%.3f",
-        validated_at - began_at,
-        setup_at - validated_at,
-        periods_at - setup_at,
-        grid_at - periods_at,
-        backward_at - grid_at,
-        forward_at - backward_at - scoring_seconds,
-        scoring_seconds,
-        finished_at - forward_at,
-        finished_at - began_at,
-    )
-    return result
-
-
-def result_score(result: SimulationResult, scenarios: list[ScenarioData]) -> float:
-    """Markov expectation, or the legacy probability-weighted realised score."""
-    if result.expected_score is not None:
-        return result.expected_score
-    return float(sum(s.probability * (result.results[s.name].total_score.sum() + result.lookahead_results[s.name].total_score.sum()) for s in scenarios) / sum(s.probability for s in scenarios))
 
 
 def projection_intervals(config: Config, starts_at: datetime) -> list[tuple[datetime, datetime]]:
     """Keep the first action at 15 minutes, then follow UTC-aligned boundaries."""
     settings = config.energy_plan
-    minutes = settings.optimiser.dynamic_programming.projection_resolution_mins
+    minutes = settings.optimiser.projection_resolution_mins
     if settings.num_projection_hours <= 0 or not minutes or any(type(step) is not int or step <= 0 for step in minutes):
         raise ValueError("DP projection duration and timesteps must be positive")
     if sum(minutes) < settings.num_projection_hours * 60:
@@ -347,90 +212,6 @@ def actions(device: DeviceInfo, settings: EnergyPlanConfig, power_divisions: int
                 if choice not in choices:
                     choices.append(choice)
     return choices
-
-
-def bounded_grids(grid: list[float], capacity: float, bounds: list[tuple[float, float]]) -> list[list[float]]:
-    """Restrict period-end search nodes without changing action profiles."""
-    grids = [grid]
-    for lower, upper in bounds:
-        if not math.isfinite(lower) or not math.isfinite(upper) or not 0 <= lower <= upper <= 1:
-            raise ValueError("battery bounds must be finite SOC fractions with 0 <= lower <= upper <= 1")
-        minimum, maximum = lower * capacity, upper * capacity
-        nodes = {energy for energy in grid if minimum <= energy <= maximum}
-        nodes.update((minimum, maximum))
-        grids.append(sorted(nodes))
-    return grids
-
-
-@lru_cache(maxsize=1)
-def get_numba_functions() -> tuple[Callable[..., list[list[float]]], Callable[..., list[Step] | None]]:
-    """Import Numba locally and cache lazy compiled versions of the same functions."""
-    try:
-        from numba import njit
-        from numba.extending import register_jitable
-    except ModuleNotFoundError as error:
-        if error.name != "numba":
-            raise
-        raise RuntimeError('Numba requires installation with: pip install -e ".[numba]"') from error
-    for helper in (simulate_system_single_time_period, interpolate, battery_protection_score, battery_limit_score, step_score):
-        register_jitable(helper)
-    return njit(cache=False)(backward_values), njit(cache=False)(forward_projection)
-
-
-def backward_values(device: DeviceParameters, capacity: float, periods: list[Period], grids: list[list[float]], choices: list[Action], terminal_rate: float) -> list[list[float]]:
-    values = [[terminal_rate * battery for battery in grids[-1]]]
-    for t in range(len(periods) - 1, -1, -1):
-        period = periods[t]
-        next_grid, next_values = grids[t + 1], values[-1]
-        current = []
-        for battery in grids[t]:
-            best = -math.inf
-            charge_skip_from = discharge_skip_from = math.inf
-            for action in choices:
-                mode, rate_kw = action
-                if (mode == OperatingMode.CHARGE_PV_FIRST and rate_kw >= charge_skip_from) or (mode == OperatingMode.DISCHARGE_PV_FIRST and rate_kw >= discharge_skip_from):
-                    continue
-                step = simulate_system_single_time_period(device, capacity, period, battery, action)
-                if step is not None:
-                    # Higher rates cannot improve a capped flow or return to the search corridor.
-                    if mode == OperatingMode.CHARGE_PV_FIRST and (step.charge < rate_kw * period.hours or step.battery_end > next_grid[-1] + 1e-9):
-                        charge_skip_from = min(charge_skip_from, rate_kw)
-                    elif mode == OperatingMode.DISCHARGE_PV_FIRST and (step.discharge < rate_kw * period.hours or step.battery_end < next_grid[0] - 1e-9):
-                        discharge_skip_from = min(discharge_skip_from, rate_kw)
-                    best = max(best, step_score(step) + interpolate(next_grid, next_values, step.battery_end))
-            current.append(best)
-        values.append(current)
-    return values[::-1]
-
-
-def forward_projection(device: DeviceParameters, capacity: float, periods: list[Period], grids: list[list[float]], values: list[list[float]], choices: list[Action], initial: float, first_action: Action) -> list[Step] | None:
-    """Re-evaluate the policy at exact states, including the shared first action."""
-    battery = initial
-    path = []
-    for t, period in enumerate(periods):
-        next_grid, next_values = grids[t + 1], values[t + 1]
-        best_value, best_step = -math.inf, None
-        charge_skip_from = discharge_skip_from = math.inf
-        for i in range(1 if t == 0 else len(choices)):
-            action = first_action if t == 0 else choices[i]
-            mode, rate_kw = action
-            if (mode == OperatingMode.CHARGE_PV_FIRST and rate_kw >= charge_skip_from) or (mode == OperatingMode.DISCHARGE_PV_FIRST and rate_kw >= discharge_skip_from):
-                continue
-            step = simulate_system_single_time_period(device, capacity, period, battery, action)
-            if step is not None:
-                # Keep the same pruning rule as the backward pass, at the actual battery level.
-                if mode == OperatingMode.CHARGE_PV_FIRST and (step.charge < rate_kw * period.hours or step.battery_end > next_grid[-1] + 1e-9):
-                    charge_skip_from = min(charge_skip_from, rate_kw)
-                elif mode == OperatingMode.DISCHARGE_PV_FIRST and (step.discharge < rate_kw * period.hours or step.battery_end < next_grid[0] - 1e-9):
-                    discharge_skip_from = min(discharge_skip_from, rate_kw)
-                value = step_score(step) + interpolate(next_grid, next_values, step.battery_end)
-                if value > best_value:
-                    best_value, best_step = value, step
-        if best_step is None:
-            return None
-        path.append(best_step)
-        battery = best_step.battery_end
-    return path
 
 
 def result_frame(device: DeviceInfo, periods: list[Period], path: list[Step], initial: float, terminal_rate: float) -> pd.DataFrame:

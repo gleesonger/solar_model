@@ -1,6 +1,6 @@
 # Saved plans and Plan History
 
-Shared background plans are published through `solar.db`. The numerical optimisers remain database-free. Demonstrations and the as-of workbook CLI do not save shared plans.
+Shared background plans are published through `solar.db`. The Markov optimiser remains database-free. Demonstrations and the as-of workbook CLI do not save shared plans.
 
 ## Ownership and publication
 
@@ -48,4 +48,8 @@ Date bounds use successive configured-local midnights, preserving 23/25-hour day
 
 ## Verification
 
-Targeted storage/dashboard tests cover precision, retention, rollback, original summaries in historical reports, cache publication and private demonstration admission. `tests/runtime/test_planner.py` runs real spawned calculation processes, injected synthetic collection/planning processes, deadlines, crashes, restarts, Windows descendant cleanup and actual supervisor recovery from a dashboard crash. `tests/browser/test_plan_history.py` exercises a real browser with concurrent synthetic collector/planner processes: blank defaults, control placement, historical pinning during new publications, chart legend preservation, clearing to latest, historical views, Excel and desktop/mobile widths. `test_plan_tab.py` retains demonstration/settings/rendering checks. These use temporary databases and synthetic measurements/reports. A separate production-worker regression assembles temporary device/history/forecast inputs, executes the real MILP optimiser inside the spawned worker and verifies all nine views after save/readback; live device/provider integration remains separate.
+Targeted storage/dashboard tests cover precision, retention, rollback, original summaries in historical reports, cache publication and private demonstration admission. `tests/runtime/test_planner.py` runs real spawned calculation processes, injected synthetic collection/planning processes, deadlines, crashes, restarts, Windows descendant cleanup and actual supervisor recovery from a dashboard crash. `tests/browser/test_plan_history.py` exercises a real browser with concurrent synthetic collector/planner processes: blank defaults, control placement, historical pinning during new publications, chart legend preservation, clearing to latest, historical views, Excel and desktop/mobile widths. `test_plan_tab.py` retains demonstration/settings/rendering checks. These use temporary databases and synthetic measurements/reports. A separate production-worker regression assembles temporary device/history/forecast inputs, executes the real Markov optimiser inside the spawned worker and verifies all nine views after save/readback; live device/provider integration remains separate.
+
+New snapshots identify their model as `markov`. Retired MILP/independent-DP snapshots remain readable as saved data, with their original YAML shown unchanged; running or saving that YAML requires explicit migration to the current flat optimiser schema.
+
+Current settings use numeric `energy_plan.scenario_multiplier` values without scenario probabilities. Archived settings using the old `scenarios` mapping remain unchanged in storage and in Plan Settings; display extracts their original multiplier numbers and ignores their old probabilities. Reusing those archived settings requires explicitly migrating the block before current configuration validation accepts it.

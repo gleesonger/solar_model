@@ -88,13 +88,13 @@ def test_source_yaml_and_formatted_yaml_deserialise_to_the_same_settings():
     settings = parse_energy_plan_yaml(config, yaml.safe_dump(source))
     assert settings == config.energy_plan
     text = energy_plan_yaml(settings)
-    assert "low: {multiplier:" in text
-    assert "refinement_stages:\n      - {grid_step_percent:" in text
+    assert "solar: {low:" in text
+    assert "grid_step_percent:" in text
     assert "days: [Mon, Tue, Wed, Thu, Fri, Sat, Sun]" in text
     assert 'start_time: "00:00"' in text
     assert 'end_time: "24:00"' in text
     assert "name: null" in text
-    assert "\n\nscenarios:" in text
+    assert "\n\nscenario_multiplier:" in text
     assert parse_energy_plan_yaml(config, text) == settings
     assert energy_plan_yaml(parse_energy_plan_yaml(config, text)) == text
 
@@ -103,11 +103,9 @@ def test_projection_runs_remain_separate_and_singletons_stay_numeric():
     config = load_config()
     resolutions = (15,) * 8 + (30,) + (60,) * 41 + (15,) * 18
     models = config.energy_plan.optimiser
-    settings = replace(config.energy_plan, optimiser=replace(models,
-        mix_integer_linear_prog=replace(models.mix_integer_linear_prog, projection_resolution_mins=resolutions),
-        dynamic_programming=replace(models.dynamic_programming, projection_resolution_mins=resolutions)))
+    settings = replace(config.energy_plan, optimiser=replace(models, projection_resolution_mins=resolutions))
     text = energy_plan_yaml(settings)
-    assert text.count("projection_resolution_mins: [15*8, 30, 60*41, 15*18]") == 2
+    assert text.count("projection_resolution_mins: [15*8, 30, 60*41, 15*18]") == 1
     assert parse_energy_plan_yaml(config, text) == settings
 
 
@@ -203,16 +201,6 @@ def test_default_does_not_hide_invalid_rule():
     rule = TariffRule(WEEKDAYS, "invalid", "06:00", 0., name=None)
     with pytest.raises(ValueError, match="tariff time"):
         tariff_rule_rate((rule,), datetime(2026, 11, 2), 999.)
-
-
-@pytest.mark.parametrize("model", ["mix_integer_linear_prog", "dynamic_programming"])
-def test_model_round_trip_always_includes_allowed_values_comment(model):
-    config = load_config()
-    settings = replace(config.energy_plan, optimiser=replace(config.energy_plan.optimiser, model=model))
-    text = energy_plan_yaml(settings)
-    assert f"  # model - mix_integer_linear_prog, dynamic_programming\n  model: {model}" in text
-    assert parse_energy_plan_yaml(config, text) == settings
-    assert energy_plan_yaml(parse_energy_plan_yaml(config, text)) == text
 
 
 @pytest.mark.parametrize("model", ["MILP", "DP", "unknown", None, 1])

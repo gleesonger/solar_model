@@ -13,8 +13,7 @@ python -m venv .venv
 ```
 
 - [requirements.txt](../../requirements.txt) contains runtime ranges rather than a lockfile. Pytest, Playwright and extraction's openpyxl are provided by package extras rather than the runtime list.
-- Planning explicitly requests HiGHS; `highspy` is a declared runtime dependency. Verify with `python -c "import cvxpy; print(cvxpy.installed_solvers())"`.
-- NumPy and Numba are explicit runtime dependencies in `requirements.txt`, also used by package installation through `pyproject.toml` and by the Docker build. DP defaults to Numba; normal installation now includes it. The existing `numba` extra remains supported for older installation commands. Set `energy_plan.optimiser.dynamic_programming.use_numba: false` for Python execution without importing Numba. The numerical functions share named tuples and ordinary/Numba typed lists; DP has no direct NumPy import.
+- NumPy and Numba are explicit runtime dependencies in `requirements.txt`, also used by package installation through `pyproject.toml` and by the Docker build. The shipped configuration explicitly enables native compilation; normal installation now includes it. The existing `numba` extra remains supported for older installation commands. Set `energy_plan.optimiser.compile_model_to_native_code: false` for Python execution without importing Numba. The numerical functions share named tuples and ordinary/Numba typed lists; DP has no direct NumPy import.
 - Configured Markov transition scaling uses scalar arithmetic outside DP numerical loops. Targeted tests cover configuration/editor round trips, exit-probability scaling, invalid probability inputs, identical rows and identity transitions. It does not require SciPy matrix logarithms.
 - Browser tests require Playwright and Chromium: `python -m pip install playwright`, then `python -m playwright install chromium`. Tests skip if the dependency/browser is absent (they also try installed Chrome).
 - Existing databases, CSV, Excel, pickle outputs, caches, and virtual environments are ignored by Git. Avoid treating these local artifacts as source.
@@ -32,7 +31,7 @@ For annotation-only edits, compare parsed syntax trees with annotations/imports 
 
 ## Package verification
 
-For an explicitly requested DP performance comparison, use `python -m solar_model.tools.benchmark_planning --model dp --grid production --cases baseline --dp-backend numba --cap-seconds 120 --output dp-numba.json`, then select `--dp-backend python` for the counterpart. There is no warm-up. Each fresh worker times the first real call, including lazy Numba import/cache loading/compilation, all configured stages and report creation. JSON marks `numba_initialisation_in_timing`. The earlier [performance comparison](../reviews/dp-numba-performance.md) excluded warm-up and is historical.
+For an explicitly requested Markov performance check, use `python -m solar_model.tools.benchmark_planning --config config.yaml --cap-seconds 5 --output markov-benchmark.json`. The isolated worker includes lazy compilation and reports deadline cases as N/A. No solver-selection, staged-refinement or MILP comparisons remain.
 
 Tests are grouped by subsystem. From the repository root, run only key targeted tests relevant to the change, using `python -m pytest -q <test-file>` with specific test names or `-k` where appropriate. Do not run the full suite. Model simulations and performance benchmarks run only when requested by the user; targeted planning regression tests can exercise the solver when needed to verify a planning change. Formatting-only changes need lightweight syntax/AST or diff checks. `python -m pip wheel . --no-deps` verifies package construction; the wheel must include dashboard CSS/JS/SVG and both register maps. Module CLIs support `--help` without opening a database. Tests use temporary databases and synthetic browser data.
 
@@ -42,10 +41,10 @@ Use the [isolated development walkthrough](isolated-development.md) for syntheti
 
 | Tests | What they cover |
 | --- | --- |
-| [test_dynamic_programming.py](../../tests/planning/test_dynamic_programming.py) | Experimental DP physical transitions, command limits, small exhaustive-search equivalence, nine-scenario passive/forced first-command replay through MILP and audited probability-weighted shared-command selection |
+| [test_dynamic_programming.py](../../tests/planning/test_dynamic_programming.py) | Markov physical transitions, command profiles, interpolation, grid-import limits and reporting |
 | [test_markov.py](../../tests/planning/test_markov.py) | Exit-probability scaling, expectation before command selection, exhaustive small-tree comparison, persistence, hard feasibility, cheap charging, Python/Numba parity, expected reporting and off-hour lookahead |
-| [test_next_action.py](../../tests/planning/test_next_action.py) | Shared commands, equipment saturation, command SOC bounds, rejection of unsafe passive/forced responses and export-safe rates across nine scenarios, including early SOC stops |
-| [test_forecast_model_config.py](../../tests/forecasting/test_forecast_model_config.py) | YAML model parsing/defaults/validation, lookback and half-life effects, and model settings passed through collection, refresh and CLI entry points |
+| [test_markov.py](../../tests/planning/test_markov.py) | Stochastic recurrence, information timing, transition matrices, expected/stress reports and Python/Numba equivalence |
+| [test_forecast_model_config.py](../../tests/forecasting/test_forecast_model_config.py) | YAML model parsing and explicit validation, lookback and half-life effects, and model settings passed through collection, refresh and CLI entry points |
 | [test_forecast_influence.py](../../tests/forecasting/test_forecast_influence.py) | Decimal-fraction load/intraday influence, sparse day-type fallback, 100% influence and invalid fractions and old percentage inputs |
 | [test_daily_load_forecast.py](../../tests/forecasting/test_daily_load_forecast.py) | House-load profile freeze/restart, midnight cutoff, DST targets, scaling, missing history, planning parity, migration and Analysis-only forecast styling |
 | [test_daily_load_forecast_browser.py](../../tests/browser/test_daily_load_forecast_browser.py) | Desktop/mobile forecast absence from Recent, hourly Analysis legend defaults and grouping changes with synthetic data |
@@ -67,7 +66,7 @@ Use the [isolated development walkthrough](isolated-development.md) for syntheti
 
 Keep verification targeted. Include the legacy-named migration regression when changing the migration paths it covers; its historical filename is not a reason to exclude it. Record the command, revision/workspace, environment and any skipped checks with each new verification result. Browser skips indicate missing prerequisites, not verified browser behavior.
 
-[test_remaining_review_fixes.py](../../tests/regressions/test_remaining_review_fixes.py) supplies additional independent numerical/recovery checks, including real HiGHS plans through both DST transitions. See [verification scope](../reviews/verification.md) for integration gaps. Desktop Chromium tests do not establish Android saved-page behavior; unit tests and package builds do not establish Docker or hardware compatibility.
+[test_remaining_review_fixes.py](../../tests/regressions/test_remaining_review_fixes.py) supplies additional independent numerical/recovery checks, including historical solver regressions through both DST transitions. See [verification scope](../reviews/verification.md) for integration gaps. Desktop Chromium tests do not establish Android saved-page behavior; unit tests and package builds do not establish Docker or hardware compatibility.
 
 ## Appropriate verification
 

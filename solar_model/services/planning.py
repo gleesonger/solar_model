@@ -1,13 +1,12 @@
 """Assemble the planning model's input snapshot from stored observations."""
 from datetime import datetime, timezone
 from dataclasses import dataclass, replace
-import os
 from zoneinfo import ZoneInfo
 import pandas as pd
 
-from solar_model.config import Config, EnergyPlanConfig, ScenariosConfig, validate_config
+from solar_model.config import Config, EnergyPlanConfig, ScenarioMultiplierConfig, validate_config
 from solar_model.logging_setup import configure_logging
-from solar_model.planning.plan_optimisation_milp import simulate_energy_plan
+from solar_model.planning.plan_optimisation_dynamic_programming import simulate_energy_plan
 from solar_model.planning.scenarios import create_scenarios
 from solar_model.planning.types import SimulationResult
 from solar_model.storage.connection import SolarDatabase, create_engine_for_database
@@ -20,26 +19,12 @@ from solar_model.storage.queries.planning import (
 )
 
 
-def warm_planning_worker() -> int:
-    """Import planning dependencies and initialise HiGHS without loading or solving a plan."""
-    import highspy
-    highspy.Highs()
-    return os.getpid()
-
-
 def plan_as_of(database: SolarDatabase, config: Config, as_of: datetime, *, battery_as_of: datetime | None = None) -> SimulationResult:
     """Select only data known by the cutoff, then call the database-free model."""
-    model = config.energy_plan.optimiser.model
-    if model == "mix_integer_linear_prog":
-        optimiser = simulate_energy_plan
-    elif model == "dynamic_programming":
-        from solar_model.planning.plan_optimisation_dynamic_programming import simulate_energy_plan as optimiser
-    else:
-        raise ValueError("energy_plan.optimiser.model must be mix_integer_linear_prog or dynamic_programming")
     device = load_device_info_as_of(database, config, as_of)
     state = load_battery_state_as_of(database, battery_as_of or as_of, device)
     forecast = load_forecast_as_of(database, as_of, config)
-    return optimiser(device, state, create_scenarios(forecast, config.energy_plan.scenarios), config, as_of)
+    return simulate_energy_plan(device, state, create_scenarios(forecast, config.energy_plan.scenario_multiplier), config, as_of)
 
 
 @dataclass
@@ -47,7 +32,7 @@ class PlanReport:
     simulation: SimulationResult
     actuals: pd.DataFrame
     battery_capacity_kwh: float | None = None
-    scenarios: ScenariosConfig | None = None
+    scenario_multiplier: ScenarioMultiplierConfig | None = None
     preferred_reserve_kwh: float | None = None
     protection_preference: float | None = None
     command_battery_capacity_kwh: float | None = None
@@ -86,12 +71,12 @@ def generate_plan_report(config: Config, as_of: datetime, energy_plan_override: 
             simulation=result,
             actuals=load_plan_actuals(database, day_start, as_of, capacity) if include_actuals else pd.DataFrame(),
             battery_capacity_kwh=capacity,
-            scenarios=config.energy_plan.scenarios,
+            scenario_multiplier=config.energy_plan.scenario_multiplier,
             preferred_reserve_kwh=config.energy_plan.preferred_reserve_kwh,
             protection_preference=config.energy_plan.protection_preference,
             command_battery_capacity_kwh=command_capacity,
             full_data_at=full_data_at,
-            model=config.energy_plan.optimiser.model,
+            model="markov",
             timezone_name=config.timezone,
         )
     finally:

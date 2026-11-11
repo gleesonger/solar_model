@@ -9,7 +9,7 @@ from zoneinfo import ZoneInfo
 import pandas as pd
 import yaml
 
-from solar_model.config import Config, EnergyPlanConfig, ScenarioDimensionConfig, ScenarioLevelConfig, ScenariosConfig, energy_plan_yaml
+from solar_model.config import Config, EnergyPlanConfig, ScenarioDimensionConfig, ScenarioMultiplierConfig, energy_plan_yaml
 from solar_model.planning.plan_report import advanced_plan_frame, detail_columns, detail_frame, hourly_detail_frame, scenario_summary
 from solar_model.planning.types import NextAction, OperatingMode, SimulationResult
 from solar_model.services.planning import PlanReport, generate_plan_report
@@ -70,7 +70,7 @@ def persist_report(config: Config, report: PlanReport, began_at: datetime, compl
         "completed_at": completed_at.isoformat(),
         "full_data_at": report.full_data_at.isoformat(),
         "timezone": config.timezone,
-        "model": config.energy_plan.optimiser.model,
+        "model": "markov",
         "settings": energy_plan_yaml(config.energy_plan),
         "action": action,
         "battery_capacity_kwh": report.battery_capacity_kwh,
@@ -134,11 +134,14 @@ def restore_run(config: Config, stored: StoredPlan, historical: bool = False) ->
     metadata = stored.metadata
     settings = metadata["settings"]
     # Archived YAML describes this report, not a request to run today's model.
-    scenario_data = yaml.safe_load(settings)["scenarios"]
-    scenarios = ScenariosConfig(**{
-        dimension: ScenarioDimensionConfig(**{name: ScenarioLevelConfig(**values) for name, values in levels.items()})
-        for dimension, levels in scenario_data.items()
-    })
+    archived = yaml.safe_load(settings)
+    if "scenario_multiplier" in archived:
+        scenario_data = archived["scenario_multiplier"]
+    else:
+        # Read original multiplier values from legacy snapshots; never migrate
+        # or validate their full archived configuration against today's schema.
+        scenario_data = {dimension: {name: values["multiplier"] for name, values in levels.items()} for dimension, levels in archived["scenarios"].items()}
+    multipliers = ScenarioMultiplierConfig(**{dimension: ScenarioDimensionConfig(**levels) for dimension, levels in scenario_data.items()})
     action = {**metadata["action"], "mode": OperatingMode(metadata["action"]["mode"])}
     visible, hidden = {}, {}
     details: dict[str, dict[str, pd.DataFrame]] = {"Compact": {}, "Advanced": {}}
@@ -169,7 +172,7 @@ def restore_run(config: Config, stored: StoredPlan, historical: bool = False) ->
         simulation=simulation,
         actuals=pd.DataFrame(),
         battery_capacity_kwh=metadata["battery_capacity_kwh"],
-        scenarios=scenarios,
+        scenario_multiplier=multipliers,
         preferred_reserve_kwh=metadata["preferred_reserve_kwh"],
         protection_preference=metadata["protection_preference"],
         command_battery_capacity_kwh=metadata["command_battery_capacity_kwh"],

@@ -51,7 +51,7 @@ Keep concise explanations in `overview/`, detailed code/data contracts in `imple
 | [Forecasting](overview/forecasting.md) | Operational correction, snapshot selection, research models |
 | [Energy planning](overview/energy-planning.md) | Economics, optimisation, as-of workbooks, tariff experiments |
 | [Plan model](overview/plan-model.md) | Current next-action/report model: forecasts, joint scenarios, scoring, physical constraints and remaining limitations |
-| [Dynamic programming walkthrough](implementation/dynamic-programming.md) | Plain-English v1 calculation: battery nodes, backward values, forward paths and shared first-command selection |
+| [Dynamic programming walkthrough](implementation/dynamic-programming.md) | Markov-only configuration, battery nodes, command resolution and policy/report contracts |
 | [Markov DP implementation](implementation/markov-dynamic-programming.md) | Coupled nine-layer stochastic DP, three-hour transitions, expected reporting and information assumptions |
 | [Markov DP design proposal](reviews/markov-dp-proposal.md) | Original agreed design, implementation choices and remaining observation limitations |
 | [Dashboard](overview/dashboard.md) | Tabs, caches, live readings, queries, exports, reconnects |

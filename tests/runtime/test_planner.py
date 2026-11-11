@@ -179,7 +179,7 @@ def test_production_worker_calculates_and_publishes_real_plan_from_temporary_inp
     from solar_model.storage.schema import ForecastSolarSample, SigenStorDevice, SigenStorHourlySample, SigenStorModbusSample
     from solar_model.services.plan_history import read_saved_run
     path, config = config_file(tmp_path)
-    config = replace(config, timezone="UTC", forecast=replace(config.forecast, solar=replace(config.forecast.solar, arrays=(config.forecast.solar.arrays[0],))), energy_plan=replace(config.energy_plan, num_projection_hours=25, num_visible_projection_hours=1, protection_preference=0., calculation_timeout_seconds=30., optimiser=replace(config.energy_plan.optimiser, model="mix_integer_linear_prog")))
+    config = replace(config, timezone="UTC", forecast=replace(config.forecast, solar=replace(config.forecast.solar, arrays=(config.forecast.solar.arrays[0],))), energy_plan=replace(config.energy_plan, num_projection_hours=25, num_visible_projection_hours=1, protection_preference=0., calculation_timeout_seconds=30., optimiser=replace(config.energy_plan.optimiser, compile_model_to_native_code=False, grid_step_percent=25, power_divisions=1)))
     config = replace(config, dashboard=replace(config.dashboard, actuals_to_forecast={"pv1": config.forecast.solar.arrays[0].name}))
     start = datetime.now(timezone.utc).replace(microsecond=0)
     device = DeviceInfo(**{field.name: 1. for field in fields(DeviceInfo)})

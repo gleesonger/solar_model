@@ -15,7 +15,7 @@ from zoneinfo import ZoneInfo
 
 import yaml
 import dacite
-from solar_model.planning.markov_transitions import DEFAULT_TRANSITION_MATRIX, validate_transition_inputs
+from solar_model.planning.markov_transitions import validate_transition_inputs
 
 @dataclass(frozen=True)
 class LoggingConfig:
@@ -116,71 +116,42 @@ class ForecastConfig:
 
 
 @dataclass(frozen=True)
-class ScenarioLevelConfig:
-    multiplier: float
-    probability: float
-
-    def __post_init__(self) -> None:
-        for name in ("multiplier", "probability"):
-            value = getattr(self, name)
-            if isinstance(value, bool) or not math.isfinite(value) or value < 0:
-                raise ValueError(f"scenario {name} must be finite and non-negative")
-        if self.probability > 1:
-            raise ValueError("scenario probability must be at most one")
-
-
-@dataclass(frozen=True)
 class ScenarioDimensionConfig:
-    low: ScenarioLevelConfig
-    med: ScenarioLevelConfig
-    high: ScenarioLevelConfig
+    low: float
+    med: float
+    high: float
 
-    def items(self) -> tuple[tuple[str, ScenarioLevelConfig], ...]:
+    def items(self) -> tuple[tuple[str, float], ...]:
         return (("low", self.low), ("med", self.med), ("high", self.high))
 
     def __post_init__(self) -> None:
-        total = sum(level.probability for _, level in self.items())
-        if not math.isclose(total, 1., rel_tol=0., abs_tol=.03 + 1e-12):
-            raise ValueError("scenario probabilities must sum to within 3% of one in each dimension")
-        for name, level in self.items():
-            object.__setattr__(self, name, replace(level, probability=level.probability / total))
-        if not self.low.multiplier <= self.med.multiplier <= self.high.multiplier:
-            raise ValueError("scenario multipliers must be in low, med, high order")
+        for _, value in self.items():
+            if isinstance(value, bool) or not math.isfinite(value) or value < 0:
+                raise ValueError("scenario_multiplier values must be finite and non-negative")
+        if not self.low <= self.med <= self.high:
+            raise ValueError("scenario_multiplier values must be in low, med, high order")
 
 
 @dataclass(frozen=True)
-class ScenariosConfig:
+class ScenarioMultiplierConfig:
     solar: ScenarioDimensionConfig
     house_load: ScenarioDimensionConfig
 
 
 @dataclass(frozen=True)
-class DPRefinementConfig:
-    grid_step_percent: float
-    power_divisions: int
-    band_percent: float | None
-
-
-@dataclass(frozen=True)
-class DynamicProgrammingConfig:
-    uncertainty_model: str
-    transition_hours: float
-    transition_matrix: tuple[tuple[float, ...], ...]
-    use_numba: bool
-    projection_resolution_mins: tuple[int, ...]
-    refinement_stages: tuple[DPRefinementConfig, ...]
-
-
-@dataclass(frozen=True)
-class MixedIntegerLinearProgrammingConfig:
-    projection_resolution_mins: tuple[int, ...]
+class TransitionMatrixConfig:
+    solar: tuple[tuple[float, ...], ...]
+    house_load: tuple[tuple[float, ...], ...]
 
 
 @dataclass(frozen=True)
 class OptimiserConfig:
-    model: str
-    mix_integer_linear_prog: MixedIntegerLinearProgrammingConfig
-    dynamic_programming: DynamicProgrammingConfig
+    compile_model_to_native_code: bool
+    transition_hours: float
+    transition_matrix: TransitionMatrixConfig
+    projection_resolution_mins: tuple[int, ...]
+    grid_step_percent: float
+    power_divisions: int
 
 
 @dataclass(frozen=True)
@@ -192,7 +163,7 @@ class PlanHistoryConfig:
 @dataclass(frozen=True)
 class EnergyPlanConfig:
     num_projection_hours: int
-    scenarios: ScenariosConfig
+    scenario_multiplier: ScenarioMultiplierConfig
     plan_rerun_frequency_mins: float
     num_visible_projection_hours: int
     calculation_timeout_seconds: float
@@ -318,39 +289,35 @@ def config_from_mapping(raw_config: dict[str, Any], source: str = "configuration
     """Normalise and validate a complete configuration mapping."""
     try:
         if isinstance(raw_config, dict) and "scenarios" in raw_config:
-            raise ValueError("move scenarios under energy_plan.scenarios")
+            raise ValueError("replace scenarios with energy_plan.scenario_multiplier")
         energy_plan_data = raw_config.get("energy_plan") if isinstance(raw_config, dict) else None
         if isinstance(energy_plan_data, dict):
+            if "scenarios" in energy_plan_data:
+                raise ValueError("rename energy_plan.scenarios to energy_plan.scenario_multiplier and use numeric low/med/high multipliers without probabilities")
             if "optimiser_specific" in energy_plan_data:
                 raise ValueError("rename energy_plan.optimiser_specific to energy_plan.optimiser")
             if "projection_resolution_mins" in energy_plan_data or "dynamic_programming" in energy_plan_data:
-                raise ValueError("move optimiser settings under energy_plan.optimiser: mix_integer_linear_prog and dynamic_programming")
+                raise ValueError("move optimiser settings under the flat energy_plan.optimiser block")
             optimiser_data = energy_plan_data.get("optimiser", {})
-            dp_data = optimiser_data.get("dynamic_programming", {}) if isinstance(optimiser_data, dict) else {}
-            if isinstance(dp_data, dict) and "backend" in dp_data:
-                raise ValueError("dynamic_programming: replace backend with use_numba: true/false")
-            if isinstance(dp_data, dict) and ("coarse_grid_step_percent" in dp_data or "coarse_power_divisions" in dp_data):
-                raise ValueError("dynamic_programming: move coarse settings into the first refinement_stages entry with band_percent: null")
-            milp_data = optimiser_data.get("mix_integer_linear_prog", {}) if isinstance(optimiser_data, dict) else {}
-            for name, settings in (("mix_integer_linear_prog", milp_data), ("dynamic_programming", dp_data)):
-                if not isinstance(settings, dict):
-                    continue
-                resolutions = settings.get("projection_resolution_mins")
+            if isinstance(optimiser_data, dict):
+                retired = set(optimiser_data) - {definition.name for definition in fields(OptimiserConfig)} - {"comment"}
+                if retired:
+                    raise ValueError("energy_plan.optimiser is Markov-only; remove legacy selectors/blocks and explicitly supply the flat optimiser settings: " + ", ".join(sorted(retired)))
+                resolutions = optimiser_data.get("projection_resolution_mins")
                 if resolutions is not None and not isinstance(resolutions, list):
-                    raise ValueError(f"{name}.projection_resolution_mins must be an array")
+                    raise ValueError("optimiser.projection_resolution_mins must be an array")
                 if isinstance(resolutions, list):
                     expanded = []
                     for entry in resolutions:
                         if isinstance(entry, str):
                             minutes_text, separator, count_text = entry.partition("*")
-                            minutes = int(minutes_text)
-                            count = int(count_text) if separator else 1
+                            minutes, count = int(minutes_text), int(count_text) if separator else 1
                             if minutes <= 0 or count <= 0:
                                 raise ValueError("projection_resolution_mins repetitions must be positive")
                             expanded.extend([minutes] * count)
                         else:
                             expanded.append(entry)
-                    settings["projection_resolution_mins"] = expanded
+                    optimiser_data["projection_resolution_mins"] = expanded
             backup_data = energy_plan_data.get("minimum_battery_kwh")
             if isinstance(backup_data, dict):
                 # This is documentation for people editing config.yaml, not configuration.
@@ -370,15 +337,14 @@ def config_from_mapping(raw_config: dict[str, Any], source: str = "configuration
                 if isinstance(period, dict) and "import" in period:
                     period["import_"] = period.pop("import")
         require_config_values(Config, raw_config)
-        scenario_data = energy_plan_data.get("scenarios") if isinstance(energy_plan_data, dict) else None
+        scenario_data = energy_plan_data.get("scenario_multiplier") if isinstance(energy_plan_data, dict) else None
         if isinstance(scenario_data, dict):
+            if set(scenario_data) != {"solar", "house_load"}:
+                raise ValueError("energy_plan.scenario_multiplier requires exactly solar and house_load")
             for name in ("solar", "house_load"):
-                levels = scenario_data.get(name)
+                levels = scenario_data[name]
                 if not isinstance(levels, dict) or set(levels) != {"low", "med", "high"}:
-                    raise ValueError(f"energy_plan.scenarios.{name} requires exactly low, med, high entries")
-                for level in levels.values():
-                    if not isinstance(level, dict) or set(level) != {"multiplier", "probability"}:
-                        raise ValueError(f"energy_plan.scenarios.{name} entries require multiplier and probability")
+                    raise ValueError(f"energy_plan.scenario_multiplier.{name} requires exactly low, med, high entries")
         config = dacite.from_dict(
             data_class=Config,
             data=raw_config,
@@ -404,7 +370,7 @@ class EnergyPlanYamlDumper(yaml.SafeDumper):
         return super().represent_sequence(tag, sequence, flow_style=inline)
 
     def represent_mapping(self, tag: str, mapping: Mapping[Any, Any], flow_style: bool | None = None) -> yaml.MappingNode:
-        inline = set(mapping) in ({"multiplier", "probability"}, {"grid_step_percent", "power_divisions", "band_percent"})
+        inline = set(mapping) == {"low", "med", "high"}
         return super().represent_mapping(tag, mapping, flow_style=inline)
 
     def represent_scalar(self, tag: str, value: str, style: str | None = None) -> yaml.ScalarNode:
@@ -424,38 +390,20 @@ def energy_plan_yaml(settings: EnergyPlanConfig) -> str:
         "protection_preference": settings.protection_preference,
     }]
     sections.append({"history": asdict(settings.history)})
-    sections.append({"scenarios": {
-        name: {level_name: {"multiplier": level.multiplier, "probability": level.probability} for level_name, level in dimension.items()}
-        for name, dimension in (("solar", settings.scenarios.solar), ("house_load", settings.scenarios.house_load))
-    }})
+    sections.append({"scenario_multiplier": {name: dict(dimension.items()) for name, dimension in (("solar", settings.scenario_multiplier.solar), ("house_load", settings.scenario_multiplier.house_load))}})
     sections.append({
         "min_forced_charge_power_kw": settings.min_forced_charge_power_kw,
         "min_forced_discharge_power_kw": settings.min_forced_discharge_power_kw,
         "max_forced_charge_power_kw": settings.max_forced_charge_power_kw,
         "max_forced_discharge_power_kw": settings.max_forced_discharge_power_kw,
     })
-    optimiser = {"model": settings.optimiser.model}
-    for name in ("mix_integer_linear_prog", "dynamic_programming"):
-        model = getattr(settings.optimiser, name)
-        values = {"use_numba": model.use_numba} if name == "dynamic_programming" else {}
-        values["projection_resolution_mins"] = collapse_projection_resolutions(model.projection_resolution_mins)
-        if name == "dynamic_programming":
-            values["uncertainty_model"] = model.uncertainty_model
-            values["transition_hours"] = model.transition_hours
-            values["transition_matrix"] = [list(row) for row in model.transition_matrix]
-            values["refinement_stages"] = [
-                {"grid_step_percent": stage.grid_step_percent, "power_divisions": stage.power_divisions, "band_percent": stage.band_percent}
-                for stage in model.refinement_stages
-            ]
-        optimiser[name] = values
+    optimiser = asdict(settings.optimiser)
+    optimiser["projection_resolution_mins"] = collapse_projection_resolutions(settings.optimiser.projection_resolution_mins)
+    optimiser["transition_matrix"] = {name: [list(row) for row in getattr(settings.optimiser.transition_matrix, name)] for name in ("solar", "house_load")}
     sections.append({"optimiser": optimiser})
     for name in ("minimum_battery_kwh", "maximum_battery_kwh", "limit_battery_export_rate_to_grid_kw"):
         sections.append({name: collapse_scheduled_rules(getattr(settings, name))})
-    text = "\n".join(yaml.dump(section, Dumper=EnergyPlanYamlDumper, sort_keys=False, allow_unicode=True, width=1000) for section in sections)
-    for name in ("mix_integer_linear_prog", "dynamic_programming"):
-        text = text.replace(f"\n  {name}:", f"\n\n  {name}:", 1)
-    model_line = f"  model: {settings.optimiser.model}"
-    return text.replace(model_line + "\n", "  # model - mix_integer_linear_prog, dynamic_programming\n" + model_line + "\n", 1)
+    return "\n".join(yaml.dump(section, Dumper=EnergyPlanYamlDumper, sort_keys=False, allow_unicode=True, width=1000) for section in sections)
 
 
 def collapse_projection_resolutions(resolutions: tuple[int, ...]) -> list[int | str]:
@@ -557,23 +505,17 @@ def validate_config(config: Config) -> None:
         value = getattr(energy_plan.history, name)
         if type(value) is not int or value <= 0:
             raise ValueError(f"energy_plan.history.{name} must be a positive integer")
-    if energy_plan.optimiser.model not in ("mix_integer_linear_prog", "dynamic_programming"):
-        raise ValueError("energy_plan.optimiser.model must be mix_integer_linear_prog or dynamic_programming")
-    dp = energy_plan.optimiser.dynamic_programming
-    if type(dp.use_numba) is not bool:
-        raise ValueError("dynamic_programming.use_numba must be a boolean")
-    if dp.uncertainty_model not in ("markov", "independent_scenarios"):
-        raise ValueError("dynamic_programming.uncertainty_model must be markov or independent_scenarios")
-    validate_transition_inputs(dp.transition_matrix, dp.transition_hours)
-    if dp.uncertainty_model == "markov" and (energy_plan.scenarios.solar.med.multiplier <= 0 or energy_plan.scenarios.house_load.med.multiplier <= 0):
-        raise ValueError("dynamic_programming markov requires positive medium multipliers")
-    milp = energy_plan.optimiser.mix_integer_linear_prog
-    if not dp.refinement_stages or dp.refinement_stages[0].band_percent is not None:
-        raise ValueError("dynamic_programming.refinement_stages must start with a full-range stage using band_percent: null")
-    for index, stage in enumerate(dp.refinement_stages):
-        step, divisions, band = stage.grid_step_percent, stage.power_divisions, stage.band_percent
-        if not math.isfinite(step) or not 0 < step <= 100 or type(divisions) is not int or divisions <= 0 or (index > 0 and (band is None or not math.isfinite(band) or not 0 < band <= 100)):
-            raise ValueError("dynamic_programming requires grid/band percentages in (0,100] and positive integer power divisions")
+    dp = energy_plan.optimiser
+    if type(dp.compile_model_to_native_code) is not bool:
+        raise ValueError("optimiser.compile_model_to_native_code must be true or false")
+    for name in ("solar", "house_load"):
+        validate_transition_inputs(getattr(dp.transition_matrix, name), dp.transition_hours, matrix_name=f"optimiser.transition_matrix.{name}")
+    if energy_plan.scenario_multiplier.solar.med <= 0 or energy_plan.scenario_multiplier.house_load.med <= 0:
+        raise ValueError("Markov DP requires positive medium multipliers")
+    if not math.isfinite(dp.grid_step_percent) or not 0 < dp.grid_step_percent <= 100 or type(dp.grid_step_percent) is bool:
+        raise ValueError("optimiser.grid_step_percent must be in (0,100]")
+    if type(dp.power_divisions) is not int or dp.power_divisions <= 0:
+        raise ValueError("optimiser.power_divisions must be a positive integer")
     for name in (
         "min_forced_charge_power_kw",
         "min_forced_discharge_power_kw",
@@ -589,12 +531,11 @@ def validate_config(config: Config) -> None:
         raise ValueError("num_projection_hours must be a positive integer")
     if type(energy_plan.num_visible_projection_hours) is not int or not 0 < energy_plan.num_visible_projection_hours <= energy_plan.num_projection_hours:
         raise ValueError("num_visible_projection_hours must be positive and no greater than num_projection_hours")
-    for name, settings in (("mix_integer_linear_prog", milp), ("dynamic_programming", dp)):
-        resolutions = settings.projection_resolution_mins
-        if not resolutions or any(type(minutes) is not int or minutes <= 0 for minutes in resolutions):
-            raise ValueError(f"{name}.projection_resolution_mins must contain positive integer minutes")
-        if sum(resolutions) < energy_plan.num_projection_hours * 60:
-            raise ValueError(f"{name}.projection_resolution_mins must cover num_projection_hours")
+    resolutions = dp.projection_resolution_mins
+    if not resolutions or any(type(minutes) is not int or minutes <= 0 for minutes in resolutions):
+        raise ValueError("optimiser.projection_resolution_mins must contain positive integer minutes")
+    if sum(resolutions) < energy_plan.num_projection_hours * 60:
+        raise ValueError("optimiser.projection_resolution_mins must cover num_projection_hours")
     if not math.isfinite(energy_plan.protection_preference) or energy_plan.protection_preference < 0:
         raise ValueError("energy_plan.protection_preference must be finite and non-negative")
     additional_device_info = config.additional_device_info

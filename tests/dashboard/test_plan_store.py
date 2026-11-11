@@ -5,7 +5,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
-import cvxpy
 import pytest
 
 from solar_model.config import load_config, energy_plan_yaml

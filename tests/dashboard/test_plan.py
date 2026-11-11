@@ -29,18 +29,6 @@ def sample_result():
     return SimulationResult(action, {"med": frame, "low_high": frame.assign(net_cost=2.)})
 
 
-def test_markov_summary_uses_expected_fields_not_stress_weights():
-    from solar_model.dashboard.tabs.plan import expected_plan_summary
-    result = sample_result()
-    assert expected_plan_summary(result) == ""
-    expected = pd.DataFrame({"net_cost": [.1, .2]})
-    result = replace(result, expected_results=expected, expected_score=1.25)
-    text = expected_plan_summary(result)
-    assert "€0.300" in text
-    assert "1.250" in text
-    assert "stress cases" in text
-
-
 @pytest.mark.parametrize("model,adjustment", [("MILP", 75.), ("DP", 75.5), ("DP", 0.)])
 @pytest.mark.parametrize("solar,load", [("med", "med"), ("high", "low")])
 @pytest.mark.parametrize("view,abbreviation", [("Compact", "com"), ("Advanced", "adv")])
@@ -114,14 +102,6 @@ def test_advanced_columns_show_only_summary_losses_and_short_flow_names():
     assert frame.losses_kwh.tolist() == pytest.approx([.07, .11])
 
 
-def test_scenario_average_cost_uses_joint_probabilities():
-    from solar_model.dashboard.tabs.plan import scenario_average_cost
-    from solar_model.planning.scenarios import scenario_probabilities
-
-    settings = load_config().energy_plan.scenarios
-    results = {name: pd.DataFrame({"net_cost": [10. if name == "med" else 0.]})
-               for name in scenario_probabilities(settings)}
-    assert scenario_average_cost(results, settings) == pytest.approx(3.6)
 
 
 def test_aggregation_uses_metadata_instead_of_column_units(monkeypatch):
@@ -195,7 +175,7 @@ def test_actual_lines_stay_solid_across_missing_samples_and_forecasts_stay_dashe
 
 
 def test_summary_and_chart_use_duration_weighting_and_consistent_units():
-    from solar_model.planning.plan_optimisation_milp import battery_protection_score
+    from solar_model.planning.plan_optimisation_dynamic_programming import battery_protection_score
     frame = sample_result().results["med"]
     summary = scenario_summary(frame, 4.)
     assert summary["cost"] == .75
@@ -383,8 +363,7 @@ def test_actuals_use_physical_units_preserve_gaps_and_exclude_future(tmp_path):
 
 @pytest.mark.parametrize("fails", [False, True])
 @pytest.mark.parametrize("preference", [75., 200.])
-@pytest.mark.parametrize("model", ["MILP", "DP"])
-def test_preference_is_request_local_and_database_is_closed(monkeypatch, fails, preference, model):
+def test_preference_is_request_local_and_database_is_closed(monkeypatch, fails, preference):
     from solar_model.services import planning
     closed = []
     fake_db = SimpleNamespace(close=lambda: closed.append(True))
@@ -399,7 +378,6 @@ def test_preference_is_request_local_and_database_is_closed(monkeypatch, fails, 
 
     def plan(db, configured, when, **kwargs):
         assert configured.energy_plan.protection_preference == preference
-        assert configured.energy_plan.optimiser.model == ("mix_integer_linear_prog" if model == "MILP" else "dynamic_programming")
         if fails:
             raise ValueError("missing forecast")
         return result
@@ -407,16 +385,15 @@ def test_preference_is_request_local_and_database_is_closed(monkeypatch, fails, 
     monkeypatch.setattr(planning, "plan_as_of", plan)
     if fails:
         with pytest.raises(ValueError, match="missing forecast"):
-            planning.generate_plan_report(config, datetime.now(timezone.utc), replace(config.energy_plan, protection_preference=preference, optimiser=replace(config.energy_plan.optimiser, model="mix_integer_linear_prog" if model == "MILP" else "dynamic_programming")))
+            planning.generate_plan_report(config, datetime.now(timezone.utc), replace(config.energy_plan, protection_preference=preference))
     else:
-        assert planning.generate_plan_report(config, datetime.now(timezone.utc), replace(config.energy_plan, protection_preference=preference, optimiser=replace(config.energy_plan.optimiser, model="mix_integer_linear_prog" if model == "MILP" else "dynamic_programming"))).simulation is result
+        assert planning.generate_plan_report(config, datetime.now(timezone.utc), replace(config.energy_plan, protection_preference=preference)).simulation is result
     assert config.energy_plan.protection_preference == original
     assert closed == [True]
 
 
-@pytest.mark.parametrize("model", [None, "MILP", "DP"])
 @pytest.mark.parametrize("battery_lag", [0, 60])
-def test_planning_service_dispatches_the_selected_model_with_shared_inputs(monkeypatch, model, battery_lag):
+def test_planning_service_passes_shared_inputs_to_markov(monkeypatch, battery_lag):
     from solar_model.services import planning
     from solar_model.planning import plan_optimisation_dynamic_programming as dp
 
@@ -436,38 +413,14 @@ def test_planning_service_dispatches_the_selected_model_with_shared_inputs(monke
     calls = []
     result = sample_result()
 
-    def milp(*args):
-        calls.append(("MILP", args))
+    def markov(*args):
+        calls.append(args)
         return result
-
-    def dynamic_programming(*args):
-        calls.append(("DP", args))
-        return result
-
-    monkeypatch.setattr(planning, "simulate_energy_plan", milp)
-    monkeypatch.setattr(dp, "simulate_energy_plan", dynamic_programming)
-    if model is not None:
-        config = replace(config, energy_plan=replace(config.energy_plan, optimiser=replace(config.energy_plan.optimiser, model="mix_integer_linear_prog" if model == "MILP" else "dynamic_programming")))
+    monkeypatch.setattr(planning, "simulate_energy_plan", markov)
     battery_as_of = start - timedelta(seconds=battery_lag) if battery_lag else None
     assert planning.plan_as_of(database, config, start, battery_as_of=battery_as_of) is result
     assert battery_cutoffs == [battery_as_of or start]
-    selected = "MILP" if config.energy_plan.optimiser.model == "mix_integer_linear_prog" else "DP"
-    assert calls == [(selected, (device, state, scenarios, config, start))]
-
-
-def test_invalid_planning_model_is_rejected_before_opening_database(monkeypatch):
-    from solar_model.services import planning
-
-    def unexpected_database(*args):
-        raise AssertionError("invalid model must not open the database")
-
-    monkeypatch.setattr(planning, "create_engine_for_database", unexpected_database)
-    config = load_config()
-    config = replace(config, energy_plan=replace(config.energy_plan, optimiser=replace(config.energy_plan.optimiser, model="unknown")))
-    with pytest.raises(ValueError, match="optimiser.model"):
-        planning.generate_plan_report(config, datetime.now(timezone.utc))
-    with pytest.raises(ValueError, match="optimiser.model"):
-        planning.plan_as_of(None, config, datetime.now(timezone.utc))
+    assert calls == [(device, state, scenarios, config, start)]
 
 
 def test_real_report_from_off_hour_inputs_excludes_future_data(tmp_path):
@@ -549,17 +502,17 @@ def test_ui_report_without_override_uses_global_settings(monkeypatch):
     report = planning.generate_plan_report(config, datetime.now(timezone.utc))
     assert report.battery_capacity_kwh == 18.
     assert report.command_battery_capacity_kwh == pytest.approx(16.2)
-    assert report.scenarios is config.energy_plan.scenarios
+    assert report.scenario_multiplier is config.energy_plan.scenario_multiplier
     assert report.preferred_reserve_kwh == config.energy_plan.preferred_reserve_kwh
     assert report.protection_preference == config.energy_plan.protection_preference
 
 
 def test_net_cost_summary_changes_selected_cost_but_preserves_range():
     from solar_model.dashboard.tabs.plan import scenario_cost_summary
-    from solar_model.planning.scenarios import scenario_probabilities
+    from solar_model.planning.markov import NAMES
 
-    settings = load_config().energy_plan.scenarios
-    results = {name: pd.DataFrame({"net_cost": [.25]}) for name in scenario_probabilities(settings)}
+    settings = load_config().energy_plan.scenario_multiplier
+    results = {name: pd.DataFrame({"net_cost": [.25]}) for name in NAMES}
     results["low_low"] = pd.DataFrame({"net_cost": [-2.44]})
     results["high_high"] = pd.DataFrame({"net_cost": [2.40]})
     assert scenario_cost_summary(results, "med") == "\u20ac0.250 (-\u20ac2.44 to \u20ac2.40)"

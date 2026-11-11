@@ -26,7 +26,6 @@ def test_integrated_plan_history_and_headless_publication(tmp_path):
     script.write_text(f'''
 import sys
 sys.path.insert(0, {str(repo)!r})
-import cvxpy
 from datetime import datetime, timedelta, timezone
 from multiprocessing import get_context
 from nicegui import ui, app, background_tasks

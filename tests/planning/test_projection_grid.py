@@ -6,11 +6,10 @@ import pytest
 
 from solar_model.config import load_config
 from solar_model.planning import plan_optimisation_dynamic_programming as dp
-from solar_model.planning.plan_optimisation_milp import _projection_intervals
 from solar_model.storage.queries.planning import _forecast_bounds
 
 
-@pytest.mark.parametrize("intervals", [dp.projection_intervals, _projection_intervals])
+@pytest.mark.parametrize("intervals", [dp.projection_intervals])
 @pytest.mark.parametrize("minute,second,expected_second_end", [
     (5, 0, (10, 30)),
     (45, 0, (11, 15)),
@@ -29,7 +28,6 @@ def test_first_action_is_15_minutes_and_second_aligns(intervals, minute, second,
 
 @pytest.mark.parametrize("intervals,expected_hidden", [
     (dp.projection_intervals, [5] + [60] * 23 + [55]),
-    (_projection_intervals, [185] + [240] * 5 + [55]),
 ])
 def test_alignment_preserves_visible_and_lookahead_horizons(intervals, expected_hidden):
     start = datetime(2026, 10, 27, 10, 55, tzinfo=timezone.utc)
@@ -41,13 +39,11 @@ def test_alignment_preserves_visible_and_lookahead_horizons(intervals, expected_
     assert hidden[-1][1] == start + timedelta(hours=48)
 
 
-@pytest.mark.parametrize("intervals", [dp.projection_intervals, _projection_intervals])
+@pytest.mark.parametrize("intervals", [dp.projection_intervals])
 def test_first_action_is_15_minutes_even_with_longer_configured_step(intervals):
     config = load_config()
     optimiser = config.energy_plan.optimiser
-    optimiser = replace(optimiser,
-        dynamic_programming=replace(optimiser.dynamic_programming, projection_resolution_mins=(60,) * 48),
-        mix_integer_linear_prog=replace(optimiser.mix_integer_linear_prog, projection_resolution_mins=(60,) * 48))
+    optimiser = replace(optimiser, projection_resolution_mins=(60,) * 48)
     config = replace(config, energy_plan=replace(config.energy_plan, optimiser=optimiser))
     start = datetime(2026, 10, 27, 10, 50, tzinfo=timezone.utc)
     periods = intervals(config, start)
@@ -56,7 +52,7 @@ def test_first_action_is_15_minutes_even_with_longer_configured_step(intervals):
     assert periods[-1][1] == start + timedelta(hours=48)
 
 
-@pytest.mark.parametrize("intervals,visible_count,hidden_count", [(dp.projection_intervals, 97, 25), (_projection_intervals, 28, 7)])
+@pytest.mark.parametrize("intervals,visible_count,hidden_count", [(dp.projection_intervals, 97, 25)])
 def test_configured_48_hours_includes_configured_lookahead_steps(intervals, visible_count, hidden_count):
     config = load_config()
     start = datetime(2026, 10, 27, 10, 5, tzinfo=timezone.utc)
@@ -72,12 +68,12 @@ def test_configured_48_hours_includes_configured_lookahead_steps(intervals, visi
     assert forecast_start <= start and forecast_end == (start + timedelta(hours=49)).replace(minute=0)
 
 
-@pytest.mark.parametrize("intervals", [dp.projection_intervals, _projection_intervals])
+@pytest.mark.parametrize("intervals", [dp.projection_intervals])
 def test_nonstandard_total_and_visible_horizon_are_not_hard_coded(intervals):
     config = load_config()
     steps = (15,) * 48 + (120,) * 9
     settings = config.energy_plan.optimiser
-    settings = replace(settings, dynamic_programming=replace(settings.dynamic_programming, projection_resolution_mins=steps), mix_integer_linear_prog=replace(settings.mix_integer_linear_prog, projection_resolution_mins=steps))
+    settings = replace(settings, projection_resolution_mins=steps)
     config = replace(config, energy_plan=replace(config.energy_plan, num_projection_hours=30, num_visible_projection_hours=12, optimiser=settings))
     start = datetime(2026, 10, 25, 0, 5, tzinfo=timezone.utc)
     periods = intervals(config, start)
@@ -89,8 +85,8 @@ def test_nonstandard_total_and_visible_horizon_are_not_hard_coded(intervals):
 
 def test_dp_mixes_15_and_30_minute_visible_steps_then_four_hour_steps():
     config = load_config()
-    settings = replace(config.energy_plan.optimiser.dynamic_programming, projection_resolution_mins=(15,) * 48 + (30,) * 24 + (240,) * 6)
-    config = replace(config, energy_plan=replace(config.energy_plan, optimiser=replace(config.energy_plan.optimiser, dynamic_programming=settings)))
+    settings = replace(config.energy_plan.optimiser, projection_resolution_mins=(15,) * 48 + (30,) * 24 + (240,) * 6)
+    config = replace(config, energy_plan=replace(config.energy_plan, optimiser=settings))
     start = datetime(2026, 3, 29, tzinfo=timezone.utc)
     periods = dp.projection_intervals(config, start)
     assert [(end - begin).total_seconds() / 60 for begin, end in periods] == [15] * 48 + [30] * 24 + [240] * 6
@@ -126,7 +122,7 @@ def test_dp_keeps_first_15_minutes_and_aligns_later_steps(minute, steps, hours, 
     config = load_config()
     optimiser = config.energy_plan.optimiser
     config = replace(config, energy_plan=replace(config.energy_plan, num_projection_hours=hours, num_visible_projection_hours=hours,
-        optimiser=replace(optimiser, dynamic_programming=replace(optimiser.dynamic_programming, projection_resolution_mins=steps))))
+        optimiser=replace(optimiser, projection_resolution_mins=steps)))
     start = datetime(2026, 10, 27, 10, minute, tzinfo=timezone.utc)
     periods = dp.projection_intervals(config, start)
     assert [(end - begin).total_seconds() / 60 for begin, end in periods] == expected
@@ -151,6 +147,6 @@ def test_dp_does_not_fill_an_underconfigured_horizon_with_deferred_time():
     config = load_config()
     optimiser = config.energy_plan.optimiser
     config = replace(config, energy_plan=replace(config.energy_plan, num_projection_hours=2, num_visible_projection_hours=2,
-        optimiser=replace(optimiser, dynamic_programming=replace(optimiser.dynamic_programming, projection_resolution_mins=(15,) * 7))))
+        optimiser=replace(optimiser, projection_resolution_mins=(15,) * 7)))
     with pytest.raises(ValueError, match="must cover num_projection_hours"):
         dp.projection_intervals(config, datetime(2026, 10, 27, 10, 5, tzinfo=timezone.utc))

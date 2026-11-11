@@ -29,9 +29,7 @@ from solar_model.planning.plan_report import (
     PlanColumn,
     detail_column,
     detail_columns,
-    scenario_average_cost,
     scenario_cost_summary,
-    expected_plan_summary,
     scenario_summary,
     table_detail_frame,
     detail_frame,
@@ -264,8 +262,8 @@ class PlanTab:
         self.result, self.actuals = report.simulation, report.actuals
         self.battery_capacity_kwh = report.battery_capacity_kwh
         self.settings_text = settings if isinstance(settings, str) else (self.override_text if demonstration and self.override_text is not None else energy_plan_yaml(settings))
-        model = report.model or (settings.optimiser.model if isinstance(settings, EnergyPlanConfig) else "unknown")
-        self.applied_model = {"mix_integer_linear_prog": "MILP", "dynamic_programming": "DP"}.get(model, model)
+        model = report.model or "markov"
+        self.applied_model = {"markov": "Markov DP", "mix_integer_linear_prog": "MILP", "dynamic_programming": "DP"}.get(model, model)
         self.applied_adjustment = report.protection_preference if report.protection_preference is not None else (settings.protection_preference if isinstance(settings, EnergyPlanConfig) else None)
         self.demonstration = demonstration
         if not report.full_resolution:
@@ -425,14 +423,14 @@ class PlanTab:
             prefix = local_start.strftime("%d/%m/%Y")
 
         action_period = f"Next {minutes:g} mins - As of {prefix} {local_start:%H:%M}"
-        scenarios = self.report.scenarios if self.report is not None and self.report.scenarios is not None else self.config.energy_plan.scenarios
+        scenarios = self.report.scenario_multiplier if self.report is not None and self.report.scenario_multiplier is not None else self.config.energy_plan.scenario_multiplier
         if self.chart is not None:
             self.action_period_label.set_text(action_period)
             if hasattr(self, "demonstration_label"):
                 self.demonstration_label.set_visibility(self.demonstration)
             self.action_label.set_text(description)
             for control, dimension in ((self.solar_scenario, scenarios.solar), (self.load_scenario, scenarios.house_load)):
-                control.options = {name: f"{name.title()} ({level.multiplier:g}x)" for name, level in dimension.items()}
+                control.options = {name: f"{name.title()} ({level:g}x)" for name, level in dimension.items()}
                 control.update()
             self._render_scenario()
             return
@@ -448,7 +446,7 @@ class PlanTab:
                     with ui.element("fieldset").classes("plan-scenario-group").props(f"data-testid=plan-{label.lower()}-scenario"):
                         ui.html(label, tag="legend").classes("text-sm font-semibold")
                         control = ui.toggle(
-                            {name: f"{name.title()} ({level.multiplier:g}x)"
+                            {name: f"{name.title()} ({level:g}x)"
                              for name, level in dimension.items()},
                             value="med", on_change=self._render_scenario,
                         ).props(f'dense no-caps unelevated color=grey-2 text-color=grey-9 toggle-color=primary toggle-text-color=white aria-label="{label} scenario"')

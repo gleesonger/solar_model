@@ -6,30 +6,35 @@ Source: [config.yaml](../../config.yaml), [solar_model/config.py](../../solar_mo
 
 ## Explicit configuration is mandatory
 
-Every declared configuration field and containing block must be present in `config.yaml`, even for inactive optimiser models. There are no implicit YAML configuration defaults. Missing values raise a `ValueError` with the full configuration path and stop startup before storage is opened or services launch. The Plan settings editor requires a complete energy-plan section as well.
+Every declared configuration field and containing block must be present in `config.yaml`. There are no implicit YAML configuration defaults. Missing values raise a `ValueError` with the full configuration path and stop startup before storage is opened or services launch. The Plan settings editor requires a complete energy-plan section as well.
 
 Nullable values must be written as `null` (including unnamed export/planning rules), and intentionally empty collections as `[]` or `{}`. A nullable type does not make a key optional. Keep the shipped YAML as the complete example when updating a deployed file. New settings must be added explicitly; a newer application must never guess values for an older configuration. Archived energy-plan YAML is displayed unchanged without validation against the current configuration schema. Run Demonstration and Save To Disk validate the editor contents against the current schema and reject missing or obsolete settings; viewing a saved projection does not apply those settings to the running application. Hot reload rejects invalid edits while retaining the previously validated running configuration; it does not apply defaults.
 
-## DP uncertainty mode
+## Markov optimiser
 
-`energy_plan.optimiser.dynamic_programming.uncertainty_model` accepts `markov` or `independent_scenarios`. The shipped YAML explicitly selects `markov`; all three uncertainty/transition settings are required, including when selecting independent_scenarios. Unknown mode values are rejected.
-
-Markov uses the current scenario multipliers, requires positive medium multipliers and starts at medium/medium around existing forecasts. Existing scenario probabilities remain relevant to MILP and independent-scenario DP; they do not weight Markov outcomes. Solar and load transitions are independent and use the same configured matrix.
-
-`transition_matrix` and `transition_hours` live under `energy_plan.optimiser.dynamic_programming`, including in the Plan settings YAML editor:
+Markov DP is the sole optimiser. All values are explicitly required in this flat block:
 
 ```yaml
-transition_hours: 3
-# Rows and columns: Low, Medium, High. Used for both solar and load.
-transition_matrix:
-  - [0.6, 0.3, 0.1]
-  - [0.2, 0.6, 0.2]
-  - [0.1, 0.3, 0.6]
+optimiser:
+  compile_model_to_native_code: true
+  transition_hours: 3
+  transition_matrix:
+    solar:
+      - [0.6, 0.3, 0.1]
+      - [0.2, 0.6, 0.2]
+      - [0.1, 0.3, 0.6]
+    house_load:
+      - [0.6, 0.3, 0.1]
+      - [0.2, 0.6, 0.2]
+      - [0.1, 0.3, 0.6]
+  projection_resolution_mins: [15*96, 60*24]
+  grid_step_percent: 2
+  power_divisions: 5
 ```
 
-These values are explicit examples; omitting them is rejected. Duration must be finite and positive. The matrix must be 3-by-3 with finite probabilities in [0,1] and each row summing to one within 1e-10. Identical rows, singular matrices and identity transitions are supported. For each source row, let q be its total off-diagonal probability. The actual interval's exit probability is `1 - (1 - q) ** (interval_hours / transition_hours)`, distributed between destinations in their original off-diagonal proportions; the diagonal is the probability of staying. See the [duration-conversion contract](../implementation/markov-dynamic-programming.md#transition-timing).
+Both `transition_matrix.solar` and `transition_matrix.house_load` must be explicitly supplied. Each has low/medium/high source rows and destination columns and is independently validated. They share the explicit `transition_hours` duration. The old shared list is rejected rather than copied implicitly. Medium multipliers must be positive. These are shipped values, not implicit defaults. The grid covers the full physical battery range; power divisions determine positive command rates between configured minimum and effective hardware maximum. There is no refinement-stage list.
 
-Markov uses the first full-range `refinement_stages` entry for grid spacing and power divisions. Later path-based corridors are not run. `use_numba` and the full `projection_resolution_mins` array still apply. Explicit API resolution overrides work; explicit battery search corridors are rejected in this mode.
+Remove the old `model`, `uncertainty_model`, `mix_integer_linear_prog`, `dynamic_programming` and `refinement_stages` settings and explicitly move the former active DP settings here. Keep the first full-range stage's `grid_step_percent` and `power_divisions`. The loader rejects old blocks and unknown optimiser keys rather than guessing or silently ignoring them. Old snapshot YAML remains archived text for display, but must be edited before Run Demonstration or Save To Disk accepts it.
 
 ## Sections
 
@@ -45,7 +50,7 @@ Markov uses the first full-range `refinement_stages` entry for grid spacing and 
 | `tariffs.periods` | Effective-dated import/export schedules |
 | `energy_plan` | 24-hour projection, intact 15-minute action, six hours of UTC-clock-aligned fine intervals, then hourly intervals, reserve/protection preference, scheduled battery limits |
 | `additional_device_info` | Inverter AC-to-DC 0.970, inverter DC-to-AC 0.974, battery charge 0.970, battery discharge 0.970; modelling assumptions, not measured device efficiencies |
-| `energy_plan.scenarios` | Required solar/house-load low, med, high entries, each with multiplier and probability |
+| `energy_plan.scenario_multiplier` | Required numeric solar/house-load low, med, high multipliers |
 
 These are current file values, not universal defaults. Preserve exact configuration spellings, including `data_retrival_schedule` and `full_updated_interval_seconds`.
 
@@ -61,36 +66,28 @@ The live collector passes these settings to solar correction and the fixed daily
 
 ## Validation and parsing
 
-`energy_plan.scenarios.solar` and `energy_plan.scenarios.house_load` each require exactly `low`, `med`, `high`, with explicit `multiplier` and `probability` fields. Multipliers must be finite, non-negative and nondecreasing; probabilities must be finite and in [0, 1], totalling 97%-103% per dimension (inclusive); accepted probabilities are normalised to sum to one during loading. Replace former triples/comma-separated settings with this mapping:
+`energy_plan.scenario_multiplier` supplies numeric low/medium/high magnitudes for solar and house load. Every dimension and level is required; values must be finite, non-negative and nondecreasing, with positive medium values. There are no scenario probabilities:
 
 ```yaml
 energy_plan:
-  scenarios:
-    solar:
-      low:  {multiplier: 0.5, probability: 0.2}
-      med:  {multiplier: 1.0, probability: 0.6}
-      high: {multiplier: 1.5, probability: 0.2}
-    house_load:
-      low:  {multiplier: 0.5, probability: 0.2}
-      med:  {multiplier: 1.0, probability: 0.6}
-      high: {multiplier: 1.5, probability: 0.2}
+  scenario_multiplier:
+    solar: {low: 0.5, med: 1.0, high: 1.5}
+    house_load: {low: 0.7, med: 1.0, high: 1.5}
 ```
 
-Move any former top-level `scenarios` block under `energy_plan`; the old location is rejected. Runtime consumers use `config.energy_plan.scenarios`.
-
-Joint probabilities multiply the two dimension probabilities, assuming independence (Med/Med = 0.36). Zero-probability cases remain available for inspection. Dashboard labels use the configured multipliers and its scenario-average cost uses the joint probabilities.
+Markov probabilities come from `optimiser.transition_matrix`, with the initial state medium/medium. The old `scenarios` block is rejected by file/editor validation: rename it and explicitly copy only its multiplier numbers. Missing values are never filled. Historical snapshots retain their exact archived YAML; display reads old multipliers without using their obsolete probability fields. Running or saving old settings requires explicit migration.
 
 - YAML is checked recursively for every declared field before dacite deserialisation into frozen dataclasses; lists become tuples. Missing nullable fields are rejected too.
-- Unknown keys outside the validated scenario mappings are currently ignored: `dacite.Config` does **not** enable strict mode. This permits descriptive `comment`/period `name` keys but can hide misspellings.
+- Unknown keys outside the validated multiplier and optimiser mappings are currently ignored: `dacite.Config` does **not** enable strict mode. This permits descriptive `comment`/period `name` keys but can hide misspellings.
 - Planning-rule lists must be supplied explicitly; minimum battery also accepts `{comment: ..., rules: [...]}`. Explicit empty schedules and uncovered intervals retain the documented model semantics below.
-- Intervals/timeouts/history lengths must be positive. `energy_plan.num_projection_hours` is the complete solved horizon (48 hours), including lookahead. `num_visible_projection_hours` controls the visible report portion (24 hours). Each optimiser has its own `projection_resolution_mins` array covering the full horizon: MILP `[15*4, 60*23, 240*6]`; DP `[15*96, 60*24]`. Both always use 15 minutes for the first action, regardless of the first configured entry. Subsequent steps that divide an hour align to their UTC clock boundaries and whole-hour multiples align to UTC hours; other step sizes retain their configured duration. At 10:05 the quarter-hour sequence begins `[15, 10, 15, 15]`, and a five-minute tail preserves the elapsed horizon. Both split at the report cutoff and stop at the total horizon; neither appends an implicit extra day. Tariff, battery-limit and midnight boundaries do not add splits.
+- Intervals/timeouts/history lengths must be positive. `energy_plan.num_projection_hours` is the complete solved horizon (48 hours), including lookahead. `num_visible_projection_hours` controls the visible report portion (24 hours). The optimiser timestep array covers the full horizon, shipped as `[15*96, 60*24]`. The planner always uses 15 minutes for the first action, regardless of the first configured entry. Subsequent steps that divide an hour align to their UTC clock boundaries and whole-hour multiples align to UTC hours; other step sizes retain their configured duration. At 10:05 the quarter-hour sequence begins `[15, 10, 15, 15]`, and a five-minute tail preserves the elapsed horizon. The planner splits at the report cutoff and stops at the total horizon without appending an implicit day. Tariff, battery-limit and midnight boundaries do not add splits.
 - Protection preference must be finite and non-negative, with no upper bound; efficiencies must be in `(0, 1]`.
 - Validation checks timezone/log level, URL shape, ports/device ID, coordinates/orientation, supported PV strings, and mapped array names.
 - Array IDs are unique integers 1–4; names must also be unique and are referenced by `dashboard.actuals_to_forecast` (for example `pv1: East`). Mapping names must match exactly; replace numeric mapping values in deployed YAML files. Empty arrays/mapping and non-positive `peak_kw` are not explicitly rejected.
 
 ## Complete values and nullable settings
 
-Use [config.yaml](../../config.yaml) for the complete current field set and selected values. All optimiser blocks, forecast calibration blocks, energy-plan schedules, history settings and time limits are required. Export/planning rule names must be explicit, for example:
+Use [config.yaml](../../config.yaml) for the complete current field set and selected values. The optimiser block, forecast calibration blocks, energy-plan schedules, history settings and time limits are required. Export/planning rule names must be explicit, for example:
 
 ```yaml
 name: null
@@ -118,37 +115,13 @@ name: null
 
 `energy_plan.plan_rerun_frequency_mins` is required and must be finite and positive; omission fails startup/configuration-editor validation. The shipped value is 5. The independent planning service checks for newly committed full SigEnergy readings once per second. It starts a background plan when the new reading is at least `max(0, plan_rerun_frequency_mins * 60 - 15)` seconds newer than the reading used by the last successful shared plan. Startup records existing data as a baseline and waits for a newer full reading before the first plan. Changed saved planning settings make the next new reading eligible immediately. Browser-only overrides do not alter this schedule. Save To Disk and external edits hot-reload the energy-plan section, including this interval; other application configuration retains restart semantics. See [Plan tab](dashboard.md#plan-tab).
 
-`energy_plan.min_forced_charge_power_kw` and `energy_plan.min_forced_discharge_power_kw` are finite, strictly positive minimum requested powers in kW, each explicitly set to 0.1 in the shipped YAML. Both DP and MILP use them. They are planning preferences, not verified hardware minimums, and actual flows may be lower when limited by SOC stops or physical capability. They do not scale with interval duration. `energy_plan.max_forced_charge_power_kw` and `max_forced_discharge_power_kw` are finite, strictly positive numeric ceilings, both explicitly set to 999 kW in the shipped YAML; null is not supported. Each effective ceiling is the smaller of the configured maximum and hardware maximum. A minimum above that ceiling makes the forced mode unavailable; self-consumption remains available.
+`energy_plan.min_forced_charge_power_kw` and `energy_plan.min_forced_discharge_power_kw` are finite, strictly positive minimum requested powers in kW, each explicitly set to 0.1 in the shipped YAML. Markov DP uses them. They are planning preferences, not verified hardware minimums, and actual flows may be lower when limited by SOC stops or physical capability. They do not scale with interval duration. `energy_plan.max_forced_charge_power_kw` and `max_forced_discharge_power_kw` are finite, strictly positive numeric ceilings, both explicitly set to 999 kW in the shipped YAML; null is not supported. Each effective ceiling is the smaller of the configured maximum and hardware maximum. A minimum above that ceiling makes the forced mode unavailable; self-consumption remains available.
 
 ## Planning score
 
-`num_projection_hours` now means the complete horizon, including lookahead. To preserve the former 24-visible-plus-24-hidden arrangement, use `num_projection_hours: 48` and `num_visible_projection_hours: 24`, and include the later durations in each model's array. Replace DP's former scalar `15` with `[15*96, 60*24]` for the current quarter-hour/hourly configuration. MILP uses `[15*4, 60*23, 240*6]`. No implicit 24-hour extension is added.
+`num_projection_hours` now means the complete horizon, including lookahead. To preserve the former 24-visible-plus-24-hidden arrangement, use `num_projection_hours: 48` and `num_visible_projection_hours: 24`, and include the later durations in the optimiser array, shipped as `[15*96, 60*24]`. No implicit 24-hour extension is added.
 
-DP-specific settings live under `energy_plan.optimiser.dynamic_programming`:
-
-```yaml
-energy_plan:
-  plan_rerun_frequency_mins: 5
-  num_projection_hours: 48
-  num_visible_projection_hours: 24
-  optimiser:
-    # model - mix_integer_linear_prog, dynamic_programming
-    model: mix_integer_linear_prog
-    mix_integer_linear_prog:
-      projection_resolution_mins: [15*4, 60*23, 240*6]
-    dynamic_programming:
-      use_numba: true
-      projection_resolution_mins: [15*96, 60*24]
-      refinement_stages:
-        - {grid_step_percent: 2, power_divisions: 5, band_percent: null}
-        - {grid_step_percent: 1, power_divisions: 10, band_percent: 5}
-        - {grid_step_percent: 1, power_divisions: 20, band_percent: 3}
-        - {grid_step_percent: 1, power_divisions: 40, band_percent: 1}
-```
-
-Shared horizon, protection, battery schedules and command power preferences remain directly under `energy_plan`. Move the former flat `projection_resolution_mins` and `dynamic_programming` blocks into the respective sections above; the loader rejects those legacy keys rather than silently ignoring them. All these settings must be explicitly supplied. Both optimisers use a non-empty array of positive integer minute durations, accepting the same repetition syntax. Scalars are rejected. Each array must cover the full `num_projection_hours`; excess entries are clipped at the horizon. `num_visible_projection_hours` (explicitly 24 in the shipped YAML) must be positive and no greater than the total horizon. Power divisions must also be positive integers; grid steps and corridor half-widths must be finite percentages in `(0, 100]`. The non-empty stage list includes the initial full-range solve, whose `band_percent` must be YAML `null` (Python `None`); subsequent stages require numeric half-widths. A list containing only that initial entry requests one full-range solve. The former separate coarse-grid and power settings are rejected; put those values in the first entry instead. Each refinement uses scenario-specific period-end bounds around the best retained path, including all configured lookahead periods. Lower/equal scores and infeasible refinements retain the earlier policy. MILP continues to use `energy_plan.optimiser.mix_integer_linear_prog.projection_resolution_mins`; these DP settings do not change its calculations. See the [DP walkthrough](../implementation/dynamic-programming.md).
-
-`use_numba` is a required boolean, explicitly `true` in the shipped YAML. Set it to `false` for Python execution of the same numerical functions without importing Numba. Numba is included in the normal runtime requirements (the existing `python -m pip install -e ".[numba]"` command is also supported); selecting it without Numba installed raises an installation error. Replace the former `backend` string with this boolean; the old key is rejected. There is no warm-up: the first real numerical call imports Numba and loads or compiles its functions inside the measured solve. This setting affects DP only.
+The single `energy_plan.optimiser.projection_resolution_mins` array covers the complete horizon. Positive integer durations and repetition entries such as `15*96` are accepted; scalars and incomplete horizons are rejected. The first action remains fifteen minutes and later intervals align to UTC boundaries. `grid_step_percent` must be finite in `(0,100]`; `power_divisions` must be a positive integer. `compile_model_to_native_code` is an explicit boolean and selecting it without Numba installed raises an installation error. No numerical warm-up is performed.
 
 `energy_plan.preferred_reserve_kwh` is a positive, finite target of stored battery kWh measured from zero; it must be supplied explicitly (3 kWh in the shipped YAML). Physical discharge cut-offs do not shift this scoring origin. `energy_plan.protection_preference` is X, any finite non-negative number, required and explicitly set to 50 in the shipped YAML. Values above 100 are supported. Replace the former `optimisation_weights` block with this scalar when updating separate YAML files; omitting the field is rejected. The old battery share corresponds to X = 100 * maximise_battery / (maximise_profit + maximise_battery), but the revised objective changes its effect.
 
@@ -164,7 +137,7 @@ The Plan settings YAML editor exposes the contents of energy_plan. It accepts a 
 
 Rename former energy_plan.optimiser_specific to energy_plan.optimiser; the old section name is rejected to prevent silently losing settings. optimiser.model must explicitly select mix_integer_linear_prog or dynamic_programming. Generated YAML always includes this field with `# model - mix_integer_linear_prog, dynamic_programming` directly above it. The UI uses the override model; other callers use the global configured model. Save To Disk confirms before persisting, keeps the editor open and does not apply or run the draft.
 
-In DP, `minimum_battery_kwh` and `maximum_battery_kwh` are preferred interval-end levels, with a bounded score penalty for breaches rather than hard SOC stops. The penalty is `-100 * error**2 / (error**2 + 5**2) * period_hours`, where error is the breach in SOC percentage points of health-adjusted capacity. It remains active at zero protection preference and has no additional configuration fields. MILP retains hard scheduled Min/Max limits. Physical capacity and equipment/export restrictions remain enforced in both models.
+In DP, `minimum_battery_kwh` and `maximum_battery_kwh` are preferred interval-end levels, with a bounded score penalty for breaches rather than hard SOC stops. The penalty is `-100 * error**2 / (error**2 + 5**2) * period_hours`, where error is the breach in SOC percentage points of health-adjusted capacity. It remains active at zero protection preference and has no additional configuration fields. Physical capacity and equipment/export restrictions remain hard constraints.
 
 DP always considers Grid supply and Hold battery alongside self-consumption and forced commands. These passive profiles add no configuration keys and ignore the forced-power preference settings; Grid supply permits charging up to physical battery/equipment capability, while Hold disables both directions.
 
@@ -182,3 +155,5 @@ energy_plan:
 ```
 
 Both fields must be explicitly supplied as positive integers; the shipped values are 30. Retain the first successful snapshot per configured UTC slot, with all scenarios and both views, for the configured elapsed days; always protect latest. Cleanup runs only within a successful save. Frequency changes re-bucket surviving snapshots, and cannot restore deleted data. These settings hot-reload with energy_plan and round-trip through the Plan settings editor. See [saved-plan retention](../implementation/plan-history.md#retention-on-successful-submission).
+
+`compile_model_to_native_code: true` selects lazy native compilation using Numba; `false` executes the same numerical functions in Python. This required boolean replaces `use_numba`, which is rejected in active configuration. Archived settings remain unchanged and can still be viewed.

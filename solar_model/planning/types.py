@@ -155,4 +155,3 @@ class ForecastData:
 class ScenarioData:
     name: str
     forecast_data: ForecastData
-    probability: float

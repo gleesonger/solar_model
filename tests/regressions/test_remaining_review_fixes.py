@@ -16,7 +16,6 @@ from solar_model.storage.schema import HOURLY_ROLLUP_MARKER, ForecastSolarSample
 from solar_model.storage.connection import SolarDatabase
 from solar_model.storage.migrations import open_database
 from solar_model.planning.types import DeviceInfo, DeviceState, ForecastData, ForecastInterval, ScenarioData
-from solar_model.planning.plan_optimisation_milp import simulate_energy_plan
 from solar_model.tools.evaluate_forecasts import forecast_performance
 from solar_model.planning.forecasts.solar import _fit_scalars, _official_day_frame, _training_frames, add_adjusted_energy_values, calculate_adjusted_forecast
 from solar_model.storage.queries.forecasting import load_operational_inputs
@@ -218,33 +217,6 @@ def test_exact_forecast_targets_energy_and_differing_grid_interpolation():
     assert values == {"2026-01-04T10:15:00+00:00": {f"panel_{p}_adj_watts": 1500. if p == 1 else 0. for p in (1, 2, 3, 4)}}
 
 
-@pytest.mark.parametrize("day,end_hour", [(date(2026, 3, 29), 5), (date(2026, 10, 25), 3)])
-def test_dst_overlap_scenarios_and_solver_use_real_elapsed_hours(day, end_hour):
-    zone = ZoneInfo("Europe/Dublin")
-    start = datetime.combine(day, datetime.min.time(), zone)
-    end = start.replace(hour=end_hour)
-    interval = ForecastInterval(start, end, 4.)
-    tail = ForecastInterval(utc_instant(end), utc_instant(end) + timedelta(hours=24), 0.)
-    forecast = ForecastData([interval, tail], [interval, tail])
-    for hour in range(4):
-        assert forecast.sum(add_elapsed(start, timedelta(hours=hour)), add_elapsed(start, timedelta(hours=hour + 1))).solar_kwh == 1.
-    scenarios = create_scenarios(forecast, load_config().energy_plan.scenarios)
-    assert next(scenario.forecast_data for scenario in scenarios if scenario.name == "med").sum(start, end).solar_kwh == 4.
-    cfg = load_config()
-    cfg = replace(cfg, tariffs=tariffs(), energy_plan=replace(cfg.energy_plan, num_projection_hours=28, num_visible_projection_hours=4,
-                  optimiser=replace(cfg.energy_plan.optimiser, mix_integer_linear_prog=replace(cfg.energy_plan.optimiser.mix_integer_linear_prog, projection_resolution_mins=(60,) * 4 + (240,) * 6)), minimum_battery_kwh=(rule(0.),), maximum_battery_kwh=(rule(10.),)))
-    device = DeviceInfo(**{f.name: 1. for f in fields(DeviceInfo)})
-    device = replace(device, system_battery_capacity_kwh=10., battery_state_of_health_percent=100.,
-                     inverter_max_active_power_kw=5., inverter_max_absorption_power_kw=5.,
-                     inverter_battery_charge_power_kw=5., inverter_battery_discharge_power_kw=5.)
-    plan = simulate_energy_plan(device, DeviceState(2.), [ScenarioData("base", forecast, 1.)], cfg, start).results["base"]
-    assert plan.solar_kwh.tolist() == [1.] * 4
-    assert [(utc_instant(row.ends_at) - utc_instant(row.starts_at)).total_seconds()
-            for row in plan.itertuples()] == [3600] * 4
-    assert plan.battery_end_kwh.between(-1e-7, 10 + 1e-7).all()
-    grouped = group_plan(plan, 60)
-    assert len(grouped) == 4
-    assert grouped.solar_kwh.sum() == 4.
 
 
 def test_fold_targets_do_not_collapse_in_cumulative_forecast_conversion():

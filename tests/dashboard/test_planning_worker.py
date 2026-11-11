@@ -2,7 +2,6 @@
 import asyncio
 from types import SimpleNamespace
 
-import cvxpy
 import pytest
 
 from solar_model.config import load_config

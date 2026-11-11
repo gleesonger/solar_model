@@ -41,7 +41,7 @@ flowchart TD
     Live --> UI
     DB --> Cutoff[As-of observation and vintage selection]
     Cutoff --> Intervals[DeviceInfo / DeviceState / ForecastData]
-    Intervals --> Solver[CVXPY variables and constraints]
+    Intervals --> Solver[Markov values and policy]
     Solver --> Workbook[Scenario DataFrames and workbook]
 ```
 

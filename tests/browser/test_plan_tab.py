@@ -25,7 +25,6 @@ def test_plan_refresh_scenarios_loading_and_failure(tmp_path):
 import sys
 sys.path.insert(0, {str(repo)!r})
 import asyncio
-import cvxpy  # Import native solver dependencies before NiceGUI in this Windows test process.
 from dataclasses import replace
 import pandas as pd
 from nicegui import ui, run
@@ -39,8 +38,8 @@ async def calculate(config):
     from datetime import datetime, timezone
     as_of = datetime.now(timezone.utc)
     preference = config.energy_plan.protection_preference
-    model = "MILP" if config.energy_plan.optimiser.model == "mix_integer_linear_prog" else "DP"
-    assert model in ('MILP', 'DP')
+    model = "Markov DP"
+    assert model == 'Markov DP'
     await asyncio.sleep(2.)
     if preference == 99:
         raise ValueError('Synthetic forecast unavailable')
@@ -61,8 +60,8 @@ async def calculate(config):
         frame['terminal_score'] = 0.
         frame['tariff_name'] = model
         load, solar = ('med', 'med') if name == 'med' else name.split('_')
-        frame['solar_kwh'] *= getattr(config.energy_plan.scenarios.solar, solar).multiplier
-        frame['load_kwh'] *= getattr(config.energy_plan.scenarios.house_load, load).multiplier
+        frame['solar_kwh'] *= getattr(config.energy_plan.scenario_multiplier.solar, solar)
+        frame['load_kwh'] *= getattr(config.energy_plan.scenario_multiplier.house_load, load)
         result.results[name] = frame
         extra = frame.iloc[[-1] * 6].copy().reset_index(drop=True)
         extra['starts_at'] = pd.date_range(frame.ends_at.iloc[-1], periods=6, freq='4h')
@@ -72,7 +71,7 @@ async def calculate(config):
         result.lookahead_results[name] = extra
     stamp = result.results['med'].starts_at.iloc[0]
     actuals = pd.DataFrame(dict(timestamp=[stamp - pd.Timedelta(hours=1), stamp], solar=[2.,2.], house_load=[1.,1.], battery=[4.,4.], grid_import=[.3,.4], grid_export=[.1,0.]))
-    return dict(report=PlanReport(result, actuals, 20., config.energy_plan.scenarios, config.energy_plan.preferred_reserve_kwh, preference, 20.), began_at=as_of, completed_at=as_of)
+    return dict(report=PlanReport(result, actuals, 20., config.energy_plan.scenario_multiplier, config.energy_plan.preferred_reserve_kwh, preference, 20.), began_at=as_of, completed_at=as_of)
 import solar_model.dashboard.tabs.plan as plan_module
 plan_module.demonstrate = calculate
 
@@ -88,12 +87,12 @@ def page():
         with ui.tab_panels(tabs, value='Plan').classes('w-full'):
             with ui.tab_panel('Plan').classes('p-0 min-w-0'):
                 config = load_config()
-                config = replace(config, energy_plan=replace(config.energy_plan, scenarios=replace(config.energy_plan.scenarios,
-                    house_load=replace(config.energy_plan.scenarios.house_load,
-                        low=replace(config.energy_plan.scenarios.house_load.low, multiplier=.5),
-                        high=replace(config.energy_plan.scenarios.house_load.high, multiplier=1.5)))))
-                config = replace(config, energy_plan=replace(config.energy_plan, optimiser=replace(config.energy_plan.optimiser, model="mix_integer_linear_prog"), scenarios=replace(config.energy_plan.scenarios,
-                    solar=replace(config.energy_plan.scenarios.solar, low=replace(config.energy_plan.scenarios.solar.low, multiplier=.4)))))
+                config = replace(config, energy_plan=replace(config.energy_plan, scenario_multiplier=replace(config.energy_plan.scenario_multiplier,
+                    house_load=replace(config.energy_plan.scenario_multiplier.house_load,
+                        low=.5,
+                        high=1.5))))
+                config = replace(config, energy_plan=replace(config.energy_plan, scenario_multiplier=replace(config.energy_plan.scenario_multiplier,
+                    solar=replace(config.energy_plan.scenario_multiplier.solar, low=.4))))
                 PlanTab(config, {str(config_path)!r}).render_plan_tab()
 
 if __name__ == '__main__':
@@ -134,12 +133,10 @@ if __name__ == '__main__':
                 def wait_for_idle():
                     page.wait_for_function("!Array.from(document.querySelectorAll('button')).find(e => e.textContent.includes('Plan settings')).disabled")
 
-                def change_preference(value, model_key=None, wait=True):
+                def change_preference(value, wait=True):
                     settings.click()
                     editor = page.get_by_role("textbox", name="YAML", exact=True)
                     text = re.sub(r"(?m)^protection_preference:.*$", f"protection_preference: {value}", editor.input_value())
-                    if model_key is not None:
-                        text = re.sub(r"(?m)^  model:.*$", f"  model: {model_key}", text)
                     editor.fill(text)
                     page.get_by_role("button", name="Run Demonstration", exact=True).click()
                     page.get_by_role("dialog").wait_for(state="hidden")
@@ -272,7 +269,7 @@ if __name__ == '__main__':
                 with page.expect_download() as download_info:
                     page.get_by_role("button", name="Download Excel", exact=True).click()
                 download = download_info.value
-                assert download.suggested_filename.startswith("plan-MILP-com-protection-75-solar-med-load-med-")
+                assert download.suggested_filename.startswith("plan-Markov DP-com-protection-75-solar-med-load-med-")
                 assert download.suggested_filename.endswith(".xlsx")
                 with ZipFile(download.path()) as workbook:
                     assert 'name="Plan detail"' in workbook.read("xl/workbook.xml").decode()
@@ -292,9 +289,9 @@ if __name__ == '__main__':
                     return positions[0].length === positions[1].length &&
                         positions[0].every((value, i) => Math.abs(value - positions[1][i]) < 1);
                 }""")
-                change_preference(75, model_key="dynamic_programming")
+                change_preference(75)
                 assert page.get_by_text(re.compile("^Model:")).count() == 0
-                page.get_by_role("cell", name="DP", exact=True).first.wait_for()
+                page.get_by_role("cell", name="Markov DP", exact=True).first.wait_for()
                 assert settings.is_enabled()
                 for width in (1440, 390):
                     page.set_viewport_size({"width": width, "height": 1100})
@@ -347,7 +344,7 @@ if __name__ == '__main__':
                 assert page.get_by_test_id("plan-chart").evaluate("element => echarts.getInstanceByDom(element).id") == chart_id
                 assert page.get_by_test_id("plan-chart").evaluate("element => {const o = echarts.getInstanceByDom(element).getOption(); return o.legend[0].selected.Solar === false && o.dataZoom[0].start === 20 && o.dataZoom[0].end === 80;}")
                 assert page.locator(".q-table tbody tr").count() == 7
-                change_preference(99, model_key="mix_integer_linear_prog")
+                change_preference(99)
                 page.get_by_text("Plan refresh failed. The previous plan is still shown.", exact=True).wait_for()
                 assert settings.is_visible() and not settings.is_disabled()
                 assert page.get_by_text(re.compile("^Model:")).count() == 0

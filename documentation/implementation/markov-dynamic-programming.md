@@ -1,16 +1,14 @@
 # Markov dynamic programming
 
-The shipped configuration selects `energy_plan.optimiser.dynamic_programming.uncertainty_model: markov`. The older calculation remains available as `independent_scenarios`. The uncertainty mode, transition duration and matrix must all be explicitly specified; missing keys fail configuration validation.
+Markov DP is the only planning model. All optimiser settings are explicitly required under `energy_plan.optimiser`; model and uncertainty selectors no longer exist. Legacy MILP, independent-scenario DP and refinement-stage settings are rejected.
 
 The original [proposal](../reviews/markov-dp-proposal.md) records the reasoning and agreed matrix. This guide describes the implemented contracts. General physics and score definitions remain in the [DP walkthrough](dynamic-programming.md) and [plan model](../overview/plan-model.md).
 
 ## Ownership and inputs
 
-`plan_optimisation_dynamic_programming.simulate_energy_plan()` retains public validation, time-grid preparation, scoring scales and progress/failure logs. In Markov mode it runs only the first full-range configured refinement stage. Explicit `grid_step_percent` and `power_divisions` still override that stage. `battery_bounds` is rejected: old per-path corridors do not describe reachable states when conditions can change.
+`plan_optimisation_dynamic_programming.simulate_energy_plan()` owns validation, time-grid preparation, scoring and timing. It runs one full-range solve using configured `grid_step_percent` and `power_divisions`; explicit API overrides remain available. There are no path-based corridors or later refinement stages. `solve_pass()` prepares periods and invokes `planning.markov.solve_prepared()`, which owns duration-scaled transitions, coupled values, probability propagation and result assembly. Both Python and Numba share the same physical command simulator and exact nonlinear protection formula.
 
-After assembling and validating scenario-period inputs, `solve_pass()` calls `planning.markov.solve_prepared()`. That module owns duration-scaled transitions, coupled backward values, forward probability propagation and Markov result assembly. Both modes reuse the existing command simulator, physical limits, route allocation and exact nonlinear protection formula.
-
-Nine uniquely named input scenarios are required: `med` for medium/medium and `<load>_<solar>` for all other low/med/high combinations. Internal layer order is explicitly load-major then solar-major; input list order does not matter. Medium multipliers must be positive.
+Nine uniquely named input scenarios are required: `med` for medium/medium and `<load>_<solar>` for all other low/med/high combinations. Internal layer order is explicitly load-major then solar-major; input list order does not matter. Medium multipliers must be positive. Magnitudes are scalar values under `energy_plan.scenario_multiplier.solar` and `.house_load`; the old scenario probability fields and `ScenarioData.probability` have been removed. All uncertainty probabilities come from transitions and the initial state.
 
 Markov period inputs are reconstructed from the medium scenario and configured multipliers. The old high-case half-hour timing redistribution is not used. No additional solar correction or actuals-based load scaling is performed: the service already supplies the as-of intraday-adjusted solar projection and existing load baseline.
 
@@ -40,13 +38,13 @@ V[final,b,s] = terminal_credit_rate * b
 
 Only positive-probability terms participate. A command is rejected if any supported physical outcome or continuation is infeasible. Infeasible outcomes are never dropped and renormalised. Scheduled battery Min/Max remain soft penalties; equipment, capacity, import and battery-export limits remain hard.
 
-The initial command comes directly from this expected-value policy, not from rescoring nine fixed scenario paths. `result_score()` returns `expected_score` for Markov results.
+The initial command comes directly from this expected-value policy, not from rescoring nine fixed scenario paths. `SimulationResult.expected_score` records that Markov objective.
 
 ## Transition timing
 
-Solar and load each use `dynamic_programming.transition_matrix`, with its reference duration in `transition_hours`. The shipped/default values are three hours and:
+Solar uses `optimiser.transition_matrix.solar`; load uses `optimiser.transition_matrix.house_load`. Both matrices are explicitly required and independently validated, with their shared reference duration in `transition_hours`. The shipped values are three hours and:
 
-The Plan YAML editor preserves `uncertainty_model`, `transition_matrix` and `transition_hours` on round trips. The previous serializer omitted `uncertainty_model`, which could revert an edited demonstration or saved configuration to independent-scenario DP; that omission is corrected with matrix configuration support.
+The Plan YAML editor round-trips all six flat optimiser fields. There is no uncertainty selector to omit or default; obsolete selector keys are rejected.
 
 | From / to | Low | Medium | High |
 | --- | ---: | ---: | ---: |
@@ -69,7 +67,7 @@ The matrix must be 3-by-3 with finite probabilities in [0,1] and row sums within
 
 This is row-wise exit-probability scaling, not a continuous-time matrix exponential. Repeated short transitions generally do not reproduce a single long transition: paths can leave and re-enter layers between decisions. Interval granularity therefore affects the projected condition process. The old composition guarantee and scalar spectral derivation in the original proposal no longer describe runtime behaviour.
 
-Solar and load transitions are independent. Joint probabilities are their products in the explicit nine-layer order. At three hours, the probability of medium/medium ending medium/medium is 0.36. Old configured scenario probabilities are not multiplied into these transitions.
+Solar and load transitions are independently duration-scaled using their respective configured matrices. Joint probabilities are the load-matrix and solar-matrix products in the explicit nine-layer order. At three hours, the probability of medium/medium ending medium/medium is 0.36. Old configured scenario probabilities are not multiplied into these transitions.
 
 The default matrix at its three-hour reference duration has long-run probabilities `(2/7, 3/7, 2/7)`. Duration-scaled matrices can have different stationary distributions, and editing the matrix also changes them. The asymmetric load multipliers can make expected load differ from the medium forecast. Do not silently recenter probabilities or amounts.
 
@@ -101,11 +99,11 @@ The Plan tab displays expected visible net cost and full-horizon expected score 
 
 The as-of workbook adds an `Expected visible` sheet and summary rows identifying fixed-condition stress sheets, expected visible cost and full-horizon score. Grouping stress sheets sums score contributions as well as energy/costs. Expected rows retain model resolution even when stress sheets are grouped. CLI visible exports do not include hidden expectations; the full score includes them.
 
-The existing `benchmark_planning --model dp` harness explicitly selects `independent_scenarios` because its audits and refinement experiments assume fixed paths. Its output records that mode. It does not benchmark Markov runtime or quality.
+The `benchmark_planning` tool benchmarks only Markov in an isolated worker with a hard deadline. It has no model-selection or refinement switches. Run it only when explicitly requested.
 
 ## Python and Numba
 
-`use_numba` selects Python or lazily compiled versions of the same `backward_values()` and `forward_distribution()` functions. Shared helpers are registered for compilation. Periods, choices, grids, transitions and selected policy indices are converted to typed lists only for the compiled path. Native dispatchers are cached across calls; no synthetic warm-up, parallel loops or relaxed arithmetic are used.
+`compile_model_to_native_code` selects Python or lazily compiled versions of the same `backward_values()` and `forward_distribution()` functions. Shared helpers are registered for compilation. Periods, choices, grids, transitions and selected policy indices are converted to typed lists only for the compiled path. Native dispatchers are cached across calls; no synthetic warm-up, parallel loops or relaxed arithmetic are used.
 
 Initial lazy compilation is included in the existing stage/total timing accounting. Markov solves report one full-range stage, plus an INFO summary containing the expected objective and identifying stress detail. The older DEBUG independent-scenario phase breakdown does not describe Markov phases.
 

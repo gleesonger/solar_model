@@ -18,7 +18,7 @@ The dashboard polls saved plan IDs/status, not electrical markers. Its private d
 load_config(path='config.yaml')
   yaml.safe_load(file) -> Python mapping/lists/scalars
   config_from_mapping(...) shares normalisation/validation with the UI editor
-  validate scenarios dimensions contain exactly low/med/high multiplier/probability entries
+  validate scenario_multiplier dimensions contain exactly low/med/high numeric values
   expand optimiser.mix_integer_linear_prog.projection_resolution_mins repetitions (e.g. 15*24)
   normalise minimum_battery_kwh wrapper if supplied
   rename each tariff period's import key to import_
@@ -32,7 +32,7 @@ The intermediate YAML object is mutable. The normalisation steps alter it before
 
 `EnergyPlanConfig.plan_rerun_frequency_mins` has no constructor default. Both startup file loading and strict editor parsing reject an omitted field before a scheduler or plan starts. It must also be finite and positive. Every other declared YAML field is also required, including nullable fields and inactive model blocks; see [explicit configuration](../overview/configuration.md#explicit-configuration-is-mandatory).
 
-Required `Config.energy_plan.scenarios: ScenariosConfig` contains `solar` and `house_load` as frozen `ScenarioDimensionConfig` objects, each with low/med/high `ScenarioLevelConfig(multiplier, probability)` entries. `items()` returns the fixed low/med/high order. Multipliers are finite, non-negative and nondecreasing; probabilities are finite in [0,1] and must total 97%-103% per dimension, then are normalised to sum to one during construction. Scenario mappings reject extra/missing levels and entry fields. Planning and dashboard share these settings; joint probabilities assume independence.
+Required `Config.energy_plan.scenario_multiplier: ScenarioMultiplierConfig` contains solar and house-load `ScenarioDimensionConfig` objects with numeric low/medium/high values. `items()` fixes that order. Every value is explicit, finite, non-negative and ordered, with positive medium multipliers. No probability field exists in `ScenarioData` or these config records. Markov probabilities come from transitions and the medium/medium starting state. Legacy archived YAML remains displayable without current-schema validation.
 
 ```python
 # Abbreviated raw YAML-derived mapping
@@ -58,7 +58,7 @@ config.actuals_to_forecast_panel_ids   # resolves names to IDs for queries/chart
 | `actuals` | `ModbusConfig`, `DataRetrivalScheduleConfig`; full/live collection |
 | `forecast` | `ForecastConfig`, tuple of `SolarArrayConfig`; API requests, panel labels, model/UI selection |
 | `tariffs` | `TariffsConfig` → `TariffPeriod` → `TariffRule`; collection, planning, recalculation |
-| `energy_plan` | `EnergyPlanConfig`, scalar protection preference, limit-rule tuples and nested `OptimiserConfig` with `MixedIntegerLinearProgrammingConfig` and `DynamicProgrammingConfig` / `DPRefinementConfig` stages; offline planners |
+| `energy_plan` | `EnergyPlanConfig`, scalar protection preference, limit-rule tuples and nested flat `OptimiserConfig` for Markov grid, power, timestep and transition settings; offline planners |
 | `additional_device_info` | Charge/discharge efficiencies; overrides planner metadata inputs |
 | `dashboard` | Host/port and PV-string mapping; NiceGUI and array allocation |
 
@@ -140,4 +140,4 @@ columns = table_to_object_list(Column,
 
 Next: [collection and ingestion](collection.md). The [dashboard state guide](dashboard-ui.md) explains the worker/thread/browser boundaries in more detail.
 
-The UI editor uses parse_energy_plan_yaml(config, text) to construct a strict replacement EnergyPlanConfig, then validate it within a copied Config. energy_plan_yaml explicitly maps the EnergyPlanConfig schema to the file layout through EnergyPlanYamlDumper: compact scalar lists, inline scenario/refinement mappings, quoted times and separated sections. collapse_projection_resolutions encodes consecutive equal timestep runs; collapse_scheduled_rules groups identical time/rate/name combinations into weekday lists without altering time windows. Rule comment metadata is discarded during shared normalisation. Round-trip checks cover file YAML to settings to formatted YAML to equivalent settings, plus stable regenerated text. save_energy_plan_yaml validates against both the running config and latest disk contents, writes a temporary sibling file and atomically replaces the target. Only the energy_plan source section is replaced. Startup config_path is passed to the shared PlanStore and through DashboardLayout to PlanTab; ordinary startup defaults to config.yaml. Successful editor saves update the store immediately, and external file edits are detected by the background check. Only energy_plan is hot-reloaded.
+The UI editor uses parse_energy_plan_yaml(config, text) to construct a strict replacement EnergyPlanConfig, then validate it within a copied Config. energy_plan_yaml explicitly maps the EnergyPlanConfig schema to the file layout through EnergyPlanYamlDumper: compact scalar lists, inline scenario mappings, quoted times and separated sections. collapse_projection_resolutions encodes consecutive equal timestep runs; collapse_scheduled_rules groups identical time/rate/name combinations into weekday lists without altering time windows. Rule comment metadata is discarded during shared normalisation. Round-trip checks cover file YAML to settings to formatted YAML to equivalent settings, plus stable regenerated text. save_energy_plan_yaml validates against both the running config and latest disk contents, writes a temporary sibling file and atomically replaces the target. Only the energy_plan source section is replaced. Startup config_path is passed to the shared PlanStore and through DashboardLayout to PlanTab; ordinary startup defaults to config.yaml. Successful editor saves update the store immediately, and external file edits are detected by the background check. Only energy_plan is hot-reloaded.

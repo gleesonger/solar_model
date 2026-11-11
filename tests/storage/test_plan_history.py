@@ -2,7 +2,6 @@
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 
-import cvxpy  # Load native dependencies before UI-related test helpers on Windows.
 import pandas as pd
 import pytest
 from sqlalchemy import event, inspect
@@ -34,7 +33,7 @@ def test_report_round_trip_keeps_nine_scenarios_precision_and_prepared_views(dat
     result = replace(result, results={"med" if load == solar == "med" else f"{load}_{solar}": original.copy() for load in ("low", "med", "high") for solar in ("low", "med", "high")})
     stamp = original.starts_at.iloc[0].to_pydatetime()
     actuals = pd.DataFrame({"timestamp": [stamp], "solar": [2.123456789]})
-    report = PlanReport(result, actuals, 20., config.energy_plan.scenarios, 3., 50., 20., stamp)
+    report = PlanReport(result, actuals, 20., config.energy_plan.scenario_multiplier, 3., 50., 20., stamp)
     snapshot_id = persist_report(config, report, stamp, stamp + timedelta(seconds=2))
     saved = read_saved_run(config, snapshot_id)
     assert saved.snapshot_id == snapshot_id
@@ -63,7 +62,7 @@ def test_actuals_are_queried_through_forecast_horizon_and_ignore_legacy_payload(
     result = sample_result()
     stamp = result.results["med"].starts_at.iloc[0].to_pydatetime()
     end = result.results["med"].ends_at.iloc[-1].to_pydatetime()
-    report = PlanReport(result, pd.DataFrame(), 20., config.energy_plan.scenarios, 3., 50., 20., stamp)
+    report = PlanReport(result, pd.DataFrame(), 20., config.energy_plan.scenario_multiplier, 3., 50., 20., stamp)
     snapshot_id = persist_report(config, report, stamp, stamp)
     with db.sessions.begin() as session:
         for offset, solar, grid in ((-60, 1., .3), (15, 2., -.4), (75, 3., .2), (76, 99., 99.)):
@@ -126,7 +125,7 @@ def test_snapshot_settings_are_archived_text_validated_only_when_reused(database
     config = replace(config, database=replace(config.database, path=path))
     result = sample_result()
     stamp = result.results["med"].starts_at.iloc[0].to_pydatetime()
-    report = PlanReport(result, pd.DataFrame(), 20., config.energy_plan.scenarios, 3., 50., 20., stamp)
+    report = PlanReport(result, pd.DataFrame(), 20., config.energy_plan.scenario_multiplier, 3., 50., 20., stamp)
     snapshot_id = persist_report(config, report, stamp, stamp)
     stored = load_plan(path, snapshot_id)
     archived = yaml.safe_load(stored.metadata["settings"])
@@ -140,7 +139,7 @@ def test_snapshot_settings_are_archived_text_validated_only_when_reused(database
     saved = restore_run(changed, stored)
     assert saved.settings == text
     assert saved.report.protection_preference == 50.
-    assert saved.report.scenarios == config.energy_plan.scenarios
+    assert saved.report.scenario_multiplier == config.energy_plan.scenario_multiplier
     pd.testing.assert_frame_equal(saved.report.simulation.results["med"], result.results["med"])
     with pytest.raises(ValueError):
         parse_energy_plan_yaml(changed, saved.settings)
@@ -249,7 +248,7 @@ def test_markov_expected_frames_survive_publication_separately_from_stress_cases
     expected = pd.DataFrame({"net_cost": [.123456789, -.2]})
     result = replace(result, expected_score=1.23456789, expected_results=expected, expected_lookahead_results=expected.iloc[:0].copy())
     stamp = datetime.now(timezone.utc)
-    report = PlanReport(result, pd.DataFrame(), 20., config.energy_plan.scenarios, 3., 50., 20., stamp)
+    report = PlanReport(result, pd.DataFrame(), 20., config.energy_plan.scenario_multiplier, 3., 50., 20., stamp)
     snapshot_id = persist_report(config, report, stamp, stamp)
     saved = read_saved_run(config, snapshot_id)
     assert saved.report.simulation.expected_score == result.expected_score
@@ -262,5 +261,28 @@ def test_markov_expected_frames_survive_publication_separately_from_stress_cases
     pd.testing.assert_frame_equal(historical.report.simulation.expected_results, expected)
     assert historical.report.simulation.expected_score == result.expected_score
     assert historical.report.expected_visible_net_cost == pytest.approx(-.076543211)
-    from solar_model.planning.plan_report import expected_plan_summary
-    assert "stress cases" in expected_plan_summary(historical.report.simulation, historical.report.expected_visible_net_cost)
+
+
+def test_retired_nested_optimiser_settings_can_still_be_viewed(database):
+    from solar_model.config import parse_energy_plan_yaml
+    from solar_model.services.plan_history import restore_run
+    path, _ = database
+    config = load_config()
+    config = replace(config, database=replace(config.database, path=path))
+    result = sample_result()
+    stamp = result.results["med"].starts_at.iloc[0].to_pydatetime()
+    report = PlanReport(result, pd.DataFrame(), 20., config.energy_plan.scenario_multiplier, 3., 50., 20., stamp)
+    snapshot_id = persist_report(config, report, stamp, stamp)
+    stored = load_plan(path, snapshot_id)
+    archived = yaml.safe_load(stored.metadata["settings"])
+    multipliers = archived.pop("scenario_multiplier")
+    archived["scenarios"] = {dimension: {name: {"multiplier": value, "probability": None} for name, value in levels.items()} for dimension, levels in multipliers.items()}
+    archived["optimiser"] = {"model": "mix_integer_linear_prog", "mix_integer_linear_prog": {"projection_resolution_mins": [60] * 48}, "dynamic_programming": {"uncertainty_model": "independent_scenarios"}}
+    text = yaml.safe_dump(archived)
+    stored.metadata["settings"] = text
+    saved = restore_run(config, stored)
+    assert saved.settings == text
+    assert saved.report.scenario_multiplier == config.energy_plan.scenario_multiplier
+    pd.testing.assert_frame_equal(saved.report.simulation.results["med"], result.results["med"])
+    with pytest.raises(ValueError, match="rename energy_plan.scenarios"):
+        parse_energy_plan_yaml(config, saved.settings)

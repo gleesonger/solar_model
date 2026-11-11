@@ -13,7 +13,7 @@ from solar_model.planning import plan_optimisation_dynamic_programming as dp
 from solar_model.planning.scenarios import create_scenarios
 from solar_model.planning.types import OperatingMode
 from tests.planning.test_dynamic_programming import period
-from tests.planning.test_next_action import inputs
+from tests.planning.helpers import inputs
 
 
 def device():
@@ -38,7 +38,7 @@ def test_exit_probability_scaling_and_joint_independence():
                 if j != i:
                     assert row[j] == pytest.approx(expected_exit * supplied[i][j] / exit_probability)
             assert sum(row) == pytest.approx(1.) and min(row) >= 0
-    joint = markov.joint_transition(3.)
+    joint = markov.joint_transition(3., tuple(tuple(row) for row in supplied), tuple(tuple(row) for row in supplied), 3.)
     assert joint[4][4] == pytest.approx(.36)
     assert all(sum(row) == pytest.approx(1.) and min(row) >= 0 for row in joint)
     for bad in (-1., math.nan, math.inf):
@@ -51,21 +51,21 @@ def test_yaml_transition_settings_round_trip_and_change_probabilities(tmp_path):
     import yaml
     from solar_model.config import energy_plan_yaml, load_config, parse_energy_plan_yaml
     raw = yaml.safe_load(Path("config.yaml").read_text(encoding="utf-8"))
-    settings = raw["energy_plan"]["optimiser"]["dynamic_programming"]
+    settings = raw["energy_plan"]["optimiser"]
     settings["transition_hours"] = 6.
-    settings["transition_matrix"] = [[.8, .15, .05], [.15, .7, .15], [.05, .15, .8]]
+    settings["transition_matrix"]["solar"] = [[.8, .15, .05], [.15, .7, .15], [.05, .15, .8]]
     path = tmp_path / "config.yaml"
     path.write_text(yaml.safe_dump(raw), encoding="utf-8")
     config = load_config(path)
     parsed = parse_energy_plan_yaml(config, energy_plan_yaml(config.energy_plan))
-    actual = parsed.optimiser.dynamic_programming
-    assert actual.uncertainty_model == "markov"
+    actual = parsed.optimiser
+    assert not hasattr(actual, "uncertainty_model")
     assert actual.transition_hours == 6.
-    assert actual.transition_matrix == tuple(tuple(row) for row in settings["transition_matrix"])
-    for row, expected in zip(markov.transition(6., actual.transition_matrix, actual.transition_hours), actual.transition_matrix):
+    assert actual.transition_matrix.solar == tuple(tuple(row) for row in settings["transition_matrix"]["solar"])
+    for row, expected in zip(markov.transition(6., actual.transition_matrix.solar, actual.transition_hours), actual.transition_matrix.solar):
         assert row == pytest.approx(expected)
-    assert markov.joint_transition(6., actual.transition_matrix, actual.transition_hours)[4][4] == pytest.approx(.49)
-    assert markov.transition(3., actual.transition_matrix, actual.transition_hours) != markov.transition(3.)
+    assert markov.joint_transition(6., actual.transition_matrix.solar, actual.transition_matrix.house_load, actual.transition_hours)[4][4] == pytest.approx(.42)
+    assert markov.transition(3., actual.transition_matrix.solar, actual.transition_hours) != markov.transition(3.)
 
 
 @pytest.mark.parametrize("matrix,hours", [
@@ -77,14 +77,14 @@ def test_yaml_transition_settings_round_trip_and_change_probabilities(tmp_path):
 ])
 def test_invalid_configured_transitions_rejected(matrix, hours):
     from solar_model.planning.markov_transitions import validate_transition_inputs
-    with pytest.raises(ValueError, match="dynamic_programming.transition"):
+    with pytest.raises(ValueError, match="optimiser.transition"):
         validate_transition_inputs(matrix, hours)
 
 
 def test_identical_rows_and_certain_transitions_are_supported(inputs):
     matrix = ((.6, .3, .1), (.1, .1, .8), (.1, .1, .8))
-    settings = replace(inputs[3].energy_plan.optimiser.dynamic_programming, uncertainty_model="markov", transition_matrix=matrix)
-    config = replace(inputs[3], energy_plan=replace(inputs[3].energy_plan, optimiser=replace(inputs[3].energy_plan.optimiser, dynamic_programming=settings)))
+    settings = replace(inputs[3].energy_plan.optimiser, transition_matrix=replace(inputs[3].energy_plan.optimiser.transition_matrix, solar=matrix, house_load=matrix))
+    config = replace(inputs[3], energy_plan=replace(inputs[3].energy_plan, optimiser=settings))
     validate_config(config)
     for actual, expected in zip(markov.transition(3., matrix), matrix):
         assert actual == pytest.approx(expected)
@@ -95,7 +95,7 @@ def test_identical_rows_and_certain_transitions_are_supported(inputs):
 
 def test_identity_matrix_keeps_conditions_fixed():
     identity = ((1., 0., 0.), (0., 1., 0.), (0., 0., 1.))
-    joint = markov.joint_transition(.25, identity, 3.)
+    joint = markov.joint_transition(.25, identity, identity, 3.)
     assert joint == [[float(i == j) for j in range(9)] for i in range(9)]
 
 
@@ -185,17 +185,16 @@ def test_python_numba_parity_with_interpolation():
     assert frame.total_score.sum() == pytest.approx(values[0][0][1])
 
 
-@pytest.mark.parametrize("use_numba", [False, True])
-def test_public_markov_result_and_fixed_stress_reports(inputs, use_numba, tmp_path):
+@pytest.mark.parametrize("compile_model_to_native_code", [False, True])
+def test_public_markov_result_and_fixed_stress_reports(inputs, compile_model_to_native_code, tmp_path):
     hardware, state, single, config, start = inputs
-    settings = replace(config.energy_plan.optimiser.dynamic_programming, uncertainty_model="markov", use_numba=use_numba, projection_resolution_mins=(15,) * 4)
-    config = replace(config, energy_plan=replace(config.energy_plan, num_projection_hours=1, num_visible_projection_hours=1, optimiser=replace(config.energy_plan.optimiser, dynamic_programming=settings)))
-    scenarios = create_scenarios(single[0].forecast_data, config.energy_plan.scenarios)
+    settings = replace(config.energy_plan.optimiser, compile_model_to_native_code=compile_model_to_native_code, projection_resolution_mins=(15,) * 4)
+    config = replace(config, energy_plan=replace(config.energy_plan, num_projection_hours=1, num_visible_projection_hours=1, optimiser=settings))
+    scenarios = create_scenarios(single[0].forecast_data, config.energy_plan.scenario_multiplier)
     result = dp.simulate_energy_plan(hardware, state, scenarios, config, start, grid_step_percent=25., power_divisions=1)
     assert set(result.results) == set(markov.NAMES)
     assert result.expected_score == pytest.approx(result.expected_results.total_score.sum())
     assert result.expected_lookahead_results.empty
-    assert dp.result_score(result, scenarios) == result.expected_score
     assert result.expected_results.starts_at.iloc[0] == start
     assert result.expected_results.ends_at.iloc[-1] == start + timedelta(hours=1)
     assert result.expected_results.battery_start_kwh.iloc[0] == pytest.approx(state.battery_kwh)
@@ -207,7 +206,7 @@ def test_public_markov_result_and_fixed_stress_reports(inputs, use_numba, tmp_pa
     database = open_database(path)
     saved_config = replace(config, database=replace(config.database, path=path))
     try:
-        report = PlanReport(result, pd.DataFrame(), hardware.system_battery_capacity_kwh, config.energy_plan.scenarios, 3., 50., hardware.system_battery_capacity_kwh, start)
+        report = PlanReport(result, pd.DataFrame(), hardware.system_battery_capacity_kwh, config.energy_plan.scenario_multiplier, 3., 50., hardware.system_battery_capacity_kwh, start)
         snapshot_id = persist_report(saved_config, report, start, start)
         saved = read_saved_run(saved_config, snapshot_id)
         assert saved.report.simulation.expected_score == result.expected_score
@@ -218,8 +217,8 @@ def test_public_markov_result_and_fixed_stress_reports(inputs, use_numba, tmp_pa
         database.close()
     # High-case timing redistribution has been removed, retaining multiplier-only amounts.
     high = result.results["high_high"]
-    assert high.load_kwh.iloc[0] == pytest.approx(.25 * config.energy_plan.scenarios.house_load.high.multiplier)
-    if not use_numba:
+    assert high.load_kwh.iloc[0] == pytest.approx(.25 * config.energy_plan.scenario_multiplier.house_load.high)
+    if not compile_model_to_native_code:
         from zipfile import ZipFile
         from solar_model.tools.reports import group_plan, write_workbook
         grouped = {name: group_plan(frame, 60) for name, frame in result.results.items()}
@@ -229,8 +228,6 @@ def test_public_markov_result_and_fixed_stress_reports(inputs, use_numba, tmp_pa
         with ZipFile(output) as workbook:
             assert 'name="Expected visible"' in workbook.read("xl/workbook.xml").decode()
             assert "Fixed-condition stress case" in workbook.read("xl/sharedStrings.xml").decode()
-    with pytest.raises(ValueError, match="full-range"):
-        dp.simulate_energy_plan(hardware, state, scenarios, config, start, battery_bounds=[(0., 1.)] * 4)
 
 
 def test_persistence_changes_the_distribution_of_future_demand():
@@ -242,22 +239,14 @@ def test_persistence_changes_the_distribution_of_future_demand():
     assert independent[0][0][0] == pytest.approx(-2.)
 
 
-def test_markov_config_validation(inputs):
-    config = inputs[3]
-    settings = replace(config.energy_plan.optimiser.dynamic_programming, uncertainty_model="invalid")
-    config = replace(config, energy_plan=replace(config.energy_plan, optimiser=replace(config.energy_plan.optimiser, dynamic_programming=settings)))
-    with pytest.raises(ValueError, match="uncertainty_model"):
-        validate_config(config)
-
-
-def test_lookahead_partial_intervals_ignore_old_weights_and_input_order(inputs):
+def test_lookahead_partial_intervals_preserve_expectation_with_reordered_inputs(inputs):
     hardware, state, single, config, original_start = inputs
     start = original_start + timedelta(minutes=5)
-    settings = replace(config.energy_plan.optimiser.dynamic_programming, uncertainty_model="markov", use_numba=False, projection_resolution_mins=(15,) * 4 + (60,))
-    config = replace(config, energy_plan=replace(config.energy_plan, num_projection_hours=2, num_visible_projection_hours=1, optimiser=replace(config.energy_plan.optimiser, dynamic_programming=settings)))
-    scenarios = create_scenarios(single[0].forecast_data, config.energy_plan.scenarios)
+    settings = replace(config.energy_plan.optimiser, compile_model_to_native_code=False, projection_resolution_mins=(15,) * 4 + (60,))
+    config = replace(config, energy_plan=replace(config.energy_plan, num_projection_hours=2, num_visible_projection_hours=1, optimiser=settings))
+    scenarios = create_scenarios(single[0].forecast_data, config.energy_plan.scenario_multiplier)
     first = dp.simulate_energy_plan(hardware, state, scenarios, config, start, grid_step_percent=25., power_divisions=1)
-    changed = [replace(scenario, probability=float(scenario.name == "med")) for scenario in reversed(scenarios)]
+    changed = list(reversed(scenarios))
     second = dp.simulate_energy_plan(hardware, state, changed, config, start, grid_step_percent=25., power_divisions=1)
     assert first.expected_score == pytest.approx(second.expected_score)
     assert first.next_action == second.next_action
@@ -266,3 +255,13 @@ def test_lookahead_partial_intervals_ignore_old_weights_and_input_order(inputs):
     assert first.expected_lookahead_results.ends_at.iloc[-1] == start + timedelta(hours=2)
     assert first.expected_results.total_score.sum() + first.expected_lookahead_results.total_score.sum() == pytest.approx(first.expected_score)
     assert first.expected_results.terminal_score.sum() == 0.
+
+
+def test_solar_and_house_load_matrices_control_their_own_joint_dimensions():
+    identity = ((1., 0., 0.), (0., 1., 0.), (0., 0., 1.))
+    cycle = ((0., 1., 0.), (0., 0., 1.), (1., 0., 0.))
+    load_only = markov.joint_transition(3., identity, cycle, 3.)
+    solar_only = markov.joint_transition(3., cycle, identity, 3.)
+    assert load_only[4][7] == 1. and sum(load_only[4]) == 1.
+    assert solar_only[4][5] == 1. and sum(solar_only[4]) == 1.
+    assert all(sum(row) == pytest.approx(1.) for row in load_only + solar_only)

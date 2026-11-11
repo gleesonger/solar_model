@@ -124,7 +124,7 @@ The first startup after the valid-count upgrade rebuilds hourly history once for
 - Missing readings: check device/network/map IDs, server logs, and warning timestamp age. Failed reads retain old live values.
 - Stale summaries after tariff changes: confirm raw update and hourly rebuild both completed.
 - Blank forecasts: check pre-midnight history, configured-panel availability, partial requests and adjustment failure.
-- Planning failure: check required metadata/history, interval alignment, HiGHS, and infeasible battery/power limits.
+- Planning failure: check required metadata/history, interval alignment, Markov transition/grid settings, and infeasible battery/power limits.
 
 ## Independent planning service
 
@@ -133,3 +133,5 @@ The managed supervisor now starts collector, planner and dashboard separately an
 For diagnosis inspect `database_metadata.planning_service_status`: service/worker PIDs, state, UTC heartbeat, last error, last publication ID and last successful completion. A five-second heartbeat is considered stale by the dashboard after 20 seconds. All planning remains report-only.
 
 Configuration files must contain every declared setting, including new retention/time-limit fields and explicit `name: null` on unnamed rules. Compare deployed YAML with the shipped complete example before upgrading. Startup rejects missing fields before opening/migrating storage.
+
+After migrating a deployed configuration to the Markov-only flat optimiser schema, restart the supervisor so all services/workers load the matching code and dataclasses. Missing values and retired selectors fail validation; do not copy archived snapshot YAML into the active config without explicit migration.

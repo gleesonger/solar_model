@@ -46,7 +46,7 @@ def test_hidden_solar_repeats_actuals_and_adjusted_forecast_without_future_leaka
         assert energy(day + timedelta(days=1, hours=14)) == pytest.approx(1.)
         # Missing actuals use the saved adjusted forecast, not its 5x raw values.
         assert energy(day + timedelta(days=2, hours=9)) == pytest.approx(1.)
-        scenarios = create_scenarios(forecast, config.energy_plan.scenarios)
+        scenarios = create_scenarios(forecast, config.energy_plan.scenario_multiplier)
         low = next(s for s in scenarios if s.name == "med_low")
         assert low.forecast_data.sum(day + timedelta(days=2, hours=8),
             day + timedelta(days=2, hours=9)).solar_kwh == pytest.approx(1.5)

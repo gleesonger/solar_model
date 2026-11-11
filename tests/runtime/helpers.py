@@ -20,7 +20,7 @@ def report(config, began_at):
         frame[name] = .1
     results = {"med" if load == solar == "med" else f"{load}_{solar}": frame.copy() for load in ("low", "med", "high") for solar in ("low", "med", "high")}
     actuals = pd.DataFrame({"timestamp": [start], "solar": [2.], "house_load": [1.], "battery": [4.], "grid_import": [.2], "grid_export": [0.]})
-    return PlanReport(SimulationResult(NextAction(OperatingMode.SELF_CONSUMPTION, 0., 0.), results), actuals, 20., config.energy_plan.scenarios, 3., 50., 20., latest_full_update(config.database.path) or start)
+    return PlanReport(SimulationResult(NextAction(OperatingMode.SELF_CONSUMPTION, 0., 0.), results), actuals, 20., config.energy_plan.scenario_multiplier, 3., 50., 20., latest_full_update(config.database.path) or start)
 
 
 def handler(operation, config):

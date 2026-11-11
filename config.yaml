@@ -100,7 +100,7 @@ tariffs:
           start_time: "00:00"
           end_time: "24:00"
           rate: 0.1716
-          
+
 forecast:
 
   load:
@@ -130,7 +130,7 @@ forecast:
         declination: 35         # Panel tilt in degrees: 0 horizontal, 90 vertical
         azimuth: 112.5          # Degrees from south: east -90, south 0, west 90
         peak_kw: 5.225          # Installed panel peak power in kWp (API kwp)
-        
+
     model_calibration_parameters:
       day_ahead:
         lookback: 42                          # How many previous days data is used in the solar model
@@ -147,66 +147,56 @@ energy_plan:
 
   num_projection_hours: 48
   num_visible_projection_hours: 24
-  
+
   preferred_reserve_kwh: 3
   protection_preference: 50
-  
+
   history:
     retain_snapshots_frequency_mins: 30
     retain_snapshots_period_days: 30
-  
-  scenarios:
-    solar:
-      low: {multiplier: 0.5, probability: 0.2}
-      med: {multiplier: 1.0, probability: 0.6}
-      high: {multiplier: 1.5, probability: 0.2}
-    house_load:
-      low: {multiplier: 0.7, probability: 0.2}
-      med: {multiplier: 1.0, probability: 0.5}
-      high: {multiplier: 1.5, probability: 0.3}
-  
+
+  scenario_multiplier:
+    solar:      {low: 0.5, med: 1.0, high: 1.5}
+    house_load: {low: 0.7, med: 1.0, high: 1.5}
+
   min_forced_charge_power_kw: 0.1
   min_forced_discharge_power_kw: 0.1
   max_forced_charge_power_kw: 999
   max_forced_discharge_power_kw: 999
-  
+
   optimiser:
-    # model - mix_integer_linear_prog, dynamic_programming
-    model: dynamic_programming
-  
-    mix_integer_linear_prog:
-      projection_resolution_mins: [15*4, 60*23, 240*6]
-  
-    dynamic_programming:
-      use_numba: true
-      uncertainty_model: markov
-      transition_hours: 3
-      # Rows: from Low/Medium/High. Columns: to Low/Medium/High. Applies to solar and load.
-      transition_matrix:
+    compile_model_to_native_code: true
+
+    projection_resolution_mins: [15*96, 60*24]
+    grid_step_percent: 2
+    power_divisions: 5
+
+    transition_hours: 1
+    transition_matrix:
+      solar:
         - [0.6, 0.3, 0.1]
         - [0.2, 0.6, 0.2]
         - [0.1, 0.3, 0.6]
-      projection_resolution_mins: [15*96, 60*24]
-      refinement_stages:
-        - {grid_step_percent: 2, power_divisions: 5, band_percent: null}
-        - {grid_step_percent: 1, power_divisions: 10, band_percent: 5}
-        - {grid_step_percent: 1, power_divisions: 20, band_percent: 3}
-        - {grid_step_percent: 1, power_divisions: 100, band_percent: 1}
-  
+      house_load:
+        - [0.6, 0.3, 0.1]
+        - [0.2, 0.6, 0.2]
+        - [0.1, 0.3, 0.6]
+
+
   minimum_battery_kwh:
     - days: [Mon, Tue, Wed, Thu, Fri, Sat, Sun]
       name: Night
       start_time: "00:00"
       end_time: "24:00"
       rate: 0
-  
+
   maximum_battery_kwh:
     - days: [Mon, Tue, Wed, Thu, Fri, Sat, Sun]
       name: null
       start_time: "00:00"
       end_time: "24:00"
       rate: 999
-  
+
   limit_battery_export_rate_to_grid_kw:
     - days: [Mon, Tue, Wed, Thu, Fri, Sat, Sun]
       name: null

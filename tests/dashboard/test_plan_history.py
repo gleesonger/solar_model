@@ -2,7 +2,6 @@
 from datetime import datetime, timedelta, timezone
 from dataclasses import replace
 
-import cvxpy
 import pytest
 
 from solar_model.config import load_config

@@ -126,3 +126,5 @@ The as-of report command is `python -m solar_model.tools.plan_as_of --database s
 Scheduled plans are produced by `python -m solar_model.runtime.planner`, independently of the dashboard. The managed launcher starts it automatically. The Plan tab shows latest or selected saved snapshots using blank-by-default date/snapshot controls beside Plan settings.
 
 All configuration settings are required. Update deployed YAML from the complete `config.yaml` example when settings are added; missing values stop startup rather than selecting defaults. Nullable settings still require an explicit `null`.
+
+Energy planning uses Markov DP only. Optimiser settings are explicitly required in the flat `energy_plan.optimiser` block; old model selectors, nested solver blocks and refinement stages are rejected. See [configuration](documentation/overview/configuration.md#markov-optimiser) when updating a deployed YAML file.

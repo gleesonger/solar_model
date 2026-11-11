@@ -8,9 +8,8 @@ from zoneinfo import ZoneInfo
 
 import pandas as pd
 
-from solar_model.config import ScenariosConfig
-from solar_model.planning.plan_optimisation_milp import battery_protection_score
-from solar_model.planning.scenarios import scenario_probabilities
+from solar_model.config import ScenarioMultiplierConfig
+from solar_model.planning.plan_optimisation_dynamic_programming import battery_protection_score
 from solar_model.planning.types import NextAction, OperatingMode, SimulationResult
 from solar_model.utils import table_to_object_list
 
@@ -151,10 +150,6 @@ def detail_columns(frame: pd.DataFrame, compact: bool) -> list[dict[str, Any]]:
     return columns
 
 
-def scenario_average_cost(results: dict[str, pd.DataFrame], settings: ScenariosConfig) -> float:
-    """Use the same joint probabilities as planning for the displayed mean cost."""
-    weights = scenario_probabilities(settings)
-    return sum(weights[name] * float(frame.net_cost.sum()) for name, frame in results.items()) / sum(weights[name] for name in results)
 
 
 def scenario_cost_summary(results: dict[str, pd.DataFrame], selected_scenario: str) -> str:

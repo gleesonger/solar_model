@@ -15,7 +15,7 @@ import pandas as pd
 from solar_model.config import Config
 from solar_model.logging_setup import LOGGER
 from solar_model.planning import plan_optimisation_dynamic_programming as dp
-from solar_model.planning.markov_transitions import DEFAULT_TRANSITION_MATRIX, transition
+from solar_model.planning.markov_transitions import transition
 from solar_model.planning.types import DeviceInfo, NoFeasiblePlanError, OperatingMode, ScenarioData, SimulationResult
 
 
@@ -40,26 +40,26 @@ def solve_prepared(
     """Reuse validated interval inputs; discard old path weights and timing stress."""
     if set(s.name for s in scenarios) != set(NAMES):
         raise ValueError("Markov DP requires all nine named low/med/high solar-load combinations")
-    settings = config.energy_plan.optimiser.dynamic_programming
-    dimensions = config.energy_plan.scenarios
+    settings = config.energy_plan.optimiser
+    dimensions = config.energy_plan.scenario_multiplier
     base = scenario_periods[next(i for i, s in enumerate(scenarios) if s.name == "med")]
-    if dimensions.solar.med.multiplier <= 0 or dimensions.house_load.med.multiplier <= 0:
+    if dimensions.solar.med <= 0 or dimensions.house_load.med <= 0:
         raise ValueError("Markov DP requires positive medium multipliers")
     periods = []
     transitions = []
     for period in base:
         periods.append([
             period._replace(
-                solar=period.solar * getattr(dimensions.solar, solar).multiplier / dimensions.solar.med.multiplier,
-                load=period.load * getattr(dimensions.house_load, load).multiplier / dimensions.house_load.med.multiplier,
+                solar=period.solar * getattr(dimensions.solar, solar) / dimensions.solar.med,
+                load=period.load * getattr(dimensions.house_load, load) / dimensions.house_load.med,
             )
             for load, solar in LAYERS
         ])
-        transitions.append(joint_transition(period.hours, settings.transition_matrix, settings.transition_hours))
+        transitions.append(joint_transition(period.hours, settings.transition_matrix.solar, settings.transition_matrix.house_load, settings.transition_hours))
     choices = dp.actions(device, config.energy_plan, power_divisions)
     numerical_device = dp.DeviceParameters(*(float(getattr(device, field)) for field in dp.DeviceParameters._fields))
     backward, forward = backward_values, forward_distribution
-    if settings.use_numba:
+    if settings.compile_model_to_native_code:
         from numba.typed import List
         backward, forward = compiled_functions()
         numerical_periods = List([List(row) for row in periods])
@@ -75,7 +75,7 @@ def solve_prepared(
     if not math.isfinite(expected_score):
         raise NoFeasiblePlanError("no Markov policy is feasible across all positive-probability outcomes")
     first_action = choices[policy[0][INITIAL_LAYER][initial_index]]
-    if settings.use_numba:
+    if settings.compile_model_to_native_code:
         numerical_policy = List([List([List(row) for row in time]) for time in policy])
     else:
         numerical_policy = policy
@@ -119,9 +119,10 @@ def solve_prepared(
     )
 
 
-def joint_transition(hours: float, probabilities: tuple[tuple[float, ...], ...] = DEFAULT_TRANSITION_MATRIX, reference_hours: float = 3.) -> list[list[float]]:
-    matrix = transition(hours, probabilities, reference_hours)
-    return [[matrix[load][next_load] * matrix[solar][next_solar] for next_load in range(3) for next_solar in range(3)] for load in range(3) for solar in range(3)]
+def joint_transition(hours: float, solar_probabilities: tuple[tuple[float, ...], ...], load_probabilities: tuple[tuple[float, ...], ...], reference_hours: float) -> list[list[float]]:
+    solar_matrix = transition(hours, solar_probabilities, reference_hours)
+    load_matrix = transition(hours, load_probabilities, reference_hours)
+    return [[load_matrix[load][next_load] * solar_matrix[solar][next_solar] for next_load in range(3) for next_solar in range(3)] for load in range(3) for solar in range(3)]
 
 
 @lru_cache(maxsize=1)

@@ -1,6 +1,6 @@
 # Maintenance jobs, evaluation, and research data pipelines
 
-The existing `benchmark_planning --model dp` audit explicitly selects `uncertainty_model: independent_scenarios` and records that choice, even when the supplied YAML selects Markov. Its fixed-path checks and refinement experiments are not a Markov benchmark. Markov correctness checks are targeted tests; see the [implementation guide](markov-dynamic-programming.md).
+The planning benchmark supports Markov only. The historical comparison harness, independent-scenario audits and refinement switches have been removed; see the [current planning guide](planning.md#developer-tools).
 
 These tools sit outside the managed collection/UI loop. Some mutate history; others only read SQLite and produce reports/artifacts. The [operations guide](../operations/runbook.md) contains invocation examples. This guide explains their function hierarchy and intermediate structures.
 
@@ -138,4 +138,6 @@ Tariff model inputs are independent of Config: hardware W/Wh limits; tariff JSON
 
 Returned data is `(list of 24-field period rows, daily dict)`. Period fields cover timestamp/local/Excel times, supplier/tariff/energy-plan names, duration, load/solar Wh, battery start/end Wh, route Wh, grid import/export Wh, cents/kWh rates, and euro cost/revenue/standing/net costs. Daily keys are `(supplier,tariff_plan,date)` with Wh and cents accumulators. `aggregate_hourly()` sums flows/costs, keeps opening/closing battery, and averages rates; `write_workbook()` emits hourly/daily/summary frames in kWh/euros where appropriate.
 
-This deterministic rule simulation is distinct from CVXPY optimisation, includes standing charges omitted from stored collector economics, and does not update production planning or database history.
+This deterministic rule simulation is distinct from Markov optimisation, includes standing charges omitted from stored collector economics, and does not update production planning or database history.
+
+The planning benchmark now supports Markov only: `python -m solar_model.tools.benchmark_planning --config config.yaml --cap-seconds 5 --output markov-benchmark.json`. Previous model/grid/refinement flags and comparison metrics in dated investigations are historical. No benchmark runs unless explicitly requested.

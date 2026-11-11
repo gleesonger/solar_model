@@ -5,7 +5,7 @@ from dataclasses import replace
 from datetime import date, datetime, time, timedelta, timezone
 import json
 from zoneinfo import ZoneInfo
-from typing import Any
+from typing import Any, Literal
 
 from nicegui import run, ui
 from nicegui.events import ValueChangeEventArguments
@@ -47,7 +47,41 @@ from solar_model.planning.plan_report import (
 )
 
 
-def plan_chart_options(frame: pd.DataFrame, actuals: pd.DataFrame, timezone_name: str) -> dict[str, Any]:
+def chart_hour(stamp: pd.Timestamp, timezone_name: str) -> pd.Timestamp:
+    local = stamp.to_pydatetime().astimezone(ZoneInfo(timezone_name))
+    return pd.Timestamp(local.replace(minute=0, second=0, microsecond=0).astimezone(timezone.utc))
+
+
+def hourly_forecast_bars(frame: pd.DataFrame, energy_column: str, timezone_name: str) -> list[list[float | None]]:
+    totals: dict[pd.Timestamp, list[float]] = {}
+    for start, end, energy in frame[["starts_at", "ends_at", energy_column]].itertuples(index=False, name=None):
+        duration = (end - start).total_seconds()
+        cursor = start
+        while cursor < end:
+            bucket = chart_hour(cursor, timezone_name)
+            boundary = min(bucket + timedelta(hours=1), end)
+            seconds = (boundary - cursor).total_seconds()
+            total = totals.setdefault(bucket, [0., 0.])
+            if pd.notna(energy):
+                total[0] += float(energy) * seconds / duration
+                total[1] += seconds
+            cursor = boundary
+    return [[(bucket + timedelta(minutes=30)).timestamp() * 1000, energy * 3600 / seconds if seconds else None] for bucket, (energy, seconds) in sorted(totals.items())]
+
+
+def hourly_actual_bars(actuals: pd.DataFrame, column: str, timezone_name: str) -> list[list[float | None]]:
+    if actuals.empty:
+        return []
+    totals: dict[pd.Timestamp, list[float]] = {}
+    for stamp, value in actuals[["timestamp", column]].itertuples(index=False, name=None):
+        total = totals.setdefault(chart_hour(stamp, timezone_name), [0., 0.])
+        if pd.notna(value):
+            total[0] += float(value)
+            total[1] += 1
+    return [[(bucket + timedelta(minutes=30)).timestamp() * 1000, total / count if count else None] for bucket, (total, count) in sorted(totals.items())]
+
+
+def plan_chart_options(frame: pd.DataFrame, actuals: pd.DataFrame, timezone_name: str, forecast_type: Literal["line", "bar"] = "line") -> dict[str, Any]:
     """One legend entry per metric, with solid actuals and dashed scenario forecasts."""
     series = []
     if not actuals.empty:
@@ -73,10 +107,16 @@ def plan_chart_options(frame: pd.DataFrame, actuals: pd.DataFrame, timezone_name
             values = (frame[energy_column].astype(float) / hours).tolist()
             forecast = list(zip(starts, values)) + [[ends[-1], values[-1]]]
         for kind, data in (("actual", observed), ("forecast", forecast)):
+            is_bar = column != "battery" and forecast_type == "bar"
+            if is_bar:
+                data = hourly_forecast_bars(frame, energy_column, timezone_name) if kind == "forecast" else hourly_actual_bars(actuals[actuals.timestamp < frame.ends_at.max()] if not actuals.empty else actuals, column, timezone_name)
             stepped = kind == "forecast" and column in {"grid_import", "grid_export"}
             series.append({
                 "id": f"{column}_{kind}",
-                "name": label, "type": "line", "data": data, "yAxisIndex": axis,
+                "name": label, "type": "bar" if is_bar else "line", "data": data, "yAxisIndex": axis,
+                "z": 1 if is_bar else 2,
+                "barMaxWidth": 12,
+                "itemStyle": {"opacity": 0.65 if is_bar and kind == "forecast" else 1, "decal": {"symbol": "rect", "dashArrayX": [1, 0], "dashArrayY": [2, 4], "rotation": -0.785} if is_bar and kind == "forecast" else None},
                 "showSymbol": False, "connectNulls": kind == "actual", "color": color,
                 "step": "end" if stepped else False,
                 "smooth": 0.2 if kind == "forecast" and not stepped else False,
@@ -87,7 +127,7 @@ def plan_chart_options(frame: pd.DataFrame, actuals: pd.DataFrame, timezone_name
     return {
         "animation": False,
         "useUTC": True,
-        "legend": {"data": ["Solar", "House Load", "Battery", "Grid Import", "Grid Export"], "top": 5},
+        "legend": {"data": ["Solar", "House Load", "Battery", "Grid Import", "Grid Export"], "type": "scroll", "left": 10, "width": "65%", "top": 5},
         "grid": {"left": 55, "right": 60, "top": 85, "bottom": 70},
         "xAxis": {"type": "time", "splitNumber": 4, "axisLabel": {"hideOverlap": True, ":formatter": f"value => {date_format}.format(value).replace(', ', '\\n')"}},
         "yAxis": [{"type": "value", "name": "Power (kW)"}, {"type": "value", "name": "Battery (kWh)", "alignTicks": True}],
@@ -116,6 +156,7 @@ class PlanTab:
         self.running = False
         self.battery_capacity_kwh: float | None = None
         self.detail_view = "Compact"
+        self.forecast_chart_type: Literal["line", "bar"] = "line"
         self.applied_adjustment: float | None = None
         self.applied_model: str | None = None
         self.historical_id: str | None = None
@@ -149,7 +190,7 @@ class PlanTab:
             if self.report is not report or request != self._history_request:
                 return
             self.actuals = actuals
-            series = plan_chart_options(self._scenario_frame(), actuals, self.config.timezone)["series"]
+            series = plan_chart_options(self._scenario_frame(), actuals, self.config.timezone, self.forecast_chart_type)["series"]
             self.chart.options["series"] = series
             self.chart.run_chart_method("setOption", {"series": series}, {"replaceMerge": ["series"]})
         except Exception:
@@ -415,7 +456,9 @@ class PlanTab:
                     else:
                         self.load_scenario = control
         self.summary_output = ui.column().classes("w-full min-w-0 gap-3")
-        self.chart = ui.echart(plan_chart_options(self._scenario_frame(), self.actuals, self.config.timezone)).classes("w-full h-96").props("data-testid=plan-chart")
+        with ui.element("div").classes("relative w-full"):
+            self.chart = ui.echart(plan_chart_options(self._scenario_frame(), self.actuals, self.config.timezone, self.forecast_chart_type)).classes("w-full h-96").props("data-testid=plan-chart")
+            ui.toggle({"line": "Line", "bar": "Bar"}, value=self.forecast_chart_type, on_change=self._forecast_chart_type_changed).props('dense no-caps aria-label="Power chart type" data-testid=plan-forecast-chart-type').classes("absolute right-0 top-0 z-10")
         self.scenario_output = ui.column().classes("w-full min-w-0 gap-3")
         self._render_scenario()
 
@@ -439,7 +482,7 @@ class PlanTab:
         reserve = self.report.preferred_reserve_kwh if self.report is not None and self.report.preferred_reserve_kwh is not None else self.config.energy_plan.preferred_reserve_kwh
         summary = (self.report.summaries or {}).get(self.scenario_name) or scenario_summary(frame, reserve)
         cost_text = scenario_cost_summary(self.result.results, self.scenario_name)
-        series = plan_chart_options(self._scenario_frame(), self.actuals, self.config.timezone)["series"]
+        series = plan_chart_options(self._scenario_frame(), self.actuals, self.config.timezone, self.forecast_chart_type)["series"]
         self.chart.options["series"] = series
         self.chart.run_chart_method("setOption", {"series": series}, {"replaceMerge": ["series"]})
         self.summary_output.clear()
@@ -457,6 +500,14 @@ class PlanTab:
                         ui.label(label).classes("text-xs text-gray-600")
                         ui.label(value).classes("text-sm font-semibold")
         self._render_detail()
+
+    def _forecast_chart_type_changed(self, event: ValueChangeEventArguments) -> None:
+        if event.value not in ("line", "bar"):
+            return
+        self.forecast_chart_type = event.value
+        series = plan_chart_options(self._scenario_frame(), self.actuals, self.config.timezone, self.forecast_chart_type)["series"]
+        self.chart.options["series"] = series
+        self.chart.run_chart_method("setOption", {"series": series}, {"replaceMerge": ["series"]})
 
     def _detail_view_changed(self, event: ValueChangeEventArguments) -> None:
         self.detail_view = event.value

@@ -130,6 +130,42 @@ def test_aggregation_uses_metadata_instead_of_column_units(monkeypatch):
     assert hourly.solar_kwh.sum() == pytest.approx(frame.solar_kwh.sum())
 
 
+def test_hourly_power_bars_switch_actuals_and_forecasts_and_keep_battery_lines():
+    frame = sample_result().results["med"]
+    actuals = pd.DataFrame({"timestamp": [frame.starts_at.iloc[0]], **{key: [1.] for key in ("solar", "house_load", "battery", "grid_import", "grid_export")}})
+    options = plan_chart_options(frame, actuals, "Europe/Dublin", "bar")
+    assert len(options["legend"]["data"]) == 5
+    for actual, forecast in zip(options["series"][::2], options["series"][1::2]):
+        expected = "line" if actual["name"] == "Battery" else "bar"
+        assert actual["type"] == forecast["type"] == expected
+        assert actual["name"] == forecast["name"]
+    assert [point[1] for point in options["series"][1]["data"]] == [2., 2.]
+    assert [point[1] for point in options["series"][5]["data"]] == [4., 4.2, 3.]
+    assert options["series"][4]["lineStyle"]["type"] == "solid"
+    assert options["series"][5]["lineStyle"]["type"] == "dashed"
+    assert options["series"][0]["data"][0][0] == options["series"][1]["data"][0][0]
+    assert options["series"][0]["itemStyle"]["decal"] is None
+    assert options["series"][1]["itemStyle"]["decal"] is not None
+    assert plan_chart_options(frame, pd.DataFrame(), "Europe/Dublin", "bar")["series"][0]["data"] == []
+
+
+def test_hourly_forecast_bars_split_intervals_and_weight_partial_hours():
+    from solar_model.dashboard.tabs.plan import hourly_forecast_bars
+    frame = pd.DataFrame({"starts_at": pd.to_datetime(["2026-11-10T10:30Z", "2026-11-10T12:30Z"]),
+        "ends_at": pd.to_datetime(["2026-11-10T12:30Z", "2026-11-10T13:00Z"]), "solar_kwh": [8., 1.]})
+    bars = hourly_forecast_bars(frame, "solar_kwh", "Europe/Dublin")
+    assert [value for _, value in bars] == [4., 4., 3.]
+    assert [pd.Timestamp(stamp, unit="ms", tz="UTC").strftime("%H:%M") for stamp, _ in bars] == ["10:30", "11:30", "12:30"]
+
+
+def test_hourly_actual_bars_preserve_missing_data_and_repeated_dst_hours():
+    from solar_model.dashboard.tabs.plan import hourly_actual_bars
+    actuals = pd.DataFrame({"timestamp": pd.to_datetime(["2026-10-25T00:15Z", "2026-10-25T00:45Z", "2026-10-25T01:15Z", "2026-10-25T02:15Z"]), "solar": [2., 4., 5., float("nan")]})
+    bars = hourly_actual_bars(actuals, "solar", "Europe/Dublin")
+    assert [value for _, value in bars] == [3., 5., None]
+    assert bars[1][0] - bars[0][0] == 3600000
+
+
 def test_actual_lines_stay_solid_across_missing_samples_and_forecasts_stay_dashed():
     frame = sample_result().results["med"]
     start = frame.starts_at.iloc[0]

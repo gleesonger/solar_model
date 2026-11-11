@@ -161,6 +161,29 @@ if __name__ == '__main__':
                         return m.getSeriesByName('House Load').every(s => m.isSeriesFiltered(s));
                     }""")
                     page.get_by_test_id("plan-chart").evaluate("e => echarts.getInstanceByDom(e).dispatchAction({type:'legendSelect',name:'House Load'})")
+                    chart_type = page.get_by_test_id("plan-forecast-chart-type")
+                    chart_type.get_by_role("button", name="Bar", exact=True).click()
+                    page.wait_for_function("Array.from(document.querySelectorAll('[data-testid=plan-chart]')).some(e => echarts.getInstanceByDom(e).getOption().series.every((s,i) => s.type === (s.name === 'Battery' ? 'line' : 'bar')))")
+                    assert page.get_by_test_id("plan-chart").evaluate("e => echarts.getInstanceByDom(e).getOption().legend[0].selected['Grid Export']") is False
+                    chart_box = page.get_by_test_id("plan-chart").bounding_box()
+                    toggle_box = chart_type.bounding_box()
+                    assert abs(toggle_box['y'] - chart_box['y']) < 10
+                    assert abs(toggle_box['x'] + toggle_box['width'] - chart_box['x'] - chart_box['width']) < 2
+                    if width == 390:
+                        legend_right = page.get_by_test_id("plan-chart").evaluate("""e => {
+                            const c = echarts.getInstanceByDom(e);
+                            const v = c.getViewOfComponentModel(c.getModel().getComponent('legend'));
+                            const g = v._controllerGroup, r = g.getBoundingRect();
+                            return g.transformCoordToGlobal(r.x + r.width, r.y)[0];
+                        }""")
+                        assert chart_box['x'] + legend_right < toggle_box['x']
+                    page.screenshot(path=str(tmp_path / f'plan-bars-{width}.png'), full_page=True)
+                    page.get_by_role("button", name="Advanced", exact=True).click()
+                    page.get_by_role("cell", name="0\u201324h", exact=True).wait_for()
+                    assert page.get_by_test_id("plan-chart").evaluate("e => echarts.getInstanceByDom(e).getOption().series.every(s => s.type === (s.name === 'Battery' ? 'line' : 'bar'))")
+                    page.get_by_role("button", name="Compact", exact=True).click()
+                    chart_type.get_by_role("button", name="Line", exact=True).click()
+                    page.wait_for_function("Array.from(document.querySelectorAll('[data-testid=plan-chart]')).some(e => echarts.getInstanceByDom(e).getOption().series.every(s => s.type === 'line'))")
                     page.get_by_role("button", name="Plan settings", exact=True).click()
                     assert page.get_by_label("YAML", exact=True).input_value() == state['archived_text']
                     page.get_by_role("button", name="Run Demonstration", exact=True).click()

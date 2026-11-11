@@ -165,14 +165,6 @@ def scenario_cost_summary(results: dict[str, pd.DataFrame], selected_scenario: s
     return f"{selected} ({minimum} to {maximum})"
 
 
-def expected_plan_summary(result: SimulationResult, visible_cost: float | None = None) -> str:
-    if result.expected_score is None:
-        return ""
-    cost = float(result.expected_results.net_cost.sum()) if result.expected_results is not None else visible_cost
-    prefix = f"Expected visible net cost: \u20ac{cost:.3f}; " if cost is not None else ""
-    return f"{prefix}expected full-horizon score: {result.expected_score:.3f}. Scenario details are stress cases."
-
-
 def scenario_summary(frame: pd.DataFrame, reserve: float) -> dict[str, float]:
     """Summarise interval energy/costs and duration-weighted retained protection."""
     durations = (pd.to_datetime(frame.ends_at) - pd.to_datetime(frame.starts_at)).dt.total_seconds() / 3600

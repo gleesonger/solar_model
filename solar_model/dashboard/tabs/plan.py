@@ -488,8 +488,6 @@ class PlanTab:
         self.chart.run_chart_method("setOption", {"series": series}, {"replaceMerge": ["series"]})
         self.summary_output.clear()
         with self.summary_output:
-            if self.result.expected_score is not None:
-                ui.label(expected_plan_summary(self.result, self.report.expected_visible_net_cost)).classes("text-sm font-semibold")
             with ui.element("div").classes("grid w-full grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 rounded border"):
                 for label, value in (
                     ("Stress-case net cost" if self.result.expected_score is not None else "Net cost", cost_text),

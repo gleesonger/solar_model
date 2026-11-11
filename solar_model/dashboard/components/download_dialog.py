@@ -8,7 +8,7 @@ from time import perf_counter
 from zoneinfo import ZoneInfo
 
 import pandas as pd
-from xlsxturbo import df_to_xlsx
+from xlsxturbo import dfs_to_xlsx
 from nicegui import run, ui
 
 from solar_model.logging_setup import LOGGER
@@ -106,8 +106,9 @@ def prepare_download(
     return result
 
 
-def excel_bytes(dataframe: pd.DataFrame, *, sheet_name: str = "Analysis Data") -> bytes:
-    if len(dataframe) > 1_048_575 or len(dataframe.columns) > 16_384:
+def excel_bytes(dataframe: pd.DataFrame, *, sheet_name: str = "Analysis Data", metadata: dict[str, object] | None = None) -> bytes:
+    metadata_rows = len(metadata) + 1 if metadata else 0
+    if len(dataframe) + metadata_rows > 1_048_575 or len(dataframe.columns) > 16_384:
         raise ValueError("The export exceeds Excel's sheet limits; choose a larger timestep or CSV")
     # Excel has no timezone-aware datetime type.  Keep the displayed local
     # interval, but remove its timezone metadata for the workbook.
@@ -118,8 +119,12 @@ def excel_bytes(dataframe: pd.DataFrame, *, sheet_name: str = "Analysis Data") -
     exported = exported.replace({float("inf"): "inf", float("-inf"): "-inf"})
     buffer = BytesIO()
     # Pass the whole DataFrame to the Rust writer; no Python cell iteration.
-    df_to_xlsx(
-        exported, buffer, sheet_name=sheet_name, constant_memory=True,
+    sheets = []
+    if metadata:
+        sheets.append((pd.DataFrame([(name, "" if value is None else str(value)) for name, value in metadata.items()]), sheet_name, {"header": False, "startrow": 0}))
+    sheets.append((exported, sheet_name, {"startrow": metadata_rows}))
+    dfs_to_xlsx(
+        sheets, buffer, constant_memory=True,
         header_format={"bold": True, "border": "thin", "align_horizontal": "center", "align_vertical": "top"},
         column_formats={"period": {"num_format": "yyyy-mm-dd hh:mm:ss"}} if "period" in exported.columns else {},
     )

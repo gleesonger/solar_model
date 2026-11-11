@@ -245,7 +245,7 @@ def result_frame(device: DeviceInfo, periods: list[Period], path: list[Step], in
 
     frame["solar_to_inverter_kwh"] = [s.solar_used for s in path]
     frame["battery_to_inverter_kwh"] = [s.discharge for s in path]
-    frame["inverter_dc_to_ac_kwh"] = frame.solar_to_load_kwh + frame.solar_to_grid_kwh + frame.battery_to_inverter_kwh
+    frame["inverter_dc_to_ac_kwh"] = (frame.solar_to_load_kwh + frame.solar_to_grid_kwh) / device.inverter_dc_to_ac_efficiency + frame.battery_to_inverter_kwh
     frame["inverter_ac_to_dc_kwh"] = [s.grid_charge_ac * device.inverter_ac_to_dc_efficiency for s in path]
     frame["terminal_score"] = 0.
     frame.loc[frame.index[-1], "terminal_score"] = terminal_rate * path[-1].battery_end

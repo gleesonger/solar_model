@@ -540,7 +540,13 @@ class PlanTab:
     def _download_detail(self, frame: pd.DataFrame, columns: list[dict[str, Any]]) -> None:
         try:
             basis = "Fixed-condition stress case; not a Markov expectation" if self.result.expected_score is not None else None
-            content = detail_excel(frame, self.config.timezone, self.result.next_action.mode, self.detail_view, report_basis=basis)
+            metadata = {
+                "snapshot_id": self.run_metadata.snapshot_id if self.run_metadata is not None else None,
+                "model": self.applied_model,
+                "solar_scenario": self.solar_scenario.value,
+                "house_load_scenario": self.load_scenario.value,
+            }
+            content = detail_excel(frame, self.config.timezone, self.result.next_action.mode, self.detail_view, report_basis=basis, actuals=self.actuals, metadata=metadata)
             start = pd.Timestamp(frame.starts_at.iloc[0]).tz_convert(self.timezone)
             view = "com" if self.detail_view == "Compact" else "adv"
             ui.download(content, filename=f"plan-{self.applied_model}-{view}-protection-{self.applied_adjustment:g}-solar-{self.solar_scenario.value}-load-{self.load_scenario.value}-{start:%Y%m%d-%H%M}.xlsx",

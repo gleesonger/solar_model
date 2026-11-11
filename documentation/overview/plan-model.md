@@ -96,7 +96,7 @@ battery_end = battery_start + eta_c * C - D / eta_d
 grid_export - grid_import = inverter_net_ac - household_demand
 ```
 
-Source-to-destination routes are reconstructed for reports: PV charges first, then grid; remaining PV serves household load before battery discharge; excess AC is exported. The four explicit loss columns are `inverter_ac_to_dc_loss_kwh = G(1-eta_acdc)`, `inverter_dc_to_ac_loss_kwh = (U-battery_solar_charge+D)(1-eta_dcac)`, `battery_charge_loss_kwh = C(1-eta_c)`, and `battery_discharge_loss_kwh = D(1/eta_d-1)`. These are model allocations, not separately measured flows.
+Source-to-destination routes are reconstructed for reports: PV charges first, then grid; remaining PV serves household load before battery discharge; excess AC is exported. The four explicit loss columns are `inverter_ac_to_dc_loss_kwh = G(1-eta_acdc)`, `inverter_dc_to_ac_loss_kwh = (U-battery_solar_charge+D)(1-eta_dcac)`, `battery_charge_loss_kwh = C(1-eta_c)`, and `battery_discharge_loss_kwh = D(1/eta_d-1)`. These are model allocations, not separately measured flows. The reported `inverter_dc_to_ac_kwh` is the combined solar/battery DC input before inverter conversion, excluding solar sent to battery charging; it equals delivered AC plus the DC-to-AC loss.
 
 The resulting `battery_end` is $E_{t,s}$ used by the protection curve; `grid_import` and `grid_export` are $I_{t,s}$ and $O_{t,s}$ used by the cost formula. Carry each scenario's end energy into its next interval. The first starting state is measured, not a forecast. Do not allow simultaneous battery charging and discharging or assume that the same battery energy has a different physical identity because it came from PV or the grid.
 

@@ -1,5 +1,6 @@
 """One Plan screen reads headless publications and pins historical snapshots."""
 from pathlib import Path
+from zipfile import ZipFile
 import re
 import socket
 import sys
@@ -202,6 +203,13 @@ if __name__ == '__main__':
                     with page.expect_download() as download:
                         page.get_by_role("button", name="Download Excel", exact=True).click()
                     assert download.value.suggested_filename.endswith('.xlsx')
+                    with ZipFile(download.value.path()) as workbook:
+                        assert 'name="Plan detail"' in workbook.read('xl/workbook.xml').decode()
+                        assert 'name="Actuals"' not in workbook.read('xl/workbook.xml').decode()
+                        text = workbook.read('xl/worksheets/sheet1.xml').decode()
+                        if 'xl/sharedStrings.xml' in workbook.namelist():
+                            text += workbook.read('xl/sharedStrings.xml').decode()
+                        assert 'Actual House Load (kW)' in text
                     page.get_by_label("Plan date", exact=True).fill("")
                     page.get_by_test_id("plan-action").get_by_text("12:00", exact=False).wait_for(state="hidden")
                     page.get_by_role("button", name="Advanced", exact=True).click()

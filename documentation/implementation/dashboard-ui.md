@@ -273,7 +273,7 @@ Advanced Plan detail displays Cost Score, Protection Score and Limit Score per h
 
 Protection adjustment has a minimum of zero and no maximum, defaulting to 50 through EnergyPlanConfig/YAML. UI, service and configuration validation all reject negative or non-finite values. X/100 remains the multiplier: values above 100 increase V beyond the reserve replacement value. The raw protection utility remains bounded by 100 points.
 
-Advanced Plan columns follow this reading order: timing/action; tariffs; household demand/solar generation; directional energy routes and inverter conversion totals; aggregate losses and grid totals; battery constraints and ending kWh/SOC; financial outcomes; scoring. `ADVANCED_HIDDEN_COLUMNS` removes battery-start, solar/battery-to-inverter and individual stage-loss columns from the table and Advanced Excel, while the original frame and `detail_frame()` retain them for calculations. `ADVANCED_LABELS` supplies short, intentionally split headers. Route abbreviations are defined above the table. In `layout.py`, the first five Advanced columns (Start through Tariff) use the original 3px padding and 9rem maximum; columns from Import rate onward use 3.2px padding and 4.4–9.6rem header bounds. Advanced adds 4rem of blank space after the table to keep the last row clear of bottom notifications. Compact is unchanged. New unlisted fields remain visible at the end.
+The on-screen Advanced Plan columns follow this reading order: timing/action; tariffs; household demand/solar generation; directional energy routes and inverter conversion totals; aggregate losses and grid totals; battery constraints and ending kWh/SOC; financial outcomes; scoring. `ADVANCED_HIDDEN_COLUMNS` removes battery-start, solar/battery-to-inverter and individual stage-loss columns from the table and Advanced Excel, while the original frame and `detail_frame()` retain them for calculations. `ADVANCED_LABELS` supplies short, intentionally split headers. Route abbreviations are defined above the table. In `layout.py`, the first five Advanced columns (Start through Tariff) use the original 3px padding and 9rem maximum; columns from Import rate onward use 3.2px padding and 4.4–9.6rem header bounds. Advanced adds 4rem of blank space after the table to keep the last row clear of bottom notifications. Compact is unchanged. New unlisted fields remain visible at the end of the on-screen table; Advanced Excel uses `ADVANCED_EXPORT_COLUMNS` below.
 
 Compact combines conversion losses and solar clipping in one Losses (kWh) column before hourly aggregation; the same combined values and totals appear in Compact Excel. Advanced keeps conversion losses and solar clipping separate. The change is applied to a copied display frame, leaving model results unchanged.
 
@@ -302,3 +302,65 @@ Plan Settings initially displays the archived energy-plan YAML of the displayed 
 Plan snapshots store projection data and settings without chart actuals. Latest and historical charts query telemetry separately through the earlier of now and the projection horizon. Displayed charts refresh actuals every minute without rerunning the optimiser or replacing a pinned forecast. One legend entry per metric controls both solid actual and dashed forecast lines at overlapping timestamps. Legacy embedded actuals are ignored. See [saved-plan contracts](plan-history.md).
 
 The Plan chart has Line/Bar power buttons on the legend row, aligned to the right. Line is the initial display. Switching affects both actuals and forecasts for Solar, House Load, Grid Import and Grid Export. Battery actuals always remain solid lines and battery forecasts dashed lines on the kWh axis. Bar mode groups power into configured-local clock hours and shows average kW: forecast interval energy is split at hour boundaries and weighted by covered duration, while actuals average available minute readings. Partial hours use available coverage; missing observations stay null, without zero filling. Repeated autumn hours retain separate UTC buckets. All bars use the hour midpoint. Actual bars are solid-coloured and forecast bars have a diagonal pattern and reduced opacity, sharing one legend toggle per metric. A scrollable legend reserves space for the controls on narrow screens. The selection is per browser and survives actuals refreshes, scenario/view changes and snapshot selection; legend toggles and zoom are preserved. This display choice does not change saved reports or settings.
+
+Plan Download Excel uses a single `Plan detail` worksheet. Compact keeps its existing forecast/detail headings and appends comparison columns on each plan interval's row. Advanced uses 52 ordered columns: local/UTC timing and action, tariffs, adjacent forecast/actual power with coverage, battery state/targets, forecast energy, finances, routes/conversions, losses/clipping, and scores. Export variables use explicit `forecast_`/`actual_` names and unit suffixes, with readable spreadsheet headings; battery ending forecast appears once. A six-row metadata block (`snapshot_id`, `model`, `view`, `solar_scenario`, `house_load_scenario`, `report_basis`) precedes the Advanced table, separated by a blank row. Unknown metadata for demonstrations or older reports stays blank. Advanced includes Duration (min) and retains the original subtotal/total contributions. Power comparisons use average kW, with actual minute samples weighted by their overlap with that interval and coverage minutes reported per metric. No missing intervals are filled or extrapolated. Battery comparison uses the forecast ending kWh and latest measured battery reading within the interval through its end, with that reading's UTC timestamp. UTC start/end columns distinguish repeated local hours. Missing/future actuals and all comparison footer cells remain blank. Measurements before the projection or beyond the selected Compact/Advanced horizon are excluded. Export reuses the chart's loaded actuals, independent of zoom/Line/Bar display, without another database read or optimiser run.
+
+
+### Advanced Plan download field mapping
+
+`dashboard/components/plan_detail.py::ADVANCED_EXPORT_COLUMNS` maps saved report fields to export variables and headings without renaming persisted reports or the on-screen table. Actual alignment uses these same export variable names; Compact maps them to its existing headings. The following order is fixed, with unavailable historical fields left blank. Scores remain interval contributions, unlike hourly score rates in the UI. Duration subtotals sum elapsed minutes; comparison footer cells stay blank.
+
+| Source/report field | Export variable | Excel heading |
+| --- | --- | --- |
+| `starts_at` | `starts_at_local` | Start (local) |
+| `ends_at` | `ends_at_local` | End (local) |
+| `duration_mins` | `duration_mins` | Duration (min) |
+| `starts_at_utc` | `starts_at_utc` | Start (UTC) |
+| `ends_at_utc` | `ends_at_utc` | End (UTC) |
+| `plan_action` | `planned_action` | Planned action |
+| `tariff_name` | `import_tariff_name` | Import tariff |
+| `import_rate` | `import_rate_eur_per_kwh` | Import rate (€/kWh) |
+| `export_rate` | `export_rate_eur_per_kwh` | Export rate (€/kWh) |
+| `forecast_solar_kw` | `forecast_solar_kw` | Solar forecast (kW) |
+| `actual_solar_kw` | `actual_solar_kw` | Solar actual (kW) |
+| `actual_solar_coverage_mins` | `actual_solar_coverage_mins` | Solar actual coverage (min) |
+| `forecast_house_load_kw` | `forecast_house_load_kw` | House load forecast (kW) |
+| `actual_house_load_kw` | `actual_house_load_kw` | House load actual (kW) |
+| `actual_house_load_coverage_mins` | `actual_house_load_coverage_mins` | House load actual coverage (min) |
+| `forecast_grid_import_kw` | `forecast_grid_import_kw` | Grid import forecast (kW) |
+| `actual_grid_import_kw` | `actual_grid_import_kw` | Grid import actual (kW) |
+| `actual_grid_import_coverage_mins` | `actual_grid_import_coverage_mins` | Grid import actual coverage (min) |
+| `forecast_grid_export_kw` | `forecast_grid_export_kw` | Grid export forecast (kW) |
+| `actual_grid_export_kw` | `actual_grid_export_kw` | Grid export actual (kW) |
+| `actual_grid_export_coverage_mins` | `actual_grid_export_coverage_mins` | Grid export actual coverage (min) |
+| `battery_end_kwh` | `forecast_battery_end_kwh` | Battery forecast end (kWh) |
+| `actual_battery_latest_kwh` | `actual_battery_latest_kwh` | Battery actual latest (kWh) |
+| `actual_battery_read_at_utc` | `actual_battery_read_at_utc` | Battery actual reading time (UTC) |
+| `battery_end_soc_percent` | `forecast_battery_end_soc_percent` | Battery forecast end SOC (%) |
+| `battery_charging` | `forecast_battery_charging` | Battery forecast charging |
+| `minimum_battery_kwh` | `battery_min_target_kwh` | Battery minimum target (kWh) |
+| `maximum_battery_kwh` | `battery_max_target_kwh` | Battery maximum target (kWh) |
+| `limit_battery_export_rate_to_grid_kw` | `battery_to_grid_limit_kw` | Battery-to-grid limit (kW) |
+| `solar_kwh` | `forecast_solar_kwh` | Solar forecast energy (kWh) |
+| `load_kwh` | `forecast_house_load_kwh` | House load forecast energy (kWh) |
+| `grid_import_kwh` | `forecast_grid_import_kwh` | Grid import forecast energy (kWh) |
+| `grid_export_kwh` | `forecast_grid_export_kwh` | Grid export forecast energy (kWh) |
+| `import_cost` | `forecast_import_cost_eur` | Import cost forecast (€) |
+| `export_revenue` | `forecast_export_revenue_eur` | Export revenue forecast (€) |
+| `net_cost` | `forecast_net_cost_eur` | Net cost forecast (€) |
+| `solar_to_load_kwh` | `forecast_solar_to_house_load_kwh` | Solar to house load (kWh) |
+| `solar_to_battery_kwh` | `forecast_solar_to_battery_kwh` | Solar to battery (kWh) |
+| `solar_to_grid_kwh` | `forecast_solar_to_grid_kwh` | Solar to grid (kWh) |
+| `grid_to_load_kwh` | `forecast_grid_to_house_load_kwh` | Grid to house load (kWh) |
+| `grid_to_battery_kwh` | `forecast_grid_to_battery_kwh` | Grid to battery (kWh) |
+| `battery_to_load_kwh` | `forecast_battery_to_house_load_kwh` | Battery to house load (kWh) |
+| `battery_to_grid_kwh` | `forecast_battery_to_grid_kwh` | Battery to grid (kWh) |
+| `inverter_ac_to_dc_kwh` | `forecast_inverter_ac_to_dc_kwh` | Inverter AC to DC (kWh) |
+| `inverter_dc_to_ac_kwh` | `forecast_inverter_dc_to_ac_kwh` | Inverter DC to AC (kWh) |
+| `losses_kwh` | `forecast_conversion_losses_kwh` | Conversion losses (kWh) |
+| `solar_clipped_kwh` | `forecast_solar_clipped_kwh` | Solar clipping (kWh) |
+| `cost_score` | `forecast_cost_score` | Cost score |
+| `protection_score` | `forecast_protection_score` | Reserve protection score |
+| `limit_score` | `forecast_battery_limit_score` | Battery limit penalty score |
+| `terminal_score` | `forecast_terminal_score` | Terminal credit score |
+| `total_score` | `forecast_total_score` | Total score |

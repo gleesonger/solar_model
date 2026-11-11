@@ -27,6 +27,25 @@ def test_epoch_periods_preserve_fractional_utc_report_timestamps(inputs):
     assert frame.tariff_name.tolist() == ["flat"]
 
 
+@pytest.mark.parametrize("solar,charge,grid_charge,discharge,load,dc_input", [
+    (2., 0., 0., 0., 1., 2.),
+    (0., 0., 0., 1., .5, 1.),
+    (1., 0., 0., 1., 1., 2.),
+    (2., 1., 0., 0., .5, 1.),
+    (.5, 1.4, 1., 0., 0., 0.),
+])
+def test_report_dc_to_ac_energy_is_pre_conversion_input(inputs, solar: float, charge: float, grid_charge: float, discharge: float, load: float, dc_input: float) -> None:
+    device = replace(inputs[0], inverter_ac_to_dc_efficiency=.9, inverter_dc_to_ac_efficiency=.8)
+    p = period(solar=solar, load=load)
+    grid = load + grid_charge - dc_input * .8
+    step = dp.Step(solar, charge, grid_charge, discharge, 4., max(0., grid), max(0., -grid), 0., 0., 0., OperatingMode.SELF_CONSUMPTION)
+    row = dp.result_frame(device, [p], [step], 4., 0.).iloc[0]
+    delivered_ac = row.solar_to_load_kwh + row.solar_to_grid_kwh + row.battery_to_load_kwh + row.battery_to_grid_kwh
+    assert row.inverter_dc_to_ac_kwh == pytest.approx(dc_input, abs=1e-12)
+    assert delivered_ac + row.inverter_dc_to_ac_loss_kwh == pytest.approx(dc_input, abs=1e-12)
+    assert row.inverter_dc_to_ac_loss_kwh == pytest.approx(dc_input * .2, abs=1e-12)
+
+
 def test_dp_aligns_first_hour_and_preserves_elapsed_horizon_through_dst(inputs):
     config = replace(inputs[3], energy_plan=replace(inputs[3].energy_plan, num_projection_hours=24, num_visible_projection_hours=24, optimiser=replace(inputs[3].energy_plan.optimiser, projection_resolution_mins=(15,) * 96)))
     start = datetime(2026, 10, 25, 0, 5, tzinfo=timezone.utc)

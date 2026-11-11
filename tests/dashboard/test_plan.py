@@ -54,16 +54,18 @@ def test_excel_filename_uses_applied_model_adjustment_scenario_and_plan_date(mon
     frame = tab.result.results[tab.scenario_name].assign(limit_score=[-2., -3.], plan_action=["Force discharge", "Force charge"])
     tab._download_detail(frame, plan.detail_columns(frame, compact=view == "Compact"))
     assert downloads[0]["filename"] == f"plan-{model}-{abbreviation}-protection-{adjustment:g}-solar-{solar}-load-{load}-20261027-1005.xlsx"
-    assert exported_frames[0].Start.iloc[0] == "2026-10-27 10:05:00"
-    assert exported_frames[0].End.iloc[0] == "2026-10-27 10:20:00"
-    action_column = "Action"
+    start_column = "Start (local)" if view == "Advanced" else "Start"
+    end_column = "End (local)" if view == "Advanced" else "End"
+    assert exported_frames[0][start_column].iloc[0] == "2026-10-27 10:05:00"
+    assert exported_frames[0][end_column].iloc[0] == "2026-10-27 10:20:00"
+    action_column = "Planned action" if view == "Advanced" else "Action"
     expected_actions = ["Force discharge", "Force charge", None, None, None] if view == "Advanced" else ["Force discharge", "Force charge", None]
     assert exported_frames[0][action_column].tolist() == expected_actions
     if view == "Advanced":
-        assert exported_frames[0].Start.tolist()[-3:] == ["0–24h", "24–48h", "Total"]
-        assert exported_frames[0]["Limit score"].iloc[-3:].tolist()[0] == -5.
-        assert pd.isna(exported_frames[0]["Limit score"].iloc[-2])
-        assert exported_frames[0]["Limit score"].iloc[-1] == -5.
+        assert exported_frames[0][start_column].tolist()[-3:] == ["0–24h", "24–48h", "Total"]
+        assert exported_frames[0]["Battery limit penalty score"].iloc[-3:].tolist()[0] == -5.
+        assert pd.isna(exported_frames[0]["Battery limit penalty score"].iloc[-2])
+        assert exported_frames[0]["Battery limit penalty score"].iloc[-1] == -5.
         assert not {"Battery start (kWh)", "Battery start SOC (%)", "Solar To Inverter kWh", "Battery To Inverter kWh", "Battery Charge Loss kWh"} & set(exported_frames[0])
     else:
         assert "Limit Score" not in exported_frames[0]

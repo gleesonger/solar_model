@@ -92,7 +92,7 @@ if __name__ == '__main__':
                 with ui.tab_panel('Plan').classes('min-w-0'):
                     tab = PlanTab(config, {str(config_path)!r}, store)
                     tab.render_plan_tab()
-        unsubscribe = store.subscribe(lambda: client.safe_invoke(tab.apply_shared_plan))
+        unsubscribe = store.subscribe(lambda: client.safe_invoke(tab.sync_shared_plan))
         client.on_disconnect(unsubscribe)
     ui.run(host='127.0.0.1', port={port}, show=False, reload=False)
 ''', encoding="utf-8")

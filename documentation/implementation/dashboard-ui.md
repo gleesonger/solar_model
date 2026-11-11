@@ -364,3 +364,6 @@ Plan Download Excel uses a single `Plan detail` worksheet. Compact keeps its exi
 | `limit_score` | `forecast_battery_limit_score` | Battery limit penalty score |
 | `terminal_score` | `forecast_terminal_score` | Terminal credit score |
 | `total_score` | `forecast_total_score` | Total score |
+
+
+On each new shared plan publication, `PlanTab.sync_shared_plan()` refreshes snapshot choices for the currently selected date. A blank Snapshot follows the new report, updating chart and table. A selected snapshot keeps its report and selection while the choices update; if retention removed its database entry, its existing choice remains available while pinned. Refreshes preserve selections made during a pending read and discard results for a superseded date. Service health notifications without a new plan version do not requery snapshot choices. Reconnecting browsers use the same synchronisation path.

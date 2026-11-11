@@ -161,6 +161,7 @@ class PlanTab:
         self.historical_id: str | None = None
         self._history_request = 0
         self._date_request = 0
+        self._snapshot_version = -1
         self._actuals_running = False
 
     def render_plan_tab(self) -> None:
@@ -199,14 +200,26 @@ class PlanTab:
             self._actuals_running = False
 
     async def _load_snapshot_options(self) -> None:
-        self._date_request += 1
-        request = self._date_request
         self._history_request += 1
         self.historical_id = None
+        self.history_snapshot.set_options({}, value=None)
         self.apply_shared_plan(force=True)
+        await self._refresh_snapshot_options()
+
+    async def sync_shared_plan(self) -> None:
+        """Follow new publications and refresh choices without unpinning history."""
+        self.apply_shared_plan()
+        if self.plan_store is not None and self.plan_store.version != self._snapshot_version:
+            await self._refresh_snapshot_options()
+
+    async def _refresh_snapshot_options(self) -> None:
+        self._date_request += 1
+        request = self._date_request
+        version = self.plan_store.version if self.plan_store is not None else 0
         raw = self.history_date.value
         if not raw:
             self.history_snapshot.set_options({}, value=None)
+            self._snapshot_version = version
             return
         try:
             day = date.fromisoformat(raw)
@@ -216,8 +229,12 @@ class PlanTab:
             if request != self._date_request:
                 return
             options = {plan.snapshot_id: plan.saved_at.astimezone(self.timezone).strftime("%H:%M:%S %Z") for plan in plans}
-            self.history_snapshot.set_options(options, value=None)
-            if not plans:
+            selected = self.history_snapshot.value
+            if selected and selected not in options:
+                options[selected] = self.history_snapshot.options[selected]
+            self.history_snapshot.set_options(options, value=selected)
+            self._snapshot_version = version
+            if not plans and not selected:
                 self.status.set_text("No saved plans for this date. The latest plan remains displayed.")
                 self.status.set_visibility(True)
         except Exception as error:

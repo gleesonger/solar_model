@@ -92,7 +92,7 @@ def main(config_path: str = "config.yaml") -> None:
         unsubscribe = lambda: None
 
         def apply_plan() -> None:
-            client.safe_invoke(layout.plan_tab.apply_shared_plan)
+            client.safe_invoke(layout.plan_tab.sync_shared_plan)
 
         unsubscribe_plan = lambda: None
 

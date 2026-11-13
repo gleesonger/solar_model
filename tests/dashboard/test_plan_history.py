@@ -78,6 +78,10 @@ def test_publication_syncs_choices_and_only_replaces_unpinned_report(monkeypatch
     original = object()
     store = SimpleNamespace(config=config, current=latest, version=2, running=False, last_error=None)
     tab = plan.PlanTab(config, plan_store=store)
+    # A connected browser subscribes before its first dashboard snapshot renders.
+    asyncio.run(tab.sync_shared_plan())
+    assert tab._snapshot_version == -1
+    assert tab.shared_version == 0
     tab.output = SimpleNamespace()
     tab.loading = SimpleNamespace(set_visibility=lambda value: None)
     tab.status = SimpleNamespace(set_visibility=lambda value: None)

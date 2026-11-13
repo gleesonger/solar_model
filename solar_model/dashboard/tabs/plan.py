@@ -213,6 +213,9 @@ class PlanTab:
             await self._refresh_snapshot_options()
 
     async def _refresh_snapshot_options(self) -> None:
+        # Publications can arrive while the browser's initial dashboard is loading.
+        if not hasattr(self, "history_date") or not hasattr(self, "history_snapshot"):
+            return
         self._date_request += 1
         request = self._date_request
         version = self.plan_store.version if self.plan_store is not None else 0

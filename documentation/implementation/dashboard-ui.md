@@ -367,3 +367,6 @@ Plan Download Excel uses a single `Plan detail` worksheet. Compact keeps its exi
 
 
 On each new shared plan publication, `PlanTab.sync_shared_plan()` refreshes snapshot choices for the currently selected date. A blank Snapshot follows the new report, updating chart and table. A selected snapshot keeps its report and selection while the choices update; if retention removed its database entry, its existing choice remains available while pinned. Refreshes preserve selections made during a pending read and discard results for a superseded date. Service health notifications without a new plan version do not requery snapshot choices. Reconnecting browsers use the same synchronisation path.
+
+
+Plan publication notifications can reach a connected browser before its initial dashboard has rendered the Plan controls. Snapshot-option refresh defers until both selectors exist, leaving the snapshot version unconsumed. Initial rendering then applies the latest cached plan and loads the current date's choices; subsequent publications use normal live/pinned synchronisation.

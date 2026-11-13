@@ -15,7 +15,7 @@ Plan detail column metadata lives in the insertion-ordered `PLAN_COLUMNS` dictio
 - **Recent:** Live/Today table; latest kW, daily meters, latest/BoD/raw forecast totals; past 7 days and past 12 months energy/economics.
 - **Analysis:** lazily loaded energy, power, battery, per-array and money charts; range/grouping/Sum–Average controls; custom chart builder and downloads.
 - **Plan:** latest or selected saved plan in one screen: today's date preloads today's snapshot choices while a blank Snapshot follows latest; selecting a saved snapshot pins its action, summaries, scenarios, chart and detail table. Private demonstrations and settings remain available.
-- **System Info:** newest valid metadata value per variable.
+- **System Info:** newest valid metadata value per variable, plus the app's first 12 Git commit characters (full hash in a tooltip; `unknown` for unstamped builds).
 - **Control:** automatically saved holiday date ranges with an inclusive day count (a single entered date creates a one-day period), household-load forecast recalculation by selected months, confirmed tariff recalculation and managed restart actions.
 
 Scheduled planning is owned by the independent `runtime.planner` process. The dashboard creates a separate private demonstration process only when requested. It has no startup solver warm-up and cannot schedule shared plans.

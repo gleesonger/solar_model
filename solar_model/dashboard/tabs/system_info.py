@@ -3,6 +3,7 @@ from __future__ import annotations
 from nicegui import ui
 from nicegui.elements.table import Table
 
+from solar_model.build_info import GIT_COMMIT
 from solar_model.logging_setup import LOGGER
 from solar_model.config import Config
 
@@ -37,6 +38,7 @@ class SystemInfoTab:
 
 def render_system_information(device_information: list[dict[str, str]]) -> Table:
     ui.label("System information").classes("text-lg font-semibold")
+    ui.label(f"App commit: {GIT_COMMIT[:12]}").classes("text-sm").tooltip(GIT_COMMIT)
     columns = [
         {"name": "variable", "label": "Variable", "field": "variable", "align": "left"},
         {"name": "value", "label": "Value", "field": "value", "align": "right"},

@@ -17,6 +17,10 @@ RUN python -m pip install --no-deps .
 
 RUN chmod +x /app/docker-entrypoint.sh
 
+ARG GIT_COMMIT=unknown
+ENV SOLAR_MODEL_GIT_COMMIT=${GIT_COMMIT}
+LABEL SOLAR_MODEL_GIT_COMMIT=${GIT_COMMIT}
+
 WORKDIR /config
 
 VOLUME ["/config"]

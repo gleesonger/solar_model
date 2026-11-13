@@ -11,8 +11,9 @@ from threading import Event
 from time import monotonic
 from types import FrameType
 
+from solar_model.build_info import GIT_COMMIT
 from solar_model.config import load_config
-from solar_model.logging_setup import LOGGER
+from solar_model.logging_setup import LOGGER, configure_logging
 from solar_model.paths import subprocess_environment
 from solar_model.runtime.processes import OwnedProcess
 from solar_model.storage.migrations import open_database
@@ -64,10 +65,13 @@ def check_services(services: list[Service], environment: dict[str, str]) -> None
 
 
 def main() -> int:
+    config = load_config()
+    configure_logging(config.logging.level)
+    LOGGER.info("Solar model starting (git commit %s)", GIT_COMMIT)
     restart_file = Path(tempfile.gettempdir()) / f"solar-model-restart-{os.getpid()}"
     restart_file.unlink(missing_ok=True)
     environment = subprocess_environment() | {"SOLAR_MODEL_RESTART_FILE": str(restart_file)}
-    open_database(load_config().database.path).close()
+    open_database(config.database.path).close()
     services = start_services(environment)
     stop = Event()
 

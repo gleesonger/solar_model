@@ -4,6 +4,8 @@ Sources: [solar_model/runtime/supervisor.py](../../solar_model/runtime/superviso
 
 Root files are compatibility launchers. Installable console commands and module entry points call the same package functions. The supervisor and Control subprocesses inherit configuration-directory working paths and receive the package location in `PYTHONPATH`; resources resolve inside the package.
 
+At startup the supervisor loads configuration, configures logging and logs the full `solar_model.build_info.GIT_COMMIT` before opening storage and starting children. Build identity comes from the image's `SOLAR_MODEL_GIT_COMMIT` environment variable, read once per process (`unknown` when missing or blank). Child processes inherit it; no runtime Git lookup or YAML setting is involved. See [Docker build/deployment procedures](../operations/runbook.md#build-identity-and-media-server-deployment).
+
 ## 1. Managed process hierarchy
 
 The supervisor migrates storage, then starts `runtime.collector`, `runtime.planner` and `dashboard.app`. Each is an `OwnedProcess`: a separate POSIX session/process group or a Windows kill-on-close Job Object. Startup launch failure cleans all children already started. Once running, a service exit reaps its descendants and restarts only that service after exponential 1?30 second backoff; a service surviving 60 seconds resets its failure count. Collector and planner continue through dashboard failure. A Control restart marker stops/restarts all three and reloads configuration/storage. Stop waits are bounded; Windows Job closure forcibly stops the owned tree.

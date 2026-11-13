@@ -33,6 +33,8 @@ The dashboard uses an explicit per-browser root page, so startup stops the unuse
 
 `AnalysisTab` is created with the layout, but charts are built lazily on first tab activation. Its local selected range persists in `DashboardState`; shared snapshot application updates only Recent/System Info. The unmounted Hourly tab and its unused UI state/element fields were removed.
 
+`SystemInfoTab.render_system_information()` renders an App commit label above the device table using `solar_model.build_info.GIT_COMMIT`. It displays the first 12 characters and exposes the full value in a tooltip. This process-level build identity is separate from device rows, so snapshot refreshes leave it intact and no storage query or Git command is needed. Missing/blank build metadata displays `unknown`.
+
 ### Registering a new standard Analysis chart
 
 `DashboardElements.historical_charts` holds the fixed `HistoricalCharts` dataclass from `state.py`. Its current fields are `energy`, `power`, `battery`, `array_energy`, and `money`, each a `ChartDataDisplay`. There is no automatic discovery of additional rendered charts.

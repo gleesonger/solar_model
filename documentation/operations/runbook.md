@@ -18,14 +18,61 @@ python docker_start.py
 ## Docker
 
 ```powershell
-docker build -t solar-model .
+docker build --build-arg GIT_COMMIT=$(git rev-parse HEAD) -t solar-model .
 docker run -p 8090:8090 -v solar-config:/config solar-model
 ```
 
 - [Dockerfile](../../Dockerfile) installs dependencies, places source in `/app`, and runs the managed launcher from `/config`.
 - [docker-entrypoint.sh](../../docker-entrypoint.sh) copies the shipped YAML only if `/config/config.yaml` does not exist. Image upgrades do not overwrite existing configuration.
-- `/config` holds persistent configuration/database; publish the actual configured dashboard port. Dockerfile's `EXPOSE 8080` differs from shipped 8090.
+- `/config` holds persistent configuration/database; publish the actual configured dashboard port (shipped and exposed port: 8090).
 - The dashboard has no application authentication layer in the reviewed source; Control actions are available to clients that can reach it. Restrict access using deployment/network controls where needed.
+
+### Build identity and media-server deployment
+
+The image accepts `GIT_COMMIT` as a build argument and stores it in both the environment variable and image label named `SOLAR_MODEL_GIT_COMMIT`. `solar_model.build_info.GIT_COMMIT` reads the environment once per process. System Info shows its first 12 characters with the full value in a tooltip; the managed supervisor logs the full value at startup. Local runs and unstamped images show `unknown`. This is build metadata, outside YAML and the Plan settings editor; it needs no Git executable or repository inside the image. A local working tree with uncommitted edits is not fully described by its HEAD hash.
+
+On `ger@media-server`, `~/media-server/docker-compose.yml` uses this build block within `solar-model`:
+
+```yaml
+build:
+  context: "https://github.com/gleesonger/solar_model.git#${SOLAR_MODEL_COMMIT:-master}"
+  dockerfile: Dockerfile
+  args:
+    GIT_COMMIT: "${SOLAR_MODEL_COMMIT:?Run rebuild_solar_model.sh}"
+```
+
+`~/media-server/rebuild_solar_model.sh` resolves and exports the full commit before invoking Compose. Compose substitutes the inherited variable into both the Git context URL and the build argument, so a branch update between resolution and build cannot mislabel the image. The script runs from its own directory:
+
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+
+cd -- "$(dirname -- "${BASH_SOURCE[0]}")"
+
+export SOLAR_MODEL_COMMIT
+SOLAR_MODEL_COMMIT="$(git ls-remote --exit-code \
+    https://github.com/gleesonger/solar_model.git refs/heads/master |
+    awk '{print $1}')"
+
+if [[ ! "$SOLAR_MODEL_COMMIT" =~ ^[0-9a-f]{40}$ ]]; then
+    echo "Unable to resolve master to a full Git commit" >&2
+    exit 1
+fi
+
+echo "Building solar-model commit $SOLAR_MODEL_COMMIT"
+docker compose build solar-model
+docker compose up -d --no-deps solar-model
+```
+
+Build happens while the previous container continues running; only a successful build proceeds to detached replacement. The service retains its `/config` bind mount. Push the intended application/Dockerfile changes to `master` before rebuilding: this deployment builds GitHub source, not the local workspace. No automatic push or rebuild accompanies a source edit.
+
+Manual Compose commands also need `SOLAR_MODEL_COMMIT` exported because Compose validates the required interpolation when loading the file, including for other services. Use the intended full source hash. Inspect the running image's baked identity without Compose or opening storage:
+
+```bash
+docker exec solar-model printenv SOLAR_MODEL_GIT_COMMIT
+```
+
+The variable will be absent in older images until they are rebuilt with the updated Dockerfile.
 
 ## Maintenance commands and effects
 

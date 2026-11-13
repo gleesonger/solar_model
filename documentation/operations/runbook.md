@@ -29,7 +29,7 @@ docker run -p 8090:8090 -v solar-config:/config solar-model
 
 ### Build identity and media-server deployment
 
-The image accepts `GIT_COMMIT` as a build argument and stores it in both the environment variable and image label named `SOLAR_MODEL_GIT_COMMIT`. `solar_model.build_info.GIT_COMMIT` reads the environment once per process. System Info shows its first 12 characters with the full value in a tooltip; the managed supervisor logs the full value at startup. Local runs and unstamped images show `unknown`. This is build metadata, outside YAML and the Plan settings editor; it needs no Git executable or repository inside the image. A local working tree with uncommitted edits is not fully described by its HEAD hash.
+The image accepts `GIT_COMMIT` as a build argument and stores it in both the environment variable and image label named `SOLAR_MODEL_GIT_COMMIT`. `solar_model.build_info.GIT_COMMIT` reads the environment once per process. The navigation banner shows its first 7 characters with the full value in a tooltip; the managed supervisor logs the full value at startup. Local runs and unstamped images show `unknown`. This is build metadata, outside YAML and the Plan settings editor; it needs no Git executable or repository inside the image. A local working tree with uncommitted edits is not fully described by its HEAD hash.
 
 On `ger@media-server`, `~/media-server/docker-compose.yml` uses this build block within `solar-model`:
 

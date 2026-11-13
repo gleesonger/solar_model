@@ -73,7 +73,7 @@ class DashboardLayout:
                         system_info = ui.tab("System Info")
                         control = ui.tab("Control")
                     self.historical_tab.render_mobile_controls_trigger()
-                    ui.label(f"Commit: {GIT_COMMIT[:12]}").classes("dashboard-commit").tooltip(GIT_COMMIT)
+                    ui.label(f"Commit: {GIT_COMMIT[:7]}").classes("dashboard-commit").tooltip(GIT_COMMIT)
                 self.historical_tab.render_historical_controls()
                 self.historical_tab.set_controls_visibility(self.state.active_tab in {"Analysis", "Historical"})
             selected = {

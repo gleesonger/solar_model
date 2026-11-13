@@ -24,7 +24,7 @@ Regenerate it from the repository root with `python -m solar_model.dashboard.ass
 ## Existing layout conventions
 
 - Page uses a centred `max-w-7xl` container, full-width sections, `p-2 md:p-4` spacing, white background, and a sticky topbar (`z-index: 30`).
-- The navigation banner's `.dashboard-commit` shows `Commit: <12-character hash>` in 12px grey (`#6b7280`), aligned right beside the centred desktop tabs. Below 768px it sits on a second right-aligned grid row, preserving space for the mobile Analysis controls and tabs. The full hash is available in a tooltip.
+- The navigation banner's `.dashboard-commit` shows `Commit: <7-character hash>` in 12px grey (`#6b7280`), aligned right beside the centred desktop tabs. Below 768px it sits on a second right-aligned grid row, preserving space for the mobile Analysis controls and tabs. The full hash is available in a tooltip.
 - Section titles typically use `text-lg font-semibold`; Recent subsection titles use `text-base`; hints use `text-sm text-gray-600`.
 - Optional chart series selection uses one compact flat text button labelled **Default**, **None** or **All** in the existing bordered toolbar, alongside Split tariff and copy/download/table controls; the toolbar wraps within the header on narrow screens.
 - Charts usually use `w-full h-96`. The desktop custom builder uses a 34rem chart and matching scrollable legend, with a fixed-width legend column.

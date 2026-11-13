@@ -7,6 +7,7 @@ Known defects, undecided policies and verification gaps. These items qualify the
 
 | Finding | Evidence / consequence |
 | --- | --- |
+| Daily-load migration regression expects an obsolete schema version | `tests/forecasting/test_daily_load_forecast.py::test_migration_discards_old_forecasts_and_does_not_rebackfill_house_energy` still asserts `0.3.2`, while the current opener migrates to `0.3.3`. The targeted run on 2026-11-13 passed its forecast-table/energy-preservation checks and failed only this final version assertion. This pre-existing test expectation is unrelated to the three-layer load calculation. |
 | Host timezone leaks into ORM local dates | [solar_model/storage/schema.py](../../solar_model/storage/schema.py) hybrids use host `astimezone()`/SQLite `localtime`; legacy hybrids still expose host dates; active recent/lifetime summaries now use configured timezone . Configured timezone can differ from host, especially Docker. |
 | Missing planning rules pass config load | Minimum/maximum schedules default empty and validate only when non-empty, but [simulate_energy_plan](../../solar_model/planning/plan_optimisation_milp.py) calls `tariff_rule` on both unconditionally. |
 | Solar interval conventions disagree | Dashboard treats forecast timestamps as starts; [load_forecast_as_of](../../solar_model/tools/plan_as_of.py) uses them as ends and uses collection interval for the first interval width. Planning may shift energy timing. |

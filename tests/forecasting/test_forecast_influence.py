@@ -50,7 +50,7 @@ def test_normal_profile_excludes_holiday_observations():
     assert result.loc[0, "prediction_kwh"] == 2.
 
 
-def test_holiday_baseline_is_lowest_of_30_hourly_means_and_is_flat():
+def test_holiday_without_holiday_history_falls_back_to_normal_hourly_profile():
     target = date(2026, 10, 23)
     history = pd.DataFrame([
         {"timestamp": pd.Timestamp(day.isoformat(), tz="UTC") + pd.Timedelta(hours=hour),
@@ -59,14 +59,16 @@ def test_holiday_baseline_is_lowest_of_30_hourly_means_and_is_flat():
         for hour in range(24)
     ])
     result = load.predict_day(history, target, ZoneInfo("UTC"), ForecastModelConfig(42., 14., .2), {target})
-    assert result.prediction_kwh.tolist() == [2.] * 24
+    normal = load.predict_day(history, target, ZoneInfo("UTC"), ForecastModelConfig(42., 14., .2))
+    pd.testing.assert_frame_equal(result, normal)
+    assert result.prediction_kwh.iloc[3] == pytest.approx(2.)
+    assert result.prediction_kwh.iloc[0] == pytest.approx(5.)
 
 
-def test_holiday_lookback_counts_holiday_dates_even_a_year_old():
+def test_holiday_history_uses_same_calendar_lookback_as_normal_days():
     target = date(2026, 10, 23)
     days = [target - timedelta(days=30 * index) for index in range(1, 23)]
-    periods = [(day.isoformat(), day.isoformat()) for day in days]
-    assert history_start_day(periods, target, ForecastModelConfig(42., 14., 1.)) == days[20]
+    assert history_start_day(target, ForecastModelConfig(42., 14., 1.), []) == target - timedelta(days=43)
     history = pd.DataFrame([
         {"timestamp": pd.Timestamp(day.isoformat(), tz="UTC"), "day": day,
          "hour": 0, "day_type": "holiday", "load_kwh": 100. if index == 21 else 2.}

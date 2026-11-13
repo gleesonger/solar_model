@@ -65,7 +65,7 @@ def load_house_load_intervals(database: SolarDatabase, as_of: datetime, config: 
     cutoff = pd.Timestamp(datetime.combine(as_of.astimezone(zone).date(), time.min, zone))
     start, end = map(pd.Timestamp, _forecast_bounds(as_of, config))
     periods = database.list_holiday_periods()
-    first_day = history_start_day(periods, cutoff.date(), settings)
+    first_day = history_start_day(cutoff.date(), settings, periods)
     holidays = holiday_days(periods, first_day, end.tz_convert(zone).date())
     history = load_hourly_house_load(database.engine.url.database, zone,
         start=pd.Timestamp(datetime.combine(first_day, time.min, zone)), end=cutoff, holidays=holidays)

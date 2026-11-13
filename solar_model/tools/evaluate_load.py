@@ -1,9 +1,8 @@
-"""Backtest a recency-weighted hourly household-load profile.
+"""Backtest the production three-layer hourly household-load forecast.
 
-This report evaluates the production daily load model without writing forecasts. Its YAML-configured defaults use a six-week lookback
-and a two-week half-life.  The local weekday/weekend hourly estimate is
-shrunk towards the all-days hourly estimate, so scarce weekend observations
-benefit from weekday history without being treated as identical to weekdays.
+Shared YAML settings weight broad, weekday/weekend and day-of-week profiles.
+Holiday and normal observations are separate streams of the same calculation;
+hours without holiday history fall back to the normal-day forecast.
 """
 from __future__ import annotations
 

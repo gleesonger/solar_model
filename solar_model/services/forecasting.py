@@ -90,7 +90,7 @@ def refresh_daily_house_load_forecast(database: SolarDatabase, as_of: datetime |
     settings = (models or ForecastModelsConfig()).load
     start, end = _day_bounds(day, zone)
     periods = database.list_holiday_periods() if holiday_periods is None else holiday_periods
-    first_day = history_start_day(periods, day, settings)
+    first_day = history_start_day(day, settings, periods)
     history_start = pd.Timestamp(datetime.combine(first_day, time.min, zone)).tz_convert("UTC")
     holidays = holiday_days(periods, first_day, day)
     history = load_hourly_house_load(database.engine.url.database, zone,

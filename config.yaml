@@ -103,11 +103,48 @@ tariffs:
 
 forecast:
 
+  # Forecast models work by looking at historical data and with greater emphasis on recent data
+  # Parameters:
+  # lookback: Number of past days included in the forecast history.
+  # halflife: Days until an observation has half the weight of a recent one;
+  #           lower values favour recent patterns.
+  #
+  # For some forecasts we can have multiple forecasts with varying degrees of granularity that we blend between.
+  #
+  # For house-load we create an hourly forecast profile based on three levels of granularity: 1) Single split  every day, 2) 2 breakdowns - weekend/weekday, 3) 7 breakdowns - each day of the week
+  #   The more data we get the more we weight towards the more granular data but that takes time (it takes 7 times longer to collect data on Mondays compared to every day)
+  #
+  # For Solar we weight between the BoD forecast and actual experience based on percentiles. If today's experience puts us at the 80th percntile of recent experience we scale today's BoD forecast - we use the same prior_effective_observations approach as described below
+  #
+  # Holiday and normal forecasts use separate history streams at all three layers.
+  # Each holiday hour without holiday history falls back to the normal-day model.
+  # Load lookback counts non-holiday dates for normal forecasts; holidays extend the window.
+  # Holiday-only forecasts retain calendar-day lookback. Missing readings stay missing.
+  # All layers share their stream window; halflife always uses elapsed calendar days.
+  # One prior_effective_observations value controls both blends.
+  # prior_effective_observations: Controls each narrower profile's influence on the broader estimate.
+  #
+  # Officially the below formula are used:
+  #   Evidence n is recency-weighted per hour: each observation contributes 2^(-age/halflife).
+  #   Specific portion = n*f / (1 - f + n*f), where f = prior_effective_observations.
+  #   Valid range: 0 < f <= 1. As f approaches 0, the specific portion approaches 0%.
+  #
+  # The below table gives a feel on how to set prior_effective_observations. A value around 0.2 is recommended.
+  #
+  # f     | n=1    | n=2    | n=4    | n=8
+  # ------|--------|--------|--------|-------
+  # 0     | Invalid| Invalid| Invalid| Invalid
+  # 0.25  | 25%    | 40%    | 57.1%  | 72.7%
+  # 0.5   | 50%    | 66.7%  | 80%    | 88.9%
+  # 0.75  | 75%    | 85.7%  | 92.3%  | 96%
+  # 1     | 100%   | 100%   | 100%   | 100%
+  #
+
   load:
     model_calibration_parameters:
-      lookback: 42                          # days
-      halflife: 14                          # days
-      prior_effective_observations: 0.2     # influence after one day of weekend evidence (blending from all days to seperate weekend experiance)
+      lookback: 35 # 35 non-holiday dates for normal profiles
+      halflife: 7
+      prior_effective_observations: 0.3
 
   solar:
     interval_seconds: 3600

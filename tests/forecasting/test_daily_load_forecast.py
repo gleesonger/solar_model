@@ -237,3 +237,18 @@ def test_migration_discards_old_forecasts_and_does_not_rebackfill_house_energy(t
             assert connection.exec_driver_sql("SELECT value FROM database_metadata WHERE key='database_version'").scalar() == "0.3.2"
     finally:
         db.close()
+
+
+def test_daily_profile_reads_past_holidays_to_fill_normal_lookback(tmp_path):
+    db = open_database(tmp_path / "extended-normal-window.db")
+    try:
+        db.replace_holiday_periods([("2026-11-14", "2026-11-15")])
+        with db.sessions.begin() as session:
+            for day, load in (("2026-11-13", 4.), ("2026-11-14", 100.), ("2026-11-15", 100.)):
+                for stamp in pd.date_range(f"{day}T00:00Z", periods=24, freq="h"):
+                    session.add(SigenStorHourlySample(hour_start_utc=stamp.isoformat(), import_tariff_band="day", sample_count=1, house_load_kwh_period=load))
+        settings = ForecastModelsConfig(load=ForecastModelConfig(1., 3., 1.))
+        assert model.refresh_daily_house_load_forecast(db, "2026-11-16T00:00Z", "UTC", models=settings) == 24
+        assert {row[1] for row in read_profile(db)} == {4.}
+    finally:
+        db.close()

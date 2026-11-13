@@ -8,6 +8,8 @@ Source: [solar_model/dashboard/app.py](../../solar_model/dashboard/app.py), [sol
 
 The favicon is the amber sun/panel in `solar_model/dashboard/assets/solar_power.svg`. Startup passes the source-relative file path to NiceGUI, which serves the SVG at `/favicon.ico` and references that URL in the page's icon link. The asset must be valid SVG; restart and reload after deployment. Browsers may cache the fixed icon URL.
 
+The top navigation banner shows `Commit: <first 12 characters>` in grey on the right, with the full build hash in a tooltip (`unknown` for unstamped builds). On mobile it occupies a second right-aligned line beneath the tabs.
+
 ## Current tabs
 
 Plan detail column metadata lives in the insertion-ordered `PLAN_COLUMNS` dictionary in `dashboard/tabs/plan.py`, built from an aligned table of frozen `PlanColumn` dataclasses with every field explicitly supplied (no constructor defaults). It centralises labels, Compact order, formats, aggregation, browser score normalisation and Excel inclusion. Advanced order follows definition order; a single semantic aggregation flag controls interval splitting, hourly grouping and footer totals.

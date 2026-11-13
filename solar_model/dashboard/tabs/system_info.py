@@ -38,7 +38,6 @@ class SystemInfoTab:
 
 def render_system_information(device_information: list[dict[str, str]]) -> Table:
     ui.label("System information").classes("text-lg font-semibold")
-    ui.label(f"App commit: {GIT_COMMIT[:12]}").classes("text-sm").tooltip(GIT_COMMIT)
     columns = [
         {"name": "variable", "label": "Variable", "field": "variable", "align": "left"},
         {"name": "value", "label": "Value", "field": "value", "align": "right"},

@@ -8,6 +8,7 @@ from nicegui import ui
 from nicegui.elements.column import Column
 from nicegui.events import ValueChangeEventArguments
 
+from solar_model.build_info import GIT_COMMIT
 from solar_model.logging_setup import LOGGER
 from solar_model.config import Config
 
@@ -72,6 +73,7 @@ class DashboardLayout:
                         system_info = ui.tab("System Info")
                         control = ui.tab("Control")
                     self.historical_tab.render_mobile_controls_trigger()
+                    ui.label(f"Commit: {GIT_COMMIT[:12]}").classes("dashboard-commit").tooltip(GIT_COMMIT)
                 self.historical_tab.render_historical_controls()
                 self.historical_tab.set_controls_visibility(self.state.active_tab in {"Analysis", "Historical"})
             selected = {
@@ -120,6 +122,14 @@ def render_dashboard_styles() -> None:
             padding-top: 0.5rem;
             padding-bottom: 0.5rem;
         }
+        .dashboard-commit {
+            grid-column: 3;
+            grid-row: 1;
+            justify-self: end;
+            color: #6b7280;
+            font-size: 0.75rem;
+            white-space: nowrap;
+        }
         .analysis-mobile-controls-trigger {
             display: none;
         }
@@ -167,6 +177,10 @@ def render_dashboard_styles() -> None:
             }
             .dashboard-tabs-row > :first-child {
                 display: none;
+            }
+            .dashboard-commit {
+                grid-column: 1 / -1;
+                grid-row: 2;
             }
             .solar-tabs {
                 min-width: 0;

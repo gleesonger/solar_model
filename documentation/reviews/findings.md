@@ -50,6 +50,9 @@ Known defects, undecided policies and verification gaps. These items qualify the
 
 - Chrome Android saved offline pages can preserve dashboard visuals while in-page scripts are inactive. Finite CSS activity indication and an absolute Last reading timestamp reduce ambiguity, but actual saved-page/freeze behaviour still needs verification on Android hardware; desktop Chromium regression checks do not establish it.
 
+- **Android installed-app shell:** the dashboard now declares an explicit standalone manifest and install icons. Local Chromium checks establish manifest parsing and asset delivery, but toolbar removal/reinstallation on Android and manifest delivery through the deployed HTTPS proxy still need device/deployment verification. The screenshot shows Chrome's title/address toolbar; the historical change that introduced it was not established.
+- **Recent browser fixture precision:** `tests/browser/test_daily_load_forecast_browser.py` expects `0.3` for a live House Load input of `0.35`, while current rendering shows `0.35`. This existing assertion stops the broader responsive/legend check before it completes; update the fixture to the current precision contract separately.
+
 - Runtime dependencies remain ranged, with no lockfile. HiGHS is now explicit; package extras declare test, browser and research dependencies.
 - Tariff helper logic is duplicated between config validation and economics; changes must preserve matching parity.
 - `solar_model/storage/queries/dashboard.py` retains older ORM/pandas calculations used by current adapters or SQL regression comparisons. Remove individual paths only after checking both consumers and independent test references; the unmounted Hourly tab has been removed.

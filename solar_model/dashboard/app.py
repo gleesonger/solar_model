@@ -13,6 +13,7 @@ from solar_model.logging_setup import LOGGER, configure_logging
 from solar_model.paths import package_path
 from solar_model.dashboard.planning_worker import stop_demonstrations
 from solar_model.dashboard.plan_store import PlanStore
+from solar_model.dashboard.web_app import INSTALL_HEAD_HTML, register_installation_assets
 
 def main(config_path: str = "config.yaml") -> None:
     config = load_config(config_path)
@@ -20,6 +21,7 @@ def main(config_path: str = "config.yaml") -> None:
     database = open_database(config.database.path)
     database.close()
     LOGGER.info("Dashboard server starting on %s:%s", config.dashboard.host, config.dashboard.port)
+    register_installation_assets()
 
     live_collector = LivePowerCollector(
         config.actuals.modbus,
@@ -53,6 +55,7 @@ def main(config_path: str = "config.yaml") -> None:
     @ui.page("/")
     def render_dashboard_page() -> None:
         client = ui.context.client
+        ui.add_head_html(INSTALL_HEAD_HTML)
 
         def refresh_browser_activity(event: str) -> None:
             LOGGER.info(f"Dashboard browser {event}: {client.id}")

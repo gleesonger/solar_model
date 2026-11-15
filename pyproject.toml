@@ -29,5 +29,5 @@ dependencies = {file = ["requirements.txt"]}
 include = ["solar_model*"]
 
 [tool.setuptools.package-data]
-"solar_model.dashboard" = ["assets/*.css", "assets/*.js", "assets/*.svg", "assets/*.ico", "assets/*.png"]
+"solar_model.dashboard" = ["assets/*.css", "assets/*.js", "assets/*.svg", "assets/*.ico", "assets/*.png", "assets/*.webmanifest"]
 "solar_model.integrations.sigenstor" = ["register_maps/*.json"]

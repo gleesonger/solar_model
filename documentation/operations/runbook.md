@@ -15,6 +15,14 @@ python docker_start.py
 - For development only: `python main_dashboard.py` or `python main_data_collection.py`. These still use configured hardware/database.
 - Shutdown terminates children, waits up to 10 seconds, then kills survivors.
 
+## Android installation
+
+After deploying/restarting the dashboard, open its normal HTTPS root URL in Chrome and use **Install app**. The dashboard serves an explicit standalone manifest and app icons so Chrome can launch it without the title/address toolbar. Android's system status and navigation bars remain visible. Existing installations may retain their old launch mode; remove/uninstall the existing Solar shortcut/app, revisit the HTTPS URL and install again if the toolbar remains.
+
+The reverse proxy must pass `/manifest.webmanifest`, `/solar-app-192.png` and `/solar-app-512.png` through to the dashboard alongside `/` and NiceGUI's existing routes. The manifest must return JSON with MIME type `application/manifest+json`, rather than a proxy login/error page. Start URL and scope cover the root of that same origin; redirects to another origin can cause Chrome to show browser controls. Installation does not enable offline readings or cache the live dashboard.
+
+Desktop Chromium checks verify manifest discovery/parsing and icon responses at desktop/mobile viewport sizes. Actual Android installation and toolbar removal still need checking on the phone after deployment; viewport emulation cannot verify Android's installed-app shell.
+
 ## Docker
 
 ```powershell

@@ -21,6 +21,8 @@ There is no standalone theme stylesheet or central typography/token system. Curr
 
 Regenerate it from the repository root with `python -m solar_model.dashboard.assets.create_solar_icon`. Deploy valid SVG, restart the dashboard and reload the page. NiceGUI serves the asset through `/favicon.ico`; browser caching can require a refresh after image changes.
 
+Installed-app icons are transparent-background 192/512-pixel PNG renderings of this SVG with 10% padding on each edge. After changing the SVG, regenerate them with `python -m solar_model.dashboard.assets.create_install_icons` (requires Playwright and Chromium or installed Edge). The manifest requests standalone display and white browser/system theme colouring; these colours apply to the app shell/launch background, independently of icon transparency. The dashboard's CSS does not control Chrome's title/address toolbar. See [Android installation](../operations/runbook.md#android-installation).
+
 ## Existing layout conventions
 
 - Page uses a centred `max-w-7xl` container, full-width sections, `p-2 md:p-4` spacing, white background, and a sticky topbar (`z-index: 30`).

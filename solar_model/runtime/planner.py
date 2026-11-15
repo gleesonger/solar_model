@@ -93,8 +93,8 @@ class PlannerService:
         elif latest is not None and not self.worker.running and (self.observed is None or latest > self.observed):
             self.observed = latest
             settings = energy_plan_yaml(self.config.energy_plan)
-            threshold = max(0., self.config.energy_plan.plan_rerun_frequency_mins * 60 - 15)
-            if self.last_data_at is None or settings != self.last_settings or (latest - self.last_data_at).total_seconds() >= threshold:
+            interval_seconds = self.config.energy_plan.plan_rerun_frequency_mins * 60
+            if self.last_data_at is None or settings != self.last_settings or latest.timestamp() // interval_seconds > self.last_data_at.timestamp() // interval_seconds:
                 self.last_error = None
                 self.active_settings = settings
                 self.worker.submit("shared", self.config)

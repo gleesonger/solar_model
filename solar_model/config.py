@@ -497,8 +497,10 @@ def validate_config(config: Config) -> None:
 
     config.forecast.models  # Validate model-specific requirements across both sections.
     energy_plan = config.energy_plan
-    if not math.isfinite(energy_plan.plan_rerun_frequency_mins) or energy_plan.plan_rerun_frequency_mins <= 0:
+    if isinstance(energy_plan.plan_rerun_frequency_mins, bool) or not math.isfinite(energy_plan.plan_rerun_frequency_mins) or energy_plan.plan_rerun_frequency_mins <= 0:
         raise ValueError("energy_plan.plan_rerun_frequency_mins must be finite and greater than zero")
+    if not (60 / energy_plan.plan_rerun_frequency_mins).is_integer():
+        raise ValueError("energy_plan.plan_rerun_frequency_mins must divide evenly into 60 minutes")
     if isinstance(energy_plan.calculation_timeout_seconds, bool) or not math.isfinite(energy_plan.calculation_timeout_seconds) or energy_plan.calculation_timeout_seconds <= 0:
         raise ValueError("energy_plan.calculation_timeout_seconds must be finite and greater than zero")
     for name in ("retain_snapshots_frequency_mins", "retain_snapshots_period_days"):

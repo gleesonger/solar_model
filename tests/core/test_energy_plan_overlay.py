@@ -35,11 +35,31 @@ def test_overlay_uses_existing_scenario_and_projection_validation():
         parse_energy_plan_yaml(config, text.replace("15*96", "15*0"))
 
 
-@pytest.mark.parametrize("frequency", [0., -1., float("inf"), float("nan")])
+@pytest.mark.parametrize("frequency", [0., -1., float("inf"), float("nan"), True])
 def test_plan_rerun_frequency_must_be_finite_and_positive(frequency):
     config = load_config()
     with pytest.raises(ValueError, match="plan_rerun_frequency_mins"):
         parse_energy_plan_yaml(config, energy_plan_yaml(replace(config.energy_plan, plan_rerun_frequency_mins=frequency)))
+
+
+@pytest.mark.parametrize("frequency", [7., 17., 45., 90.])
+def test_plan_rerun_frequency_must_divide_hour_in_file_and_editor(tmp_path, frequency):
+    config = load_config()
+    raw = yaml.safe_load(Path("config.yaml").read_text(encoding="utf-8"))
+    raw["energy_plan"]["plan_rerun_frequency_mins"] = frequency
+    path = tmp_path / "config.yaml"
+    path.write_text(yaml.safe_dump(raw), encoding="utf-8")
+    with pytest.raises(ValueError, match="plan_rerun_frequency_mins.*divide evenly into 60"):
+        load_config(path)
+    with pytest.raises(ValueError, match="plan_rerun_frequency_mins.*divide evenly into 60"):
+        parse_energy_plan_yaml(config, yaml.safe_dump(raw["energy_plan"]))
+
+
+@pytest.mark.parametrize("frequency", [1., 5., 10., 15., 20., 30., 60., .5, .02])
+def test_plan_rerun_frequency_accepts_hour_divisors(frequency):
+    config = load_config()
+    settings = replace(config.energy_plan, plan_rerun_frequency_mins=frequency)
+    assert parse_energy_plan_yaml(config, energy_plan_yaml(settings)) == settings
 
 
 def test_plan_rerun_frequency_is_required_in_file_and_editor(tmp_path):

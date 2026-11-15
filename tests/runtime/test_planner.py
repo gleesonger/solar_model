@@ -10,7 +10,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from solar_model.config import load_config
+from solar_model.config import energy_plan_yaml, load_config
 from solar_model.runtime.planner import PlannerService
 from solar_model.runtime.planning_worker import PlanningWorker
 from solar_model.runtime.processes import OwnedProcess
@@ -36,6 +36,62 @@ def eventually(callback, seconds=30):
             return value
         sleep(.1)
     pytest.fail("Timed out waiting for process state")
+
+
+@pytest.mark.parametrize("previous, latest, frequency, expected", [
+    ("10:02:20", "10:04:59", 5., False),
+    ("10:02:20", "10:05:00", 5., True),
+    ("10:05:04", "10:09:59", 5., False),
+    ("10:05:04", "10:10:03", 5., True),
+    ("10:57:00", "11:00:00", 5., True),
+    ("10:02:20", "10:22:00", 5., True),
+    ("10:15:00", "10:59:59", 60., False),
+    ("10:15:00", "11:00:00", 60., True),
+])
+def test_planner_cadence_uses_clock_slots(monkeypatch, previous, latest, frequency, expected):
+    config = load_config()
+    config = replace(config, energy_plan=replace(config.energy_plan, plan_rerun_frequency_mins=frequency))
+    submitted = []
+    worker = SimpleNamespace(poll=lambda: None, running=False, submit=lambda *args: submitted.append(args))
+    service = PlannerService(config, worker=worker)
+    service.initialised = True
+    service.last_data_at = service.observed = datetime.fromisoformat(f"2026-11-15T{previous}+00:00")
+    service.last_settings = energy_plan_yaml(config.energy_plan)
+    reading = datetime.fromisoformat(f"2026-11-15T{latest}+00:00")
+    monkeypatch.setattr(service, "reload_settings", lambda: None)
+    monkeypatch.setattr(service, "publish_status", lambda **kwargs: None)
+    monkeypatch.setattr("solar_model.runtime.planner.latest_full_update", lambda path: reading)
+    service.step()
+    assert bool(submitted) is expected
+    assert service.observed == reading
+    # Polling the same committed reading never queues a second calculation.
+    service.step()
+    assert len(submitted) == int(expected)
+
+
+def test_planner_startup_and_settings_change_wait_for_fresh_reading(monkeypatch):
+    config = load_config()
+    submitted = []
+    worker = SimpleNamespace(poll=lambda: None, running=False, submit=lambda *args: submitted.append(args))
+    service = PlannerService(config, worker=worker)
+    reading = datetime(2026, 11, 15, 10, 2, tzinfo=timezone.utc)
+    monkeypatch.setattr(service, "reload_settings", lambda: None)
+    monkeypatch.setattr(service, "publish_status", lambda **kwargs: None)
+    monkeypatch.setattr("solar_model.runtime.planner.latest_full_update", lambda path: reading)
+    monkeypatch.setattr("solar_model.runtime.planner.load_plan", lambda path: None)
+    service.step()
+    assert not submitted
+    reading += timedelta(seconds=1)
+    service.step()
+    assert len(submitted) == 1
+    service.last_data_at = reading
+    service.last_settings = energy_plan_yaml(config.energy_plan)
+    service.config = replace(config, energy_plan=replace(config.energy_plan, plan_rerun_frequency_mins=10.))
+    service.step()
+    assert len(submitted) == 1
+    reading += timedelta(seconds=1)
+    service.step()
+    assert len(submitted) == 2
 
 
 def test_spawned_worker_deadline_crash_and_recovery(tmp_path):

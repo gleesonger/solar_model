@@ -1,6 +1,6 @@
 # Plan model
 
-Markov dynamic programming is the only planning optimiser. It proposes a next battery-control action and produces projections; the application does not send battery-control commands. The headless planning service schedules recalculation from committed readings. The numerical model has no storage, network or UI dependency.
+Markov dynamic programming is the only planning optimiser. It proposes a next battery-control action and produces projections; the application does not send battery-control commands. The headless planning service schedules recalculation from committed readings in hour-aligned UTC slots, using the required `plan_rerun_frequency_mins` interval, which must divide evenly into 60 minutes. Startup and saved-settings refreshes use the next fresh reading; see [scheduling details](configuration.md). The numerical model has no storage, network or UI dependency.
 
 Sources: [planner preparation and physics](../../solar_model/planning/plan_optimisation_dynamic_programming.py), [Markov policy](../../solar_model/planning/markov.py), [transitions](../../solar_model/planning/markov_transitions.py), [service](../../solar_model/services/planning.py), and [implementation contract](../implementation/markov-dynamic-programming.md).
 

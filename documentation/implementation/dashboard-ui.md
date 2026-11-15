@@ -31,7 +31,7 @@ The dashboard uses an explicit per-browser root page, so startup stops the unuse
 
 `DashboardLayout` owns mutable `DashboardState` and `DashboardElements`. State tracks active tab, range/grouping/aggregation, and zoom. Elements holds references to NiceGUI labels/tables/charts plus applied live timestamp. Those references belong to a browser page, not the shared snapshot.
 
-`DashboardLayout.render_dashboard_layout()` adds a `.dashboard-commit` label to the navigation grid from `solar_model.build_info.GIT_COMMIT`: `Commit: ` followed by its first 7 characters, with the full value in a tooltip. Desktop uses the right column; mobile uses a second row spanning the grid, aligned right. Snapshot/live refreshes leave this process-level label intact. It is rendered with the navigation after the initial snapshot loads and remains visible during subsequent loading/stale states.
+`DashboardLayout.render_dashboard_layout()` adds a `.dashboard-commit` label to the navigation grid from `solar_model.build_info.GIT_COMMIT`: `Commit: ` followed by its first 7 characters, with the full value in a tooltip. Desktop uses the right column; the shared CSS hides the label with `display: none` below 768px, removing it from mobile grid layout. Snapshot/live refreshes leave this process-level label intact. It is rendered with the navigation after the initial snapshot loads and remains visible on desktop during subsequent loading/stale states.
 
 `AnalysisTab` is created with the layout, but charts are built lazily on first tab activation. Its local selected range persists in `DashboardState`; shared snapshot application updates only Recent/System Info. The unmounted Hourly tab and its unused UI state/element fields were removed.
 

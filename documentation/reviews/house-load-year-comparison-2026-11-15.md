@@ -64,6 +64,73 @@ Values are **average kWh consumed per 60 minutes within each clock-hour band**, 
 
 The strongest profile changes are lower usage at 06:00-11:00 and higher usage at 02:00-04:00 and 20:00-23:00. The largest hourly average in 2025 is 08:00-09:00 (1.761 kWh/hour); in 2026 it is 21:00-22:00 (1.885 kWh/hour). Timing patterns alone do not identify which appliances or controls caused the change.
 
+## Household usage valued at the latest configured tariff
+
+Added on 2026-11-15 using the latest effective-dated period in repository-root `config.yaml`: **Yuno Energy - EV Variable Smart**, effective **2026-09-12**. The same latest import schedule is applied to both years throughout the whole comparison, including dates before its effective date. This is a common-price comparison, not reconstruction of historical bills.
+
+| Local time, every day | Band | EUR/kWh |
+| --- | --- | ---: |
+| 00:00-02:00 | night | 0.2146 |
+| 02:00-06:00 | EV | 0.0859 |
+| 06:00-08:00 | night | 0.2146 |
+| 08:00-17:00 | day | 0.4047 |
+| 17:00-19:00 | peak | 0.4538 |
+| 19:00-23:00 | day | 0.4047 |
+| 23:00-24:00 | night | 0.2146 |
+
+The same 4,001 fully covered paired half-hours give the following hypothetical import costs if all household demand were supplied from the grid at its time of consumption:
+
+| Period | 2025 cost EUR | 2026 cost EUR | Change EUR | Change |
+| --- | ---: | ---: | ---: | ---: |
+| Aug 23-31 | 45.25 | 61.62 | +16.38 | +36.19% |
+| September | 200.50 | 212.45 | +11.95 | +5.96% |
+| October | 278.83 | 205.06 | -73.76 | -26.45% |
+| Nov 1-14 | 128.39 | 125.69 | -2.70 | -2.10% |
+| **Total** | **652.96** | **604.82** | **-48.14** | **-7.37%** |
+
+The repriced 2026 demand costs **EUR 48.14 less (-7.37%)**, despite energy being only 1.53% lower. The larger cost reduction reflects the changed time-of-day mix. In November, demand rises 14.15% while its repriced cost falls 2.10%.
+
+This values House Load at import prices, consistent with the model's No Solar Cost concept. It does not represent the actual 2026 grid bill or quantify PV/battery savings. Standing charges, export credits and other billing adjustments are excluded; rates are used exactly as configured without adding or removing VAT. No assumption about the configured rates' VAT treatment is made.
+
+### Hourly comparison in euros
+
+Average euros per 60 minutes within each clock-hour band, using the identical paired exposure as the energy comparison. Period totals by hour and half-hour calculations are also saved as CSVs.
+
+![Hourly household cost comparison](system-review-evidence/house-load-year-comparison-2026-11-15/hourly-cost.png)
+
+| Hour starting | EUR/kWh | 2025 EUR/hour | 2026 EUR/hour |
+| --- | ---: | ---: | ---: |
+| 00:00 | 0.2146 | 0.101 | 0.116 |
+| 01:00 | 0.2146 | 0.108 | 0.127 |
+| 02:00 | 0.0859 | 0.043 | 0.114 |
+| 03:00 | 0.0859 | 0.035 | 0.104 |
+| 04:00 | 0.0859 | 0.048 | 0.085 |
+| 05:00 | 0.0859 | 0.071 | 0.061 |
+| 06:00 | 0.2146 | 0.284 | 0.118 |
+| 07:00 | 0.2146 | 0.319 | 0.140 |
+| 08:00 | 0.4047 | 0.713 | 0.366 |
+| 09:00 | 0.4047 | 0.620 | 0.421 |
+| 10:00 | 0.4047 | 0.568 | 0.408 |
+| 11:00 | 0.4047 | 0.572 | 0.416 |
+| 12:00 | 0.4047 | 0.495 | 0.447 |
+| 13:00 | 0.4047 | 0.403 | 0.367 |
+| 14:00 | 0.4047 | 0.418 | 0.311 |
+| 15:00 | 0.4047 | 0.362 | 0.286 |
+| 16:00 | 0.4047 | 0.328 | 0.301 |
+| 17:00 | 0.4538 | 0.484 | 0.389 |
+| 18:00 | 0.4538 | 0.511 | 0.340 |
+| 19:00 | 0.4047 | 0.436 | 0.323 |
+| 20:00 | 0.4047 | 0.326 | 0.535 |
+| 21:00 | 0.4047 | 0.249 | 0.763 |
+| 22:00 | 0.4047 | 0.231 | 0.545 |
+| 23:00 | 0.2146 | 0.094 | 0.160 |
+
+Calculation: multiply each unrounded paired half-hour kWh value by the latest band rate at that interval's local start, then sum before rounding monetary totals. All tariff boundaries align to half-hours. The application's `TariffRule` and `tariff_rule` matcher select the band; the historical-date period selector is intentionally bypassed so both years use the latest period. Monthly, hourly and tariff-band costs reconcile to the same overall totals.
+
+Additional local evidence: `price_usage.py`, `cost-summary.json`, `half-hour-cost-comparison.csv`, `hourly-cost-comparison.csv`, `monthly-cost-comparison.csv`, `tariff-band-cost-comparison.csv`, `render_cost_chart.py`, and `hourly-cost.png` in the same evidence directory. Reproduce with `python documentation/reviews/system-review-evidence/house-load-year-comparison-2026-11-15/price_usage.py`; this reads the existing comparison CSV and configuration, without opening the database.
+
+Configuration SHA-256 for this pricing: `43dd789c404b58e761d03e2ed2e130bc694b00ddfc57d75bd0ba1bd44eb39cc7`.
+
 ## Measurement and verification
 
 - The 2025 source is the supplied `HDF_calckWh_10306341332_15-11-2026.csv`; use its explicitly labelled import kWh directly. End-labelled half-hours are converted to start times before matching, preserving both DST folds. The source hash is recorded in the [grid-meter comparison](provider-meter-comparison-2026-11-15.md).

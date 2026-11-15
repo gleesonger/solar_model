@@ -8,7 +8,7 @@ Source: [solar_model/dashboard/app.py](../../solar_model/dashboard/app.py), [sol
 
 The favicon is the amber sun/panel in `solar_model/dashboard/assets/solar_power.svg`. Startup passes the source-relative file path to NiceGUI, which serves the SVG at `/favicon.ico` and references that URL in the page's icon link. The asset must be valid SVG; restart and reload after deployment. Browsers may cache the fixed icon URL.
 
-The top navigation banner shows `Commit: <first 7 characters>` in grey on the right, with the full build hash in a tooltip (`unknown` for unstamped builds). On mobile it occupies a second right-aligned line beneath the tabs.
+The top navigation banner shows `Commit: <first 7 characters>` in grey on the right, with the full build hash in a tooltip (`unknown` for unstamped builds). Below 768px the commit label is hidden so it does not add a row beneath the mobile tabs.
 
 ## Current tabs
 

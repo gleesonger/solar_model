@@ -179,8 +179,7 @@ def render_dashboard_styles() -> None:
                 display: none;
             }
             .dashboard-commit {
-                grid-column: 1 / -1;
-                grid-row: 2;
+                display: none;
             }
             .solar-tabs {
                 min-width: 0;

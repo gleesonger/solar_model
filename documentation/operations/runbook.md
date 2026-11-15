@@ -21,7 +21,9 @@ After deploying/restarting the dashboard, open its normal HTTPS root URL in Chro
 
 The reverse proxy must pass `/manifest.webmanifest`, `/solar-app-192.png` and `/solar-app-512.png` through to the dashboard alongside `/` and NiceGUI's existing routes. The manifest must return JSON with MIME type `application/manifest+json`, rather than a proxy login/error page. Start URL and scope cover the root of that same origin; redirects to another origin can cause Chrome to show browser controls. Installation does not enable offline readings or cache the live dashboard.
 
-Desktop Chromium checks verify manifest discovery/parsing and icon responses at desktop/mobile viewport sizes. Actual Android installation and toolbar removal still need checking on the phone after deployment; viewport emulation cannot verify Android's installed-app shell.
+The manifest link explicitly uses `crossorigin="use-credentials"` so cookie-protected deployments such as Cloudflare Access receive the existing login cookie when Chrome fetches the manifest. Without this attribute, Chrome can receive the proxy's login HTML instead of manifest JSON even while the dashboard itself is logged in. Keep the manifest and dashboard on the same origin and sign in normally before installing; the fix does not require removing access protection.
+
+`tests/browser/test_web_app.py` uses full Chrome/Chromium with temporary profiles to check manifest discovery, installability diagnostics and icon delivery at desktop/mobile viewport sizes, then actually installs from the loaded manifest, launches the app and uninstalls it. Both public and cookie-protected synthetic deployments are covered. Run with `python -m pytest -q tests/browser/test_web_app.py`; full Playwright Chromium or installed Chrome is required (the smaller headless shell lacks PWA installation commands). Actual Android installation and toolbar removal still need checking on the phone after deployment; these headless desktop checks do not verify Android's installed-app shell or WebAPK service.
 
 ## Docker
 

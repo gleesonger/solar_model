@@ -6,7 +6,7 @@ from solar_model.paths import package_path
 
 
 INSTALL_HEAD_HTML = '''
-<link rel="manifest" href="/manifest.webmanifest">
+<link rel="manifest" href="/manifest.webmanifest" crossorigin="use-credentials">
 <meta name="theme-color" content="#ffffff">
 <meta name="mobile-web-app-capable" content="yes">
 '''

@@ -1,11 +1,12 @@
-"""Browser manifest discovery and install assets, without devices or a database."""
+"""Actual desktop install/launch lifecycle, without devices or a database."""
 import json
+from http.cookiejar import CookieJar
 from pathlib import Path
 import socket
 import struct
 import sys
 import time
-from urllib.request import urlopen
+from urllib.request import HTTPCookieProcessor, build_opener
 
 import pytest
 
@@ -14,7 +15,9 @@ from solar_model.runtime.processes import OwnedProcess
 playwright = pytest.importorskip("playwright.sync_api")
 
 
-def test_chrome_discovers_standalone_manifest_and_install_icons(tmp_path):
+@pytest.mark.parametrize("browser_channel", ["chromium", "chrome"])
+@pytest.mark.parametrize("requires_login", [False, True])
+def test_chrome_installs_and_launches_app(tmp_path, browser_channel, requires_login):
     repo = Path(__file__).resolve().parents[2]
     with socket.socket() as sock:
         sock.bind(("127.0.0.1", 0))
@@ -23,11 +26,27 @@ def test_chrome_discovers_standalone_manifest_and_install_icons(tmp_path):
     script.write_text(f'''
 import sys
 sys.path.insert(0, {str(repo)!r})
-from nicegui import ui
+from fastapi import Request
+from fastapi.responses import HTMLResponse, RedirectResponse
+from nicegui import app, ui
 from solar_model.dashboard.web_app import INSTALL_HEAD_HTML, register_installation_assets
 from solar_model.paths import package_path
 
 register_installation_assets()
+
+@app.middleware('http')
+async def cookie_protected_assets(request: Request, call_next):
+    protected = request.url.path == '/manifest.webmanifest' or request.url.path.startswith('/solar-app-')
+    if {requires_login!r} and protected and request.cookies.get('install_session') != 'test':
+        return RedirectResponse('/login')
+    response = await call_next(request)
+    if request.url.path == '/':
+        response.set_cookie('install_session', 'test', httponly=True)
+    return response
+
+@app.get('/login')
+def login():
+    return HTMLResponse('<html><body>Login required</body></html>')
 
 @ui.page('/')
 def page():
@@ -38,11 +57,14 @@ ui.run(host='127.0.0.1', port={port}, title='Solar dashboard', favicon=package_p
 ''', encoding="utf-8")
     server = OwnedProcess([sys.executable, str(script)])
     base = f"http://127.0.0.1:{port}"
+    client = build_opener(HTTPCookieProcessor(CookieJar()))
     try:
         deadline = time.monotonic() + 20
         while time.monotonic() < deadline:
             try:
-                with urlopen(base + "/manifest.webmanifest", timeout=1) as response:
+                with client.open(base + "/", timeout=1):
+                    pass
+                with client.open(base + "/manifest.webmanifest", timeout=1) as response:
                     assert response.headers.get_content_type() == "application/manifest+json"
                     assert response.headers["Cache-Control"] == "no-cache"
                     manifest = json.load(response)
@@ -57,7 +79,7 @@ ui.run(host='127.0.0.1', port={port}, title='Solar dashboard', favicon=package_p
         assert manifest["display"] == "standalone"
         assert manifest["id"] == manifest["start_url"] == manifest["scope"] == "/"
         for icon in manifest["icons"]:
-            with urlopen(base + icon["src"], timeout=2) as response:
+            with client.open(base + icon["src"], timeout=2) as response:
                 assert response.headers.get_content_type() == "image/png"
                 image = response.read()
             assert image[:8] == b"\x89PNG\r\n\x1a\n"
@@ -67,15 +89,13 @@ ui.run(host='127.0.0.1', port={port}, title='Solar dashboard', favicon=package_p
 
         with playwright.sync_playwright() as driver:
             try:
-                browser = driver.chromium.launch(headless=True)
+                browser = driver.chromium.launch_persistent_context(str(tmp_path / "browser-profile"), channel=browser_channel, headless=True)
             except playwright.Error:
-                try:
-                    browser = driver.chromium.launch(channel="msedge", headless=True)
-                except playwright.Error:
-                    pytest.skip("No Chromium browser installed")
+                pytest.skip(f"No full {browser_channel} browser installed")
             try:
                 for viewport in ({"width": 1440, "height": 1000}, {"width": 390, "height": 844}):
-                    page = browser.new_page(viewport=viewport)
+                    page = browser.new_page()
+                    page.set_viewport_size(viewport)
                     page.goto(base)
                     assert page.locator('link[rel="manifest"]').get_attribute("href") == "/manifest.webmanifest"
                     assert page.locator('meta[name="theme-color"]').get_attribute("content") == "#ffffff"
@@ -83,7 +103,25 @@ ui.run(host='127.0.0.1', port={port}, title='Solar dashboard', favicon=package_p
                     installed_manifest = session.send("Page.getAppManifest")
                     assert installed_manifest["errors"] == []
                     assert json.loads(installed_manifest["data"]) == manifest
-                    page.close()
+                    diagnostics = session.send("Page.getInstallabilityErrors")
+                    assert diagnostics["installabilityErrors"] == [], diagnostics
+                # Install from the loaded page's manifest, not synthesized URL metadata.
+                protocol = session
+                identity = base + "/"
+                installed = False
+                try:
+                    protocol.send("PWA.install", {"manifestId": identity})
+                    installed = True
+                    protocol.send("PWA.getOsAppState", {"manifestId": identity})
+                    with browser.expect_page() as launched:
+                        protocol.send("PWA.launch", {"manifestId": identity})
+                    app_page = launched.value
+                    app_page.wait_for_load_state()
+                    assert app_page.url == identity
+                    app_page.get_by_text("Install test dashboard", exact=True).wait_for()
+                finally:
+                    if installed:
+                        protocol.send("PWA.uninstall", {"manifestId": identity})
             finally:
                 browser.close()
     finally:

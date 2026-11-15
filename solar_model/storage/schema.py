@@ -10,7 +10,7 @@ from sqlalchemy.sql.elements import ColumnElement
 from sqlalchemy.types import TypeDecorator
 
 def column_name(metric: str, unit: str) -> str:
-    suffix = {"%": "percent", "kWh": "kwh", "kW": "kw", "V": "volts", "A": "amps", "Hz": "hz"}.get(unit, unit)
+    suffix = {"%": "percent", "kWh": "kwh", "kW": "kw", "V": "volts", "A": "amps", "Hz": "hz", "C": "c"}.get(unit, unit)
     metric = re.sub(r"[^a-zA-Z0-9_]", "_", metric).lower()
     return metric if metric.endswith(f"_{suffix}") else f"{metric}_{suffix}"
 
@@ -110,6 +110,8 @@ class SigenStorModbusSample(Base):
 
     inverter_power_kw: Mapped[float | None] = mapped_column(Float)
     inverter_battery_avg_cell_voltage_volts: Mapped[float | None] = mapped_column(Float)
+    inverter_battery_avg_cell_temperature_c: Mapped[float | None] = mapped_column(Float)
+    inverter_internal_temperature_c: Mapped[float | None] = mapped_column(Float)
     inverter_battery_charge_daily_kwh: Mapped[float | None] = mapped_column(Float)
     inverter_battery_charge_daily_kwh_period: Mapped[float | None] = mapped_column(Float)
     inverter_battery_discharge_daily_kwh: Mapped[float | None] = mapped_column(Float)

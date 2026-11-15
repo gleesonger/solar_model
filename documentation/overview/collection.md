@@ -22,13 +22,16 @@ Source: [solar_model/runtime/collector.py](../../solar_model/runtime/collector.p
 
 - Definitions include metric, raw address, kind, unit, data type, words, scale, cumulative flag, optional device ID/name.
 - Definitions are grouped by device and register kind into spans of at most 120 registers. Spans may include unused gaps.
+- Definitions marked `optional: true` get individual blocks outside required grouping. Persisted collection skips a failed optional diagnostic read and retains successful required readings; required reads still fail the interval. Existing required spans can already contain diagnostic addresses in their gaps.
 - `holding` uses holding-register reads; other kinds use input-register reads. Addresses are passed directly to pymodbus.
 - Words decode in big-endian order; signed types use two's complement. Numeric result is divided by map `scale`; strings decode UTF-8 through the first NUL.
 - The client tries the `device_id` argument, with a `slave` fallback for API compatibility.
-- An error or short response rejects the electrical interval. The connection is closed and retried next cycle.
-- Metadata failure retains an already saved electrical row. Empty/zero/non-finite metadata is discarded (zero is valid for the grid import limit); valid changed values append history. Known inverter models add maximum PV input power from [solar_model/integrations/sigenstor/datasheets.py](../../solar_model/integrations/sigenstor/datasheets.py).
+- An error or short response in required electrical reads rejects the interval. The connection is closed and retried next cycle.
+- Metadata failure retains an already saved electrical row. Empty/non-finite metadata is discarded. Zero is retained for the grid import limit, EMS work mode, inverter output/running state and plant alarms 1–6; other zero metadata retains its previous rejection behavior. Valid changed values append history. Known inverter models add maximum PV input power from [solar_model/integrations/sigenstor/datasheets.py](../../solar_model/integrations/sigenstor/datasheets.py).
 
 The device map also reads holding register **40040** on plant device **247**: Grid maximum import limitation (`grid_max_import_power_kw`), U32 over two words, divided by 1000 into kW. This is the grid-connection import cap, requires a grid sensor and applies across EMS modes per V2.9. Changes, including zero, enter device history and appear in System information. Installed-firmware response still requires verification.
+
+Additional collection includes three operating/status codes and six plant alarm words as device change history, and battery-average-cell/inverter-internal temperatures as nullable °C telemetry. See the [diagnostics contract](../implementation/sigenstor-diagnostics.md) for addresses, display semantics, excluded overlaps and live probe evidence. These observations do not change planning limits or send control commands.
 
 ## Forecast collection
 

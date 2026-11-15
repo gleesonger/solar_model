@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 
 from solar_model.logging_setup import LOGGER, heavy_work
 from solar_model.config import SolarArrayConfig
+from solar_model.integrations.sigenstor.metadata import device_display_value
 from solar_model.storage.schema import (
     HOURLY_VALID_COUNT_COLUMNS,
     ForecastSolarSample,
@@ -532,6 +533,8 @@ EXPORT_FIELD_LABELS = {
     "no_solar_battery_import_cost_period": "Net Cost if No Solar",
     "import_rate": "Import Rate",
     "export_rate": "Export Rate",
+    "inverter_battery_avg_cell_temperature_c": "Battery Average Cell Temperature (°C)",
+    "inverter_internal_temperature_c": "Inverter Internal Temperature (°C)",
 }
 
 
@@ -1690,7 +1693,7 @@ def load_device_information(database_path: str) -> list[dict[str, str]]:
     for row in rows:
         latest_by_variable.setdefault(row.variable, row)
     return [
-        {"variable": row.variable, "value": row.value, "unit": row.unit}
+        {"variable": row.variable, "value": device_display_value(row.variable, row.value), "unit": row.unit}
         for row in sorted(latest_by_variable.values(), key=lambda item: item.variable.casefold())
     ]
 

@@ -69,6 +69,8 @@ The block's `registers` contains only definitions to decode, not every address i
 
 ## 3. Wire data to decoded readings
 
+`Register.optional` defaults to false for existing definitions. Explicitly optional diagnostic definitions are emitted as individual blocks without entering required grouping. `_read_collection_registers()` reads required blocks first and then attempts each optional block separately; an optional error/short response/exception is logged and omitted. `read_registers()` itself remains strict, including when called directly on optional blocks. Required span boundaries stay unchanged; existing gaps may already contain optional addresses. Persisted collection uses the helper for both electrical and metadata reads. Live dashboard polling retains its existing filtered metrics and strict read path. See [diagnostics](sigenstor-diagnostics.md) for the current field list.
+
 `read_block()` selects holding-register reads for `kind == 'holding'`, otherwise input-register reads, and passes addresses unchanged. It first calls with `device_id`, then retries with `slave` if the library rejects that keyword.
 
 The relevant pymodbus result interface is `isError()` and `registers: list[int]`. Individual words are unsigned 16-bit integers; definitions determine whether the assembled value is signed. An error or short slice fails the entire `read_registers()` call.

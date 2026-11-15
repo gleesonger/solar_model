@@ -115,7 +115,7 @@ The shared snapshot calls `load_recent_energy_summaries()`: two minimum-timestam
 
 `load_lifetime_start_date()` continues to read minimum raw electrical/forecast collection timestamps and converts them to the configured timezone. The combined query covers the union of daily, monthly and lifetime date ranges. Current-day Live/Today reads remain a separate loader and are not part of this single-statement guarantee. See [performance measurements](../reviews/performance.md) and [regression tests](../../tests/dashboard/test_recent_summary_sql.py).
 
-`load_device_information()` reads device history descending ID, keeps the newest row per human `variable`, sorts labels case-insensitively, and returns `{variable,value,unit}` strings. It is not a historical as-of selector.
+`load_device_information()` reads device history descending ID, keeps the newest row per human `variable`, sorts labels case-insensitively, and returns `{variable,value,unit}` strings. `device_display_value()` adds protocol labels to known EMS/output/running codes and formats plant alarms 1–6 as hexadecimal (`0x0000 (none)` when clear); unknown status codes remain visible unchanged. Storage and planning continue to read original numeric text. It is not a historical as-of selector; an unavailable optional read leaves the last successful metadata visible.
 
 ## 4. Analysis request and bounds contracts
 

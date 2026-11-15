@@ -65,6 +65,8 @@ save_modbus_sample(values, previous, collected, tariffs)
 
 `column_name()` cleans names and appends a unit suffix if absent: `% -> percent`, `V -> volts`, `A -> amps`, and kW/kWh/Hz to lower-case suffixes. For example, decoded `plant_battery_soc` becomes `plant_battery_soc_percent`. Undefined electrical metrics are rejected against the declared model; register-map changes alone cannot extend storage.
 
+`C -> c` maps the optional battery-average-cell and inverter-internal temperatures to `inverter_battery_avg_cell_temperature_c` and `inverter_internal_temperature_c`. They are nullable instantaneous °C levels, with scaled integer storage, hourly sums/valid counts and average full-data exports. Failed optional reads leave the current row null, including when an earlier row had a valid temperature; they never reuse an old temperature or substitute zero. Adding their raw/hourly columns does not backfill historical values or bump the rollup readiness marker.
+
 Synthetic input state and resulting physical-unit row:
 
 ```python
@@ -183,7 +185,7 @@ save_device_info(readings, collected, variable_names)
   append only changed value/unit pairs
 ```
 
-Typical ORM row: `{id, collected_at_utc, collected_at_local, variable_name, variable, value, unit}`. `variable_name` is a stable identifier used by planning; `variable` is a human label. Empty strings, text `"0"`, numeric zero, and non-finite numeric values are not saved, except that zero is valid and preserved for `Grid maximum import limitation` (`grid_max_import_power_kw`). That setting is stored as physical kW text in the existing device table; no measurement column, rollup or schema migration is needed. Changes append history; identical consecutive readings do not append rows. This history is not a complete metadata snapshot at every electrical timestamp.
+Typical ORM row: `{id, collected_at_utc, collected_at_local, variable_name, variable, value, unit}`. `variable_name` is a stable identifier used by planning; `variable` is a human label. Empty strings and non-finite numeric values are not saved. Text/numeric zero is preserved for `Grid maximum import limitation`, EMS work mode, inverter output/running states and plant alarms 1–6; it remains rejected for other device variables. The explicit zero-valid metric set lives in `integrations/sigenstor/metadata.py`. These values use the existing text-valued device table, without measurement columns or rollups. Changes append history; identical consecutive readings do not append rows. Statuses and alarms stay numeric text in storage; labels/hexadecimal formatting apply only in the System Info query. This history is not a complete metadata snapshot at every electrical timestamp and does not assert freshness after an optional failure.
 
 ## 6. Retrieval contracts and consumers
 

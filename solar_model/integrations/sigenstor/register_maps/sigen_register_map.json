@@ -31,5 +31,7 @@
   { "metric": "inverter_phase_c_voltage"            , "address": 31015, "kind": "input", "unit": "V"  , "data_type": "u32", "scale": 100 , "cumulative": false, "words": 2, "device_id": 1 },
   { "metric": "inverter_phase_a_current"            , "address": 31017, "kind": "input", "unit": "A"  , "data_type": "s32", "scale": 100 , "cumulative": false, "words": 2, "device_id": 1 },
   { "metric": "inverter_phase_b_current"            , "address": 31019, "kind": "input", "unit": "A"  , "data_type": "s32", "scale": 100 , "cumulative": false, "words": 2, "device_id": 1 },
-  { "metric": "inverter_phase_c_current"            , "address": 31021, "kind": "input", "unit": "A"  , "data_type": "s32", "scale": 100 , "cumulative": false, "words": 2, "device_id": 1 }
+  { "metric": "inverter_phase_c_current"            , "address": 31021, "kind": "input", "unit": "A"  , "data_type": "s32", "scale": 100 , "cumulative": false, "words": 2, "device_id": 1 },
+  { "metric": "inverter_battery_avg_cell_temperature", "address": 30603, "kind": "input", "unit": "C"  , "data_type": "s16", "scale": 10  , "cumulative": false, "words": 1, "device_id": 1, "optional": true },
+  { "metric": "inverter_internal_temperature"       , "address": 31003, "kind": "input", "unit": "C"  , "data_type": "s16", "scale": 10  , "cumulative": false, "words": 1, "device_id": 1, "optional": true }
 ]

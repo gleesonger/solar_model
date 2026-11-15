@@ -18,6 +18,7 @@ class Register:
     words: int = 1
     device_id: int | None = None
     variable_name: str | None = None
+    optional: bool = False
 
 @dataclass(frozen=True)
 class RegisterBlock:
@@ -57,13 +58,17 @@ def load_registers(
 
 def group_registers(registers: list[Register]) -> list[RegisterBlock]:
     by_device_and_kind: dict[tuple[int, str], list[Register]] = {}
+    blocks: list[RegisterBlock] = []
     for register in registers:
         if register.device_id is None:
             raise ValueError(f"register {register.metric} has no device_id")
         device_id = register.device_id
+        if register.optional:
+            # Keep diagnostics out of required spans and isolate unsupported reads.
+            blocks.append(RegisterBlock(device_id, register.kind, register.address, register.words, (register,)))
+            continue
         by_device_and_kind.setdefault((device_id, register.kind), []).append(register)
 
-    blocks: list[RegisterBlock] = []
     for (device_id, kind), definitions in by_device_and_kind.items():
         current: list[Register] = []
         current_end = -1

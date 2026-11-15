@@ -40,6 +40,7 @@ For a consolidated comparison of units, signs, missing values, time attribution 
 - Hourly grid import/export power stores separate sign magnitudes and a valid grid observation count, preserving activity even when net power is zero. These are distinct from cumulative meter energy.
 - Hourly cumulative meters use maxima; other numeric fields use sums. Means divide by each field's non-null count (`<field>_sample_count`; grid uses `grid_power_sample_count`). Zeros count as observations; summed power is not an hourly power reading.
 - Missing measurements remain nullable. Some display paths substitute zeros; this must not be mistaken for observed zero generation.
+- Optional inverter-internal and battery-average-cell temperatures are nullable °C telemetry, with the same scaled raw/hourly storage and valid-count means as other levels. Device change history separately retains zero-valued status/alarm transitions. See [diagnostic fields](../implementation/sigenstor-diagnostics.md).
 - Daily load forecasts store one profile per local date, with UTC hourly targets and a separate generation timestamp. Live collection keeps that profile fixed across runs/restarts; an explicit Control backfill atomically replaces selected historical profiles. Missing history stays null; migration itself does not backfill historical profiles.
 - Raw and adjusted forecast fields stay separate. Adjusted writers accept only `_adj_` fields; raw collection can update its own panel fields at the same composite key.
 

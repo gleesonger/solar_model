@@ -21,7 +21,7 @@ def collect_once(
     device_registers: list[RegisterBlock] | None = None,
 ) -> bool:
     try:
-        readings = read_registers(client, registers)
+        readings = _read_collection_registers(client, registers)
         values: dict[str, tuple[float, str, bool]] = {}
         for metric, (value, unit, cumulative) in readings.items():
             if isinstance(value, str):
@@ -44,7 +44,7 @@ def collect_once(
         if device_registers is not None:
             try:
                 changed = database.save_device_info(
-                    read_registers(client, device_registers),
+                    _read_collection_registers(client, device_registers),
                     collected,
                     variable_names={
                         register.metric: register.variable_name
@@ -61,3 +61,16 @@ def collect_once(
     except Exception:
         LOGGER.info("Modbus interval failed; interval skipped")
         return False
+
+
+def _read_collection_registers(client: ModbusTcpClient, blocks: list[RegisterBlock]) -> dict[str, tuple[float | str, str, bool]]:
+    required = [block for block in blocks if not all(register.optional for register in block.registers)]
+    readings = read_registers(client, required)
+    for block in blocks:
+        if not all(register.optional for register in block.registers):
+            continue
+        try:
+            readings.update(read_registers(client, [block]))
+        except Exception:
+            LOGGER.info("Optional Modbus diagnostic unavailable: device=%s %s:%s", block.device_id, block.kind, block.address)
+    return readings

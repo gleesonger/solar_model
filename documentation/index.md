@@ -72,6 +72,8 @@ Keep concise explanations in `overview/`, detailed code/data contracts in `imple
 | [DP v1 verification](reviews/dp-v1-recheck.md) | Restored nine-scenario planner: shared first-command audit, fresh configured-grid MILP comparisons and performance; links to the earlier experiment |
 | [DP Numba performance](reviews/dp-numba-performance.md) | Shared Python/Numba numerical core: equivalent configured outcomes and repeated runtime comparison excluding initialisation/compilation |
 | [Sigenergy register review](reviews/sigenergy-home-assistant-register-review.md) | Load boundaries, electrical residuals and diagnostic priorities |
+| [Provider meter comparison, 2026-11-15](reviews/provider-meter-comparison-2026-11-15.md) | Read-only HDF comparison: matched grid import/export, interval alignment, gaps and monthly differences |
+| [Household usage comparison, 2026-11-15](reviews/house-load-year-comparison-2026-11-15.md) | Pre-system 2025 provider consumption versus 2026 House Load: matched-date totals and hourly usage |
 | [Schema reference](reference/schema.md) | Every declared database column, key, type, and index |
 | [Metric semantics](reference/metric-semantics.md) | Units, signs, missing values, time attribution and chart/download aggregation differences |
 

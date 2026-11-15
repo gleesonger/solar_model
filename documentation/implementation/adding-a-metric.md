@@ -2,6 +2,8 @@
 
 This is an implementation recipe, **not an existing feature**. Example contract: `inverter_temperature_c`, physical °C, instantaneous level, nullable, averaged over valid readings. Obtain the address, device ID, signedness, word count, divisor and invalid-value rules from the actual device specification; this guide supplies no register address.
 
+The generic example name remains illustrative. Implemented battery-average-cell and inverter-internal temperature fields, their verified addresses and optional failure behavior are documented in [SigenStor diagnostics](sigenstor-diagnostics.md).
+
 ## 1. Decode and persist
 
 1. In [solar_model/integrations/sigenstor/register_maps/sigen_register_map.json](../../solar_model/integrations/sigenstor/register_maps/sigen_register_map.json), add the verified register with `metric: inverter_temperature`, normalised `unit: C`, and `cumulative: false`. `column_name()` maps that pair to `inverter_temperature_c`. A temperature is not a cumulative counter and needs no `_period` field.
@@ -12,7 +14,7 @@ This is an implementation recipe, **not an existing feature**. Example contract:
    ```
 
    This file's `Float` aliases `ScaledInteger`: write physical 25.5, store integer 255000. Do not pre-scale decoded values. A register definition alone fails persistence because undeclared metrics are rejected.
-3. Follow `read_registers → collect_once → save_modbus_sample → _add_hourly_sample`. Handle device sentinel values deliberately before persistence; do not treat a failed read or missing temperature as zero. Existing electrical read failures reject the whole interval.
+3. Follow `read_registers → collect_once → save_modbus_sample → _add_hourly_sample`. Handle device sentinel values deliberately before persistence; do not treat a failed read or missing temperature as zero. Required electrical read failures reject the whole interval. Optional diagnostics use separate blocks and the collector helper omits a failed read without rejecting required readings.
 
 ## 2. Hourly statistics and existing databases
 

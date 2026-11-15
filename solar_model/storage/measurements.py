@@ -10,6 +10,7 @@ from sqlalchemy.engine import Connection, CursorResult
 from sqlalchemy.orm import Session
 from solar_model.config import TariffsConfig
 from solar_model.integrations.sigenstor.datasheets import SIGENSTOR_MODEL_SPECIFICATIONS
+from solar_model.integrations.sigenstor.metadata import ZERO_VALID_DEVICE_METRICS
 from solar_model.tariffs import economic_period_values
 from solar_model.logging_setup import LOGGER, heavy_work
 
@@ -293,7 +294,7 @@ class MeasurementStorage:
         valid_values = {
             variable: (value_text, unit)
             for variable, (value, unit, _) in values_to_save.items()
-            if (value_text := device_value_text(value, allow_zero=variable == "Grid maximum import limitation")) is not None
+            if (value_text := device_value_text(value, allow_zero=variable in ZERO_VALID_DEVICE_METRICS)) is not None
         }
         if not valid_values:
             return 0

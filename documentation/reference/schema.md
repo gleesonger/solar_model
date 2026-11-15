@@ -70,6 +70,8 @@ Primary key: `collected_at_utc`.
 | `plant_battery_discharge_total_kwh_period` | `INTEGER` | scaled number | yes |
 | `inverter_power_kw` | `INTEGER` | scaled number | yes |
 | `inverter_battery_avg_cell_voltage_volts` | `INTEGER` | scaled number | yes |
+| `inverter_battery_avg_cell_temperature_c` | `INTEGER` | scaled number, °C | yes |
+| `inverter_internal_temperature_c` | `INTEGER` | scaled number, °C | yes |
 | `inverter_battery_charge_daily_kwh` | `INTEGER` | scaled number | yes |
 | `inverter_battery_charge_daily_kwh_period` | `INTEGER` | scaled number | yes |
 | `inverter_battery_discharge_daily_kwh` | `INTEGER` | scaled number | yes |
@@ -119,6 +121,8 @@ Primary key: `hour_start_utc`, `import_tariff_band`.
 | `export_rate_sample_count` | `INTEGER` | integer (non-null field readings) | yes |
 | `inverter_power_kw_sample_count` | `INTEGER` | integer (non-null field readings) | yes |
 | `inverter_battery_avg_cell_voltage_volts_sample_count` | `INTEGER` | integer (non-null field readings) | yes |
+| `inverter_battery_avg_cell_temperature_c_sample_count` | `INTEGER` | integer (non-null field readings) | yes |
+| `inverter_internal_temperature_c_sample_count` | `INTEGER` | integer (non-null field readings) | yes |
 | `inverter_pv1_voltage_volts_sample_count` | `INTEGER` | integer (non-null field readings) | yes |
 | `inverter_pv1_current_amps_sample_count` | `INTEGER` | integer (non-null field readings) | yes |
 | `inverter_pv2_voltage_volts_sample_count` | `INTEGER` | integer (non-null field readings) | yes |
@@ -168,6 +172,8 @@ Primary key: `hour_start_utc`, `import_tariff_band`.
 | `plant_battery_discharge_total_kwh_period` | `INTEGER` | scaled number | yes |
 | `inverter_power_kw` | `INTEGER` | scaled number | yes |
 | `inverter_battery_avg_cell_voltage_volts` | `INTEGER` | scaled number | yes |
+| `inverter_battery_avg_cell_temperature_c` | `INTEGER` | scaled number, °C sum | yes |
+| `inverter_internal_temperature_c` | `INTEGER` | scaled number, °C sum | yes |
 | `inverter_battery_charge_daily_kwh` | `INTEGER` | scaled number | yes |
 | `inverter_battery_charge_daily_kwh_period` | `INTEGER` | scaled number | yes |
 | `inverter_battery_discharge_daily_kwh` | `INTEGER` | scaled number | yes |

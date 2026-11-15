@@ -30,3 +30,5 @@ The [vendor protocol](../reference/Sigenergy%20Modbus%20Protocol%20EN_V2.9.pdf) 
 5. Future control needs fresh serialized readback, ownership and handover policy. Readback alone does not verify physical behavior; this application remains report-only.
 
 Exact loss allocation, calibration and firmware behavior remain unverified. See [open findings](findings.md).
+
+The [2026-11-15 provider-meter comparison](provider-meter-comparison-2026-11-15.md) independently checks stored grid import/export against the supplied half-hour HDF: +0.0461% import and -0.0148% export over 3,906 matched intervals. This supports grid-energy accounting for that history; it does not resolve household-load boundaries or conversion-loss allocation.

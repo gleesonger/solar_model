@@ -17,7 +17,7 @@ Plan detail column metadata lives in the insertion-ordered `PLAN_COLUMNS` dictio
 - **Recent:** Live/Today table; latest kW, daily meters, latest/BoD/raw forecast totals; past 7 days and past 12 months energy/economics.
 - **Analysis:** lazily loaded energy, power, battery, per-array and money charts; range/grouping/Sum–Average controls; custom chart builder and downloads.
 - **Plan:** latest or selected saved plan in one screen: today's date preloads today's snapshot choices while a blank Snapshot follows latest; selecting a saved snapshot pins its action, summaries, scenarios, chart and detail table. Private demonstrations and settings remain available.
-- **System Info:** newest valid metadata value per variable.
+- **System Info:** newest valid metadata value per variable. EMS work mode and inverter output/running states show numeric codes with protocol labels; plant alarm words show hexadecimal values (`0x0000 (none)` when clear). Raw numeric text remains unchanged in device history. Optional read failures retain the previous successful metadata rather than fabricating a cleared alarm.
 - **Control:** automatically saved holiday date ranges with an inclusive day count (a single entered date creates a one-day period), household-load forecast recalculation by selected months, confirmed tariff recalculation and managed restart actions.
 
 Scheduled planning is owned by the independent `runtime.planner` process. The dashboard creates a separate private demonstration process only when requested. It has no startup solver warm-up and cannot schedule shared plans.

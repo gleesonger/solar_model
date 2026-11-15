@@ -14,7 +14,7 @@ solar_model/
   services/collection.py, forecasting.py, planning.py
   integrations/
     forecast_solar.py
-    sigenstor/client.py, registers.py, datasheets.py, register_maps/
+    sigenstor/client.py, registers.py, metadata.py, datasheets.py, register_maps/
   storage/
     schema.py, connection.py, migrations.py, measurements.py, forecasts.py
     queries/planning.py, forecasting.py, dashboard.py, recent.py, analysis.py, exports.py, types.py

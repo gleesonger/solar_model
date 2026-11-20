@@ -1,6 +1,44 @@
 # Solar model collectors
 
+Solar Model is a standalone web app that runs in Docker. It collects Sigenergy solar, battery, and grid readings over Modbus TCP and displays live and historical energy data. It uses solar and household load forecasts and electricity tariffs to create a battery energy plan. The plan is currently advisory only.
+
 Start with the [project documentation](documentation/index.md) for architecture, code structure, storage, forecasting, planning, styling, and review findings. Future agents should also read [AGENTS.md](AGENTS.md).
+
+## Desktop screenshots
+
+### Plan
+This pic shows the plan (dashed line) as of a point in time. A snapshot can be selected to overlay how actuals compare to plan.
+[![Saved battery plan showing the next action and actual versus projected battery energy and grid import](documentation/screenshots/plan.png)](documentation/screenshots/plan.png)
+
+<details>
+<summary>Plan detail table</summary>
+
+[![Hourly plan detail with battery actions, tariffs, energy flows, state of charge and costs](documentation/screenshots/plan-detail.png)](documentation/screenshots/plan-detail.png)
+
+</details>
+
+### Recent table
+
+[![Recent tab with the Live and Today table and seven days of energy and cost summaries](documentation/screenshots/table.png)](documentation/screenshots/table.png)
+
+### Analysis
+
+[![Analysis tab with date controls and hourly solar, household load and grid energy](documentation/screenshots/analysis.png)](documentation/screenshots/analysis.png)
+
+<details>
+<summary>More Analysis Charts - Power, battery, solar array and tariff charts</summary>
+
+[![Minute-by-minute power across solar, house load, battery, inverter and grid](documentation/screenshots/analysis-power.png)](documentation/screenshots/analysis-power.png)
+
+[![Available battery energy and state of charge over the day](documentation/screenshots/analysis-battery.png)](documentation/screenshots/analysis-battery.png)
+
+[![Actual and forecast hourly solar generation by array](documentation/screenshots/analysis-solar-arrays.png)](documentation/screenshots/analysis-solar-arrays.png)
+
+[![Hourly energy costs split by tariff, with import and export rates](documentation/screenshots/analysis-costs.png)](documentation/screenshots/analysis-costs.png)
+
+</details>
+
+## Running the application
 
 The managed application launcher starts the minute-resolution electrical and forecast collector and dashboard:
 

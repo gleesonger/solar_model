@@ -37,6 +37,16 @@ docker run -p 8090:8090 -v solar-config:/config solar-model
 - `/config` holds persistent configuration/database; publish the actual configured dashboard port (shipped and exposed port: 8090).
 - The dashboard has no application authentication layer in the reviewed source; Control actions are available to clients that can reach it. Restrict access using deployment/network controls where needed.
 
+### Dashboard port
+
+Set `SOLAR_MODEL_PORT` in the container environment to choose its listening port before the first start. The shipped [Compose file](../../compose.yaml) passes the variable through and uses it on both sides of the port mapping. When unset or empty, Python uses `dashboard.port` in the mounted YAML and Compose publishes `8090:8090`. If the deployed YAML uses a different port, set the Compose mapping to match it or supply `SOLAR_MODEL_PORT`. Apply changes to the container environment or the port mapping with `docker compose up -d`.
+
+### Docker Compose file ownership
+
+Use the [Compose install](../../README.md#docker-compose) on a Linux Docker host. Create the bind mount and Numba cache directories as your regular user before starting Compose. Set `user` in [compose.yaml](../../compose.yaml) to the numeric UID and GID of that user. The example uses `1000:1000`. Check your IDs with `id -u` and `id -g` and update the example if they differ.
+
+When the service runs with the IDs of the host user who created the directory, that user can edit `./solar-model/config.yaml` and the service can write its SQLite database and Numba cache. Set ownership on the dedicated `./solar-model` directory and its contents before starting if you select a different identity or migrate an existing root-owned install. Stop the service and any other writers before adjusting ownership on an existing database directory.
+
 ### Build identity and media-server deployment
 
 The image accepts `GIT_COMMIT` as a build argument and stores it in both the environment variable and image label named `SOLAR_MODEL_GIT_COMMIT`. `solar_model.build_info.GIT_COMMIT` reads the environment once per process. The navigation banner shows its first 7 characters with the full value in a tooltip; the managed supervisor logs the full value at startup. Local runs and unstamped images show `unknown`. This is build metadata, outside YAML and the Plan settings editor; it needs no Git executable or repository inside the image. A local working tree with uncommitted edits is not fully described by its HEAD hash.

@@ -38,7 +38,42 @@ This pic shows the plan (dashed line) as of a point in time. A snapshot can be s
 
 </details>
 
-## Running the application
+## Install
+
+### Docker Compose
+
+Save [compose.yaml](compose.yaml) on your Linux Docker host. The service builds from the latest commit on `master` each time you rebuild.
+
+```yaml
+services:
+  solar-model:
+    build:
+      context: "https://github.com/gleesonger/solar_model.git#master"
+    user: "1000:1000"
+    environment:
+      NUMBA_CACHE_DIR: /config/.numba-cache
+      SOLAR_MODEL_PORT:
+    restart: unless-stopped
+    ports:
+      - "${SOLAR_MODEL_PORT:-8090}:${SOLAR_MODEL_PORT:-8090}"
+    volumes:
+      - ./solar-model:/config
+```
+
+The example uses UID and GID `1000:1000`. If `id -u` or `id -g` prints a different number on your host, update `user:` in `compose.yaml`. From the directory containing `compose.yaml`, create the data directory and start the service as your regular user.
+
+```sh
+mkdir -p ./solar-model/.numba-cache
+docker compose up -d --build
+```
+
+To run the dashboard on another port from the first start, set `SOLAR_MODEL_PORT=8091` in a `.env` file beside `compose.yaml`. This sets both the published port and the port the dashboard listens on. Use that port in the dashboard URL. Run `docker compose up -d` after changing it.
+
+If you already have root-owned files from a previous install, see [Docker file ownership](documentation/operations/runbook.md#docker-compose-file-ownership).
+
+The container creates `./solar-model/config.yaml` on first start and stores its SQLite database in the same directory. Set `actuals.modbus.host` to your Sigenergy system's IP address and configure your solar arrays and tariffs in that file. After editing, open [the dashboard](http://localhost:8090) and choose **Control → Restart application** to reload the configuration. If the dashboard is unavailable, run `docker compose restart solar-model`.
+
+### Run from source
 
 The managed application launcher starts the minute-resolution electrical and forecast collector and dashboard:
 
@@ -147,9 +182,9 @@ python main_dashboard.py
 
 For normal operation, use `python docker_start.py` above so that the Control tab can restart both this process and the data collector.
 
-It listens on `dashboard.port` from `config.yaml`. Live cells update in place at the configured live interval (shipped as one second) and remain blank until the first successful reading. Shared Recent/System Info data refreshes at the full interval; Analysis loads on demand and when its controls are applied. Mapped PV-string voltage/current readings provide proportions for allocating plant solar energy and power. The battery chart uses plant available-discharge telemetry; it does not derive available energy from state of charge. See [dashboard](documentation/overview/dashboard.md) and [styling](documentation/overview/styling.md).
+The dashboard listens on `SOLAR_MODEL_PORT` when set, otherwise it uses `dashboard.port` from `config.yaml`. Live cells update in place at the configured live interval (shipped as one second) and remain blank until the first successful reading. Shared Recent/System Info data refreshes at the full interval; Analysis loads on demand and when its controls are applied. Mapped PV-string voltage/current readings provide proportions for allocating plant solar energy and power. The battery chart uses plant available-discharge telemetry; it does not derive available energy from state of charge. See [dashboard](documentation/overview/dashboard.md) and [styling](documentation/overview/styling.md).
 
-The Docker image starts the minute collector and dashboard. Publish the configured dashboard port when running the container, for example `docker run -p 8090:8090 -v solar-config:/config solar-model`.
+The [Docker Compose install](#docker-compose) starts the collector, planner, and dashboard. Change the Compose port mapping if you change the configured dashboard port.
 
 The dashboard shows a persistent warning across all tabs when the browser is offline, the server connection stops updating, or the readings become stale. Returning to a suspended phone tab requires a fresh server heartbeat before the connection warning clears. NiceGUI reconnects automatically; a Reload button is also available. Live readings are marked stale after the greater of 15 seconds or three live polling intervals. Missing or stale readings wait for new data without repeatedly reloading the page. Reconnecting also reapplies the latest shared snapshot.
 
@@ -163,6 +198,6 @@ The as-of report command is `python -m solar_model.tools.plan_as_of --database s
 
 Scheduled plans are produced by `python -m solar_model.runtime.planner`, independently of the dashboard. The managed launcher starts it automatically. The Plan tab shows latest or selected saved snapshots using blank-by-default date/snapshot controls beside Plan settings.
 
-All configuration settings are required. Update deployed YAML from the complete `config.yaml` example when settings are added; missing values stop startup rather than selecting defaults. Nullable settings still require an explicit `null`.
+Use the complete `config.yaml` example when updating a deployment. Settings must be supplied explicitly, including `null` for nullable values. `SOLAR_MODEL_PORT` can supply `dashboard.port` at runtime.
 
 Energy planning uses Markov DP only. Optimiser settings are explicitly required in the flat `energy_plan.optimiser` block; old model selectors, nested solver blocks and refinement stages are rejected. See [configuration](documentation/overview/configuration.md#markov-optimiser) when updating a deployed YAML file.

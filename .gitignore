@@ -43,6 +43,8 @@ htmlcov/
 *.swo
 
 # Local configuration and databases
+/.env
+/solar-model/
 *.sqlite
 *.sqlite3
 *.db

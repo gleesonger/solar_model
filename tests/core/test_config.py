@@ -9,6 +9,42 @@ import yaml
 from solar_model.config import load_config
 
 
+@pytest.mark.parametrize("override", [None, "", "8091"])
+def test_dashboard_port_environment_precedence(monkeypatch, override):
+    if override is None:
+        monkeypatch.delenv("SOLAR_MODEL_PORT", raising=False)
+    else:
+        monkeypatch.setenv("SOLAR_MODEL_PORT", override)
+    shipped_port = yaml.safe_load(Path("config.yaml").read_text(encoding="utf-8"))["dashboard"]["port"]
+    assert load_config().dashboard.port == (int(override) if override else shipped_port)
+
+
+@pytest.mark.parametrize("override", ["invalid", "0", "65536"])
+def test_invalid_dashboard_port_environment_fails_validation(monkeypatch, override):
+    monkeypatch.setenv("SOLAR_MODEL_PORT", override)
+    with pytest.raises(ValueError, match=r"SOLAR_MODEL_PORT \(dashboard\.port\)"):
+        load_config()
+
+
+def test_environment_supplies_missing_dashboard_port_through_plan_save(tmp_path, monkeypatch):
+    from solar_model.config import energy_plan_yaml, save_energy_plan_yaml
+
+    raw = yaml.safe_load(Path("config.yaml").read_text(encoding="utf-8"))
+    del raw["dashboard"]["port"]
+    path = tmp_path / "config.yaml"
+    path.write_text(yaml.safe_dump(raw), encoding="utf-8")
+    monkeypatch.delenv("SOLAR_MODEL_PORT", raising=False)
+    with pytest.raises(ValueError, match=r"missing required configuration value: dashboard\.port"):
+        load_config(path)
+
+    monkeypatch.setenv("SOLAR_MODEL_PORT", "8091")
+    config = load_config(path)
+    assert config.dashboard.port == 8091
+    save_energy_plan_yaml(path, config, energy_plan_yaml(config.energy_plan))
+    assert "port" not in yaml.safe_load(path.read_text(encoding="utf-8"))["dashboard"]
+    assert load_config(path).dashboard.port == 8091
+
+
 @pytest.mark.parametrize("seconds", [0., -1., float("inf"), float("nan"), True])
 def test_calculation_deadline_rejects_invalid_values(seconds):
     from dataclasses import replace

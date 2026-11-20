@@ -8,5 +8,5 @@ services:
     ports:
       - 8090:8090
     volumes:
-      - ./solar-model:/config
+      - ./config:/config
     restart: unless-stopped

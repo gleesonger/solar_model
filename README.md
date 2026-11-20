@@ -42,13 +42,21 @@ This pic shows the plan (dashed line) as of a point in time. A snapshot can be s
 
 ### Docker Compose
 
-**1. Download.** Run this as your regular user from a new directory on your Linux Docker host.
+**1. Setup application folder.**
 
 ```bash
-mkdir -p ./solar-model && curl -fsSL https://raw.githubusercontent.com/gleesonger/solar_model/master/compose.yaml -o compose.yaml && curl -fsSL https://raw.githubusercontent.com/gleesonger/solar_model/master/config.yaml -o ./solar-model/config.yaml
+mkdir -p ./solar-model/
+cd ./solar-model
 ```
 
-**2. Configure.** Edit `./solar-model/config.yaml` for your installation.
+**2. Download Config.**
+
+```bash
+mkdir -p ./config
+curl https://raw.githubusercontent.com/gleesonger/solar_model/master/config.yaml -o ./config/config.yaml
+```
+
+**3. Configure.** Edit `./config/config.yaml`
 
 - `actuals.modbus.host` is your Sigenergy system’s IP address. Set `actuals.modbus.port` if it uses a port other than `502`.
 - `timezone` is your local time zone, such as `Europe/Dublin`. Tariff schedules use this time zone.
@@ -56,15 +64,25 @@ mkdir -p ./solar-model && curl -fsSL https://raw.githubusercontent.com/gleesonge
 - `tariffs.periods` contains your effective dates, import and export rates, and time-of-use schedules.
 - `dashboard.port` is the dashboard’s listening port, set to `8090` in the downloaded config. If you change it, update the right side of the port mapping in `compose.yaml` to match.
 
-The downloaded [compose.yaml](compose.yaml) uses `user: "1000:1000"`. Change it if your host IDs from `id -u` and `id -g` differ. To use a different host port, change the left side of `8090:8090` in `ports`.
+The downloaded [compose.yaml](compose.yaml) uses `user: "1000:1000"`. Change it if your host IDs from `id -u` and `id -g` differ.
 
-**3. Start.** Run this from the directory containing `compose.yaml`.
+**4. Start.**
 
-```sh
+```bash
+curl https://raw.githubusercontent.com/gleesonger/solar_model/master/compose.yaml -o ./compose.yaml 
 docker compose up
 ```
 
-Open [the dashboard](http://localhost:8090), using the Docker host’s address (eg https://localhost:8090) if you’re connecting from another machine. The database is stored in `./solar-model`. After later edits to `config.yaml`, choose **Control → Restart application** to reload it.
+Folder setup should look like this:
+```
+solar-model/
+├── compose.yaml
+└── solar-model/
+    ├── config.yaml
+    └── solar.db
+```
+
+Open [the dashboard](http://localhost:8090). If you’re connecting from another machine, use the Docker host’s address and published port. The database is stored in `./config`. After later edits to `config.yaml`, choose **Control → Restart application** to reload it.
 
 ### Run from source
 

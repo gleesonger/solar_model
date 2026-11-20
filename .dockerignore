@@ -1,6 +1,7 @@
 .git
 .gitignore
 .env
+config/
 solar-model/
 .venv
 venv

@@ -45,7 +45,9 @@ The dashboard listens on `dashboard.port` in the mounted `config.yaml`, set to `
 
 Use the [Compose install](../../README.md#docker-compose) on a Linux Docker host. Create the bind-mount directory as your regular user before starting Compose. Numba creates `.numba-cache` within it on first use. Set `user` in [compose.yaml](../../compose.yaml) to the numeric UID and GID of that user. The example uses `1000:1000`. Check your IDs with `id -u` and `id -g` and update the example if they differ.
 
-When the service runs with the IDs of the host user who created the directory, that user can edit `./solar-model/config.yaml` and the service can write its SQLite database and Numba cache. Set ownership on the dedicated `./solar-model` directory and its contents before starting if you select a different identity or migrate an existing root-owned install. Stop the service and any other writers before adjusting ownership on an existing database directory.
+The shipped Compose file mounts `./config` at `/config`. When the service runs with the IDs of the host user who created the directory, that user can edit `./config/config.yaml` and the service can write its SQLite database and Numba cache. Set ownership on the dedicated data directory and its contents before starting if you select a different identity or migrate an existing root-owned install. Stop the service and any other writers before adjusting ownership on an existing database directory.
+
+Existing installs that use `./solar-model` for data can keep that bind mount in their Compose file. To adopt the new `./config` path, stop all database writers and move the existing data directory to that path before starting with the updated Compose file.
 
 ### Build identity and media-server deployment
 

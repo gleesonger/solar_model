@@ -39,11 +39,11 @@ docker run -p 8090:8090 -v solar-config:/config solar-model
 
 ### Dashboard port
 
-Set `SOLAR_MODEL_PORT` in the container environment to choose its listening port before the first start. The shipped [Compose file](../../compose.yaml) passes the variable through and uses it on both sides of the port mapping. When unset or empty, Python uses `dashboard.port` in the mounted YAML and Compose publishes `8090:8090`. If the deployed YAML uses a different port, set the Compose mapping to match it or supply `SOLAR_MODEL_PORT`. Apply changes to the container environment or the port mapping with `docker compose up -d`.
+The dashboard listens on `dashboard.port` in the mounted `config.yaml`, set to `8090` in the shipped example. The shipped [Compose file](../../compose.yaml) publishes `8090:8090`. To change only the host port, edit the left side of the mapping. To change the listening port inside the container, edit `dashboard.port` and the right side of the mapping. Apply changes to the port mapping with `docker compose up -d`.
 
 ### Docker Compose file ownership
 
-Use the [Compose install](../../README.md#docker-compose) on a Linux Docker host. Create the bind mount and Numba cache directories as your regular user before starting Compose. Set `user` in [compose.yaml](../../compose.yaml) to the numeric UID and GID of that user. The example uses `1000:1000`. Check your IDs with `id -u` and `id -g` and update the example if they differ.
+Use the [Compose install](../../README.md#docker-compose) on a Linux Docker host. Create the bind-mount directory as your regular user before starting Compose. Numba creates `.numba-cache` within it on first use. Set `user` in [compose.yaml](../../compose.yaml) to the numeric UID and GID of that user. The example uses `1000:1000`. Check your IDs with `id -u` and `id -g` and update the example if they differ.
 
 When the service runs with the IDs of the host user who created the directory, that user can edit `./solar-model/config.yaml` and the service can write its SQLite database and Numba cache. Set ownership on the dedicated `./solar-model` directory and its contents before starting if you select a different identity or migrate an existing root-owned install. Stop the service and any other writers before adjusting ownership on an existing database directory.
 
@@ -58,7 +58,7 @@ build:
   context: "https://github.com/gleesonger/solar_model.git#${SOLAR_MODEL_COMMIT:-master}"
   dockerfile: Dockerfile
   args:
-    GIT_COMMIT: "${SOLAR_MODEL_COMMIT:?Run rebuild_solar_model.sh}"
+    GIT_COMMIT: "${SOLAR_MODEL_COMMIT:-unknown}"
 ```
 
 `~/media-server/rebuild_solar_model.sh` resolves and exports the full commit before invoking Compose. Compose substitutes the inherited variable into both the Git context URL and the build argument, so a branch update between resolution and build cannot mislabel the image. The script runs from its own directory:
@@ -79,14 +79,14 @@ if [[ ! "$SOLAR_MODEL_COMMIT" =~ ^[0-9a-f]{40}$ ]]; then
     exit 1
 fi
 
-echo "Building solar-model commit $SOLAR_MODEL_COMMIT"
+echo "Building solar-model from master#HEAD ($SOLAR_MODEL_COMMIT)"
 docker compose build solar-model
-docker compose up -d --no-deps solar-model
+docker compose up solar-model
 ```
 
-Build happens while the previous container continues running; only a successful build proceeds to detached replacement. The service retains its `/config` bind mount. Push the intended application/Dockerfile changes to `master` before rebuilding: this deployment builds GitHub source, not the local workspace. No automatic push or rebuild accompanies a source edit.
+Build happens while the previous container continues running. After a successful build, Compose starts the service in the foreground and retains its `/config` bind mount. Push the intended application and Dockerfile changes to `master` before rebuilding since this deployment builds from GitHub.
 
-Manual Compose commands also need `SOLAR_MODEL_COMMIT` exported because Compose validates the required interpolation when loading the file, including for other services. Use the intended full source hash. Inspect the running image's baked identity without Compose or opening storage:
+Manual lifecycle commands such as `docker compose down solar-model` work without `SOLAR_MODEL_COMMIT`. A manual build without it uses `master` and stamps the image as `unknown`. Use the rebuild script for a pinned build with an exact commit stamp. Inspect the running image's baked identity with this command.
 
 ```bash
 docker exec solar-model printenv SOLAR_MODEL_GIT_COMMIT

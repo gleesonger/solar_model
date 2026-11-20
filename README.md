@@ -42,36 +42,29 @@ This pic shows the plan (dashed line) as of a point in time. A snapshot can be s
 
 ### Docker Compose
 
-Save [compose.yaml](compose.yaml) on your Linux Docker host. The service builds from the latest commit on `master` each time you rebuild.
+**1. Download.** Run this as your regular user from a new directory on your Linux Docker host.
 
-```yaml
-services:
-  solar-model:
-    build:
-      context: "https://github.com/gleesonger/solar_model.git#master"
-    user: "1000:1000"
-    environment:
-      NUMBA_CACHE_DIR: /config/.numba-cache
-      SOLAR_MODEL_PORT:
-    restart: unless-stopped
-    ports:
-      - "${SOLAR_MODEL_PORT:-8090}:${SOLAR_MODEL_PORT:-8090}"
-    volumes:
-      - ./solar-model:/config
+```bash
+mkdir -p ./solar-model && curl -fsSL https://raw.githubusercontent.com/gleesonger/solar_model/master/compose.yaml -o compose.yaml && curl -fsSL https://raw.githubusercontent.com/gleesonger/solar_model/master/config.yaml -o ./solar-model/config.yaml
 ```
 
-The example uses UID and GID `1000:1000`. If `id -u` or `id -g` prints a different number on your host, update `user:` in `compose.yaml`. From the directory containing `compose.yaml`, create the data directory and start the service as your regular user.
+**2. Configure.** Edit `./solar-model/config.yaml` for your installation.
+
+- `actuals.modbus.host` is your Sigenergy system’s IP address. Set `actuals.modbus.port` if it uses a port other than `502`.
+- `timezone` is your local time zone, such as `Europe/Dublin`. Tariff schedules use this time zone.
+- `forecast.solar.arrays` describes each solar array. Set its name, `latitude`, `longitude`, `declination` (tilt), `azimuth`, and `peak_kw`. Match the array names in `dashboard.actuals_to_forecast` to your inverter’s PV inputs.
+- `tariffs.periods` contains your effective dates, import and export rates, and time-of-use schedules.
+- `dashboard.port` is the dashboard’s listening port, set to `8090` in the downloaded config. If you change it, update the right side of the port mapping in `compose.yaml` to match.
+
+The downloaded [compose.yaml](compose.yaml) uses `user: "1000:1000"`. Change it if your host IDs from `id -u` and `id -g` differ. To use a different host port, change the left side of `8090:8090` in `ports`.
+
+**3. Start.** Run this from the directory containing `compose.yaml`.
 
 ```sh
-mkdir -p ./solar-model/.numba-cache
-docker compose up -d --build
+docker compose up
 ```
 
-To run the dashboard on another port from the first start, set `SOLAR_MODEL_PORT=8091` in a `.env` file beside `compose.yaml`. This sets both the published port and the port the dashboard listens on. Use that port in the dashboard URL. Run `docker compose up -d` after changing it.
-
-If you already have root-owned files from a previous install, see [Docker file ownership](documentation/operations/runbook.md#docker-compose-file-ownership).
-
-The container creates `./solar-model/config.yaml` on first start and stores its SQLite database in the same directory. Set `actuals.modbus.host` to your Sigenergy system's IP address and configure your solar arrays and tariffs in that file. After editing, open [the dashboard](http://localhost:8090) and choose **Control → Restart application** to reload the configuration. If the dashboard is unavailable, run `docker compose restart solar-model`.
+Open [the dashboard](http://localhost:8090), using the Docker host’s address (eg https://localhost:8090) if you’re connecting from another machine. The database is stored in `./solar-model`. After later edits to `config.yaml`, choose **Control → Restart application** to reload it.
 
 ### Run from source
 
@@ -182,7 +175,7 @@ python main_dashboard.py
 
 For normal operation, use `python docker_start.py` above so that the Control tab can restart both this process and the data collector.
 
-The dashboard listens on `SOLAR_MODEL_PORT` when set, otherwise it uses `dashboard.port` from `config.yaml`. Live cells update in place at the configured live interval (shipped as one second) and remain blank until the first successful reading. Shared Recent/System Info data refreshes at the full interval; Analysis loads on demand and when its controls are applied. Mapped PV-string voltage/current readings provide proportions for allocating plant solar energy and power. The battery chart uses plant available-discharge telemetry; it does not derive available energy from state of charge. See [dashboard](documentation/overview/dashboard.md) and [styling](documentation/overview/styling.md).
+The dashboard listens on `dashboard.port` from `config.yaml`. Live cells update in place at the configured live interval (shipped as one second) and remain blank until the first successful reading. Shared Recent/System Info data refreshes at the full interval; Analysis loads on demand and when its controls are applied. Mapped PV-string voltage/current readings provide proportions for allocating plant solar energy and power. The battery chart uses plant available-discharge telemetry; it does not derive available energy from state of charge. See [dashboard](documentation/overview/dashboard.md) and [styling](documentation/overview/styling.md).
 
 The [Docker Compose install](#docker-compose) starts the collector, planner, and dashboard. Change the Compose port mapping if you change the configured dashboard port.
 
@@ -198,6 +191,6 @@ The as-of report command is `python -m solar_model.tools.plan_as_of --database s
 
 Scheduled plans are produced by `python -m solar_model.runtime.planner`, independently of the dashboard. The managed launcher starts it automatically. The Plan tab shows latest or selected saved snapshots using blank-by-default date/snapshot controls beside Plan settings.
 
-Use the complete `config.yaml` example when updating a deployment. Settings must be supplied explicitly, including `null` for nullable values. `SOLAR_MODEL_PORT` can supply `dashboard.port` at runtime.
+Use the complete `config.yaml` example when updating a deployment. Settings must be supplied explicitly, including `null` for nullable values.
 
 Energy planning uses Markov DP only. Optimiser settings are explicitly required in the flat `energy_plan.optimiser` block; old model selectors, nested solver blocks and refinement stages are rejected. See [configuration](documentation/overview/configuration.md#markov-optimiser) when updating a deployed YAML file.

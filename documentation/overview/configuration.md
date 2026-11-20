@@ -6,7 +6,7 @@ Source: [config.yaml](../../config.yaml), [solar_model/config.py](../../solar_mo
 
 ## Explicit configuration is mandatory
 
-Supply every declared field and containing block in `config.yaml`. A non-empty `SOLAR_MODEL_PORT` can supply or override `dashboard.port` at runtime. It must be an integer from 1 to 65535. When the variable is unset or empty, `dashboard.port` is required in YAML. Missing values raise a `ValueError` with the full configuration path and stop startup before storage is opened or services launch. The Plan settings editor requires a complete energy-plan section as well.
+Supply every declared field and containing block in `config.yaml`, including `dashboard.port` as an integer from 1 to 65535. Missing values raise a `ValueError` with the full configuration path and stop startup before storage is opened or services launch. The Plan settings editor requires a complete energy-plan section as well.
 
 Nullable values must be written as `null` (including unnamed export/planning rules), and intentionally empty collections as `[]` or `{}`. A nullable type does not make a key optional. Keep the shipped YAML as the complete example when updating a deployed file. New settings must be added explicitly; a newer application must never guess values for an older configuration. Archived energy-plan YAML is displayed unchanged without validation against the current configuration schema. Run Demonstration and Save To Disk validate the editor contents against the current schema and reject missing or obsolete settings; viewing a saved projection does not apply those settings to the running application. Hot reload rejects invalid edits while retaining the previously validated running configuration; it does not apply defaults.
 

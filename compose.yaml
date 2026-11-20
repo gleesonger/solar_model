@@ -5,7 +5,6 @@ services:
     user: "1000:1000"
     environment:
       NUMBA_CACHE_DIR: /config/.numba-cache
-      SOLAR_MODEL_PORT: 8090
     ports:
       - 8090:8090
     volumes:

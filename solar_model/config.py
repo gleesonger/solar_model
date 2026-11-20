@@ -259,17 +259,9 @@ class Config:
 
 def load_config(path: str | Path = "config.yaml") -> Config:
     with open(path, encoding="utf-8") as file:
-        return _config_from_file_text(file.read(), str(path))
+        raw_config = yaml.safe_load(file)
 
-
-def _config_from_file_text(text: str, source: str) -> Config:
-    raw_config = yaml.safe_load(text)
-    port = os.environ.get("SOLAR_MODEL_PORT")
-    if port and isinstance(raw_config, dict) and isinstance(dashboard := raw_config.get("dashboard"), dict):
-        if not re.fullmatch(r"[0-9]{1,5}", port) or not 1 <= int(port) <= 65535:
-            raise ValueError(f"{source}: SOLAR_MODEL_PORT (dashboard.port) must be an integer from 1 to 65535")
-        dashboard["port"] = int(port)
-    return config_from_mapping(raw_config, source)
+    return config_from_mapping(raw_config, str(path))
 
 
 def require_config_values(schema: type[Any], values: Any, path: str = "") -> None:
@@ -479,7 +471,7 @@ def save_energy_plan_yaml(path: str | Path, config: Config, text: str) -> None:
     replacement = "energy_plan:\n" + "".join("  " + line + "\n" for line in text.rstrip().splitlines())
     updated = original[:key.start_mark.index] + replacement + original[end:]
     # Also validate against the latest on-disk configuration, before writing anything.
-    _config_from_file_text(updated, str(path))
+    config_from_mapping(yaml.safe_load(updated), str(path))
     temporary = None
     try:
         with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", newline="", dir=path.parent, delete=False) as file:

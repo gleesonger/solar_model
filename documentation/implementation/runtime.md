@@ -18,8 +18,7 @@ The dashboard polls saved plan IDs/status, not electrical markers. Its private d
 
 ```text
 load_config(path='config.yaml')
-  yaml.safe_load(file text) -> Python mapping/lists/scalars
-  apply non-empty SOLAR_MODEL_PORT to dashboard.port if supplied
+  yaml.safe_load(file) -> Python mapping/lists/scalars
   config_from_mapping(...) shares normalisation/validation with the UI editor
   validate scenario_multiplier dimensions contain exactly low/med/high numeric values
   expand optimiser.mix_integer_linear_prog.projection_resolution_mins repetitions (e.g. 15*24)
@@ -33,7 +32,7 @@ load_config(path='config.yaml')
 
 The intermediate YAML object is mutable. The normalisation steps alter it before constructing frozen dataclasses. Unknown keys are ignored because dacite strict mode is not enabled; this is why descriptive `name`/`comment` keys in YAML do not become runtime fields.
 
-`EnergyPlanConfig.plan_rerun_frequency_mins` has no constructor default. Both startup file loading and strict editor parsing reject an omitted field before a scheduler or plan starts. It must also be finite and positive and divide evenly into 60 minutes. Fractional-minute divisors are accepted. Booleans and intervals longer than an hour are rejected. The file loader and pre-save validation for Plan settings use the same `SOLAR_MODEL_PORT` override. Saving Plan settings preserves the existing dashboard YAML. See [explicit configuration](../overview/configuration.md#explicit-configuration-is-mandatory).
+`EnergyPlanConfig.plan_rerun_frequency_mins` has no constructor default. Both startup file loading and strict editor parsing reject an omitted field before a scheduler or plan starts. It must also be finite and positive and divide evenly into 60 minutes. Fractional-minute divisors are accepted. Booleans and intervals longer than an hour are rejected. The dashboard binds to `dashboard.port` from the file. Saving Plan settings preserves the existing dashboard YAML. See [explicit configuration](../overview/configuration.md#explicit-configuration-is-mandatory).
 
 Required `Config.energy_plan.scenario_multiplier: ScenarioMultiplierConfig` contains solar and house-load `ScenarioDimensionConfig` objects with numeric low/medium/high values. `items()` fixes that order. Every value is explicit, finite, non-negative and ordered, with positive medium multipliers. No probability field exists in `ScenarioData` or these config records. Markov probabilities come from transitions and the medium/medium starting state. Legacy archived YAML remains displayable without current-schema validation.
 

@@ -85,7 +85,7 @@ solar-model/
 Open [the dashboard](http://localhost:8090). If you’re connecting from another machine, use the Docker host’s address and published port. The database is stored in `./config`. After later edits to `config.yaml`, choose **Control → Restart application** to reload it.
 
 
-** Sucesfull logs will look like this
+** Successful logs **
 ```
 [+] up 3/3
  ✔ Image solar-model-solar-model       Built                                                                        7.5s

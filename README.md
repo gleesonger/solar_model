@@ -84,6 +84,35 @@ solar-model/
 
 Open [the dashboard](http://localhost:8090). If you’re connecting from another machine, use the Docker host’s address and published port. The database is stored in `./config`. After later edits to `config.yaml`, choose **Control → Restart application** to reload it.
 
+
+** Sucesfull logs will look like this
+```
+[+] up 3/3
+ ✔ Image solar-model-solar-model       Built                                                                        7.5s
+ ✔ Network solar-model_default         Created                                                                      0.0s
+ ✔ Container solar-model-solar-model Created                                                                      0.0s
+Attaching to solar-model
+solar-model  | 2026-11-20 20:24:53 INFO solar_model: Solar model starting (git commit unknown)
+solar-model  | 2026-11-20 20:24:53 INFO solar_model: Initializing/recovering hourly rollup from raw history
+solar-model  | 2026-11-20 20:24:53 INFO solar_model: Hourly rollup initialization completed (0 groups)
+solar-model  | 2026-11-20 20:24:55 INFO solar_model: Waiting for next interval before starting collectors
+solar-model  | 2026-11-20 20:24:56 INFO solar_model: Dashboard server starting on 0.0.0.0:8091
+solar-model  | NiceGUI ready to go on http://localhost:8091, and http://172.20.0.2:8091
+solar-model  | 2026-11-20 20:25:00 INFO solar_model: power kW: solar=0.0 load=0.935 battery=-1.039 grid-import=0.0 grid-export=0.004
+solar-model  | 2026-11-20 20:25:00 INFO solar_model: device information updated: 29 values
+solar-model  | 2026-11-20 20:25:00 INFO solar_model: full Modbus data collection update (0.499s)
+solar-model  | 2026-11-20 20:25:00 INFO solar_model: saved 24 daily house-load forecast rows
+solar-model  | 2026-11-20 20:25:00 INFO solar_model: saved 21 forecast rows for East
+solar-model  | 2026-11-20 20:25:01 INFO solar_model: saved 21 forecast rows for West
+solar-model  | 2026-11-20 20:25:01 INFO solar_model: saved 10 adjusted solar forecast rows
+solar-model  | 2026-11-20 20:25:01 INFO solar_model: solar forecast collection update (0.613s)
+solar-model  | 2026-11-20 20:25:01 INFO solar_model: Planning calculation started - operation=shared worker_pid=28
+solar-model  | 2026-11-20 20:25:02 INFO solar_model.storage.queries.planning: Using battery telemetry collected at 2026-11-20T20:25:00+00:00
+solar-model  | 2026-11-20 20:25:02 INFO solar_model.storage.queries.planning: Using forecast snapshot collected at 2026-11-20T20:25:00+00:00
+solar-model  | 2026-11-20 20:25:02 WARNING solar_model: Scheduled plan failed: no historical house-load profile exists for 2026-11-20T20:00:00+00:00
+```
+
+
 ### Run from source
 
 The managed application launcher starts the minute-resolution electrical and forecast collector and dashboard:

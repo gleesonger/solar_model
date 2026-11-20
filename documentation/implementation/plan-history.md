@@ -29,10 +29,10 @@ The entire policy is configured under `energy_plan.history`:
 ```yaml
 history:
   retain_snapshots_frequency_mins: 30
-  retain_snapshots_period_days: 30
+  retain_snapshots_period_days: 7
 ```
 
-Both values must be explicitly supplied as positive integers. Missing history blocks or values fail configuration validation; the shipped values are 30. Keep the first successful snapshot in each configured UTC interval, with all scenarios and both Compact and Advanced views (including optional model Expected sections), for the configured number of elapsed days. Always protect the latest submitted plan, even if it is outside the retained slot or the application has been idle beyond the period. Superseded intermediate plans are removed at the next successful submission; there is no recent-every-run tier or separate Advanced expiry.
+Both values must be supplied as positive integers. The shipped configuration keeps the first successful snapshot in each 30-minute UTC interval for 7 elapsed days, with every scenario and the Compact, Advanced and Expected sections. Retention always protects the latest submitted plan, including after a longer idle period. Cleanup removes superseded intermediate plans on the next successful submission.
 
 `slot = saved_at // (frequency_mins * 60_000_000)`. A frequency change re-buckets surviving rows atomically before selecting keepers; `database_metadata.plan_history_frequency_mins` records the current bucketing interval. Changing the period/frequency cannot recover snapshots or Advanced data already deleted under an earlier policy. The planner hot-reloads these settings with energy_plan; a save using the new settings applies the new policy. No read or configuration edit itself deletes history.
 

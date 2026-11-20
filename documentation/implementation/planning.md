@@ -41,7 +41,7 @@ See [saved plans](plan-history.md) for retention, archived YAML, actuals refresh
 | `system_battery_capacity_kwh`, `battery_state_of_health_percent` | Usable capacity = product /100 |
 | `inverter_battery_charge_power_kw`, `inverter_max_absorption_power_kw` | Separate total battery charging-input limit and grid-to-battery AC absorption limit |
 | `inverter_battery_discharge_power_kw`, `inverter_max_active_power_kw` | Discharge energy limit and combined inverter-flow constraint |
-| `grid_max_import_power_kw` | Grid-point import cap from 40040; both system-limit helpers expose duration-scaled `max_grid_import_kwh`. Both DP and MILP enforce it. |
+| `grid_max_import_power_kw` | Grid-point import cap from 40040. The planner multiplies it by the interval duration in hours to get the import limit in kWh. |
 | `inverter_ac_to_dc_efficiency`, `inverter_dc_to_ac_efficiency`, `battery_charge_efficiency`, `battery_discharge_efficiency` | Four distinct conversion stages and report losses |
 | Model/serial/firmware, rated power/apparent power, grid ratings, pack/string/MPPT counts | Required metadata but no direct optimisation constraint |
 | Battery discharge SOC cutoff | Does not shift protection scoring; the controller target is distinct from this device metadata field. |

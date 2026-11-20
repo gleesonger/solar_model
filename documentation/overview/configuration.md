@@ -4,37 +4,21 @@ The [runtime implementation guide](../implementation/runtime.md) traces YAML nor
 
 Source: [config.yaml](../../config.yaml), [solar_model/config.py](../../solar_model/config.py). Configuration loads at process startup; a managed restart reloads it for all three services. The planning service and dashboard additionally hot-reload the energy_plan section when its startup file changes.
 
-## Explicit configuration is mandatory
+## Contents
 
-Supply every declared field and containing block in `config.yaml`, including `dashboard.port` as an integer from 1 to 65535. Missing values raise a `ValueError` with the full configuration path and stop startup before storage is opened or services launch. The Plan settings editor requires a complete energy-plan section as well.
-
-Nullable values must be written as `null` (including unnamed export/planning rules), and intentionally empty collections as `[]` or `{}`. A nullable type does not make a key optional. Keep the shipped YAML as the complete example when updating a deployed file. New settings must be added explicitly; a newer application must never guess values for an older configuration. Archived energy-plan YAML is displayed unchanged without validation against the current configuration schema. Run Demonstration and Save To Disk validate the editor contents against the current schema and reject missing or obsolete settings; viewing a saved projection does not apply those settings to the running application. Hot reload rejects invalid edits while retaining the previously validated running configuration; it does not apply defaults.
-
-## Markov optimiser
-
-Markov DP is the sole optimiser. All values are explicitly required in this flat block:
-
-```yaml
-optimiser:
-  compile_model_to_native_code: true
-  transition_hours: 3
-  transition_matrix:
-    solar:
-      - [0.6, 0.3, 0.1]
-      - [0.2, 0.6, 0.2]
-      - [0.1, 0.3, 0.6]
-    house_load:
-      - [0.6, 0.3, 0.1]
-      - [0.2, 0.6, 0.2]
-      - [0.1, 0.3, 0.6]
-  projection_resolution_mins: [15*96, 60*24]
-  grid_step_percent: 2
-  power_divisions: 5
-```
-
-Both `transition_matrix.solar` and `transition_matrix.house_load` must be explicitly supplied. Each has low/medium/high source rows and destination columns and is independently validated. They share the explicit `transition_hours` duration. The old shared list is rejected rather than copied implicitly. Medium multipliers must be positive. These are shipped values, not implicit defaults. The grid covers the full physical battery range; power divisions determine positive command rates between configured minimum and effective hardware maximum. There is no refinement-stage list.
-
-Remove the old `model`, `uncertainty_model`, `mix_integer_linear_prog`, `dynamic_programming` and `refinement_stages` settings and explicitly move the former active DP settings here. Keep the first full-range stage's `grid_step_percent` and `power_divisions`. The loader rejects old blocks and unknown optimiser keys rather than guessing or silently ignoring them. Old snapshot YAML remains archived text for display, but must be edited before Run Demonstration or Save To Disk accepts it.
+- [Configuration sections](#sections)
+- [Tariff and scheduled-limit rules](#tariff-and-scheduled-limit-rules)
+  - [Tariff example](#tariff-example)
+- [Required settings](#explicit-configuration-is-mandatory)
+- [Markov optimiser](#markov-optimiser)
+- [Forecast model calibration](#forecast-model-calibration-parameters)
+- [Validation and parsing](#validation-and-parsing)
+- [Complete values and nullable settings](#complete-values-and-nullable-settings)
+- [Modbus register configuration](#register-configuration)
+- [Planning command preferences](#planning-command-preferences)
+- [Planning score](#planning-score)
+- [Plan settings editor](#ui-energy-plan-overrides)
+- [Plan snapshot retention](#plan-snapshot-retention)
 
 ## Sections
 
@@ -48,17 +32,81 @@ Remove the old `model`, `uncertainty_model`, `mix_integer_linear_prog`, `dynamic
 | `forecast` | Endpoint, timeout, collection interval 3600 seconds, array definitions and model tuning under `model_calibration_parameters` |
 | `dashboard` | Host `0.0.0.0`, port 8090, PV-string-to-panel mapping |
 | `tariffs.periods` | Effective-dated import/export schedules |
-| `energy_plan` | 24-hour projection, intact 15-minute action, six hours of UTC-clock-aligned fine intervals, then hourly intervals, reserve/protection preference, scheduled battery limits |
+| `energy_plan` | 48-hour horizon, 24 hours visible, an intact 15-minute first action, then quarter-hour resolution followed by hourly lookahead, with reserve/protection preferences and scheduled battery limits |
 | `additional_device_info` | Inverter AC-to-DC 0.970, inverter DC-to-AC 0.974, battery charge 0.970, battery discharge 0.970; modelling assumptions, not measured device efficiencies |
 | `energy_plan.scenario_multiplier` | Required numeric solar/house-load low, med, high multipliers |
 
 These are current file values, not universal defaults. Preserve exact configuration spellings, including `data_retrival_schedule` and `full_updated_interval_seconds`.
 
+## Tariff and scheduled-limit rules
+
+- Periods must have strictly increasing `effective_from` ISO dates. Lookup chooses the newest period effective on the supplied local date; earlier uncovered dates raise an error.
+- YAML `import` becomes dataclass `import_`. Each import band must have a non-empty `name`.
+- Rules specify weekday names, `start_time`, `end_time`, and non-negative finite `rate`.
+- Start is inclusive; end is exclusive. End may be `24:00`; equal start/end covers a full day.
+- A crossing-midnight rule's weekdays identify the starting day. Each tariff direction requires exactly one match per weekday/minute. Battery-limit schedules may have gaps, but overlapping rules are rejected.
+- Planning schedules reuse `TariffRule.rate`: it means **kWh** for minimum/maximum battery and **kW** for battery-to-grid limit, not money.
+- Where no battery-limit rule matches, the fallback bounds are 0 kWh minimum, 999 kWh maximum, and 999 kW battery-to-grid export limit. The physical battery capacity and equipment limits still apply. The planner samples schedules at the interval’s local start time. The shipped schedule sets battery export to 0 kW from 02:00 to 06:00 each day.
+
+### Tariff example
+
+This example charges 0.30 per kWh for import and pays 0.15 per kWh for export, all day, every day. Use your own rates and start date. For time-of-use prices, add rules that cover every hour of the week for both import and export.
+
+```yaml
+tariffs:
+  periods:
+    - effective_from: "2026-01-01"
+      import:
+        - days: [Mon, Tue, Wed, Thu, Fri, Sat, Sun]
+          name: flat
+          start_time: "00:00"
+          end_time: "24:00"
+          rate: 0.30
+      export:
+        - days: [Mon, Tue, Wed, Thu, Fri, Sat, Sun]
+          name: null
+          start_time: "00:00"
+          end_time: "24:00"
+          rate: 0.15
+```
+
+## Explicit configuration is mandatory
+
+Supply every declared field and containing block in `config.yaml`, including `dashboard.port` as an integer from 1 to 65535. Missing values raise a `ValueError` with the full configuration path and stop startup before storage is opened or services launch. The Plan settings editor requires a complete energy-plan section as well.
+
+Nullable values must be written as `null` (including unnamed export/planning rules), and intentionally empty collections as `[]` or `{}`. A nullable type does not make a key optional. Keep the shipped YAML as the complete example when updating a deployed file. New settings must be added explicitly; a newer application must never guess values for an older configuration. Archived energy-plan YAML is displayed unchanged without validation against the current configuration schema. Run Demonstration and Save To Disk validate the editor contents against the current schema and reject missing or obsolete settings; viewing a saved projection does not apply those settings to the running application. Hot reload rejects invalid edits while retaining the previously validated running configuration; it does not apply defaults.
+
+## Markov optimiser
+
+Markov DP is the sole optimiser. The shipped `energy_plan.optimiser` block shows all six required fields.
+
+```yaml
+optimiser:
+  compile_model_to_native_code: true
+  transition_hours: 2
+  transition_matrix:
+    solar:
+      - [0.7, 0.2, 0.1]
+      - [0.3, 0.4, 0.3]
+      - [0.1, 0.3, 0.6]
+    house_load:
+      - [0.5, 0.4, 0.1]
+      - [0.3, 0.4, 0.3]
+      - [0.1, 0.3, 0.6]
+  projection_resolution_mins: [15*96, 60*24]
+  grid_step_percent: 1
+  power_divisions: 10
+```
+
+Both `transition_matrix.solar` and `transition_matrix.house_load` must be explicitly supplied. Each has low/medium/high source rows and destination columns and is independently validated. They share the explicit `transition_hours` duration. The old shared list is rejected rather than copied implicitly. Medium multipliers must be positive. These are shipped values, not implicit defaults. The grid covers the full physical battery range; power divisions determine positive command rates between configured minimum and effective hardware maximum. There is no refinement-stage list.
+
+Remove the old `model`, `uncertainty_model`, `mix_integer_linear_prog`, `dynamic_programming` and `refinement_stages` settings and explicitly move the former active DP settings here. Keep the first full-range stage's `grid_step_percent` and `power_divisions`. The loader rejects old blocks and unknown optimiser keys rather than guessing or silently ignoring them. Old snapshot YAML remains archived text for display, but must be edited before Run Demonstration or Save To Disk accepts it.
+
 ## Forecast model calibration parameters
 
 `forecast.solar` groups provider `endpoint`, `timeout_seconds`, collection `interval_seconds`, `arrays`, and `model_calibration_parameters` containing `day_ahead` and `intraday`. `forecast.load.model_calibration_parameters` holds house-load tuning. Each uses `lookback`, `halflife`, and `prior_effective_observations`; see the [forecasting model table](forecasting.md). `lookback`/`halflife` use days for day-ahead/load and hours for intraday. Intraday `lookback: null` preserves all earlier completed hours today. Day-ahead `prior_effective_observations: null` reflects that model's absence of prior shrinkage; a numeric value is rejected rather than ignored.
 
-`prior_effective_observations` is a decimal fraction, not a count: the shipped load setting is `0.2` (20%) and intraday is `0.3333`. The shipped YAML uses `0.3333` for intraday. The derived strength is `1 / prior_effective_observations - 1` (4 for load and approximately 2 for intraday). Values must be finite and in `(0, 1]`; old percentage values such as `20` are rejected. Lookback/halflife values must be finite and positive, except the permitted intraday null lookback. Load lookback and both load/intraday fractions are required. Every solar/load calibration block must explicitly provide all three fields; omitted blocks or values are rejected.
+`prior_effective_observations` expresses the influence of one unit of evidence as a decimal fraction. The shipped load setting is `0.3` (30%) and the solar intraday setting is `0.3333` (about one third). The derived strength is `1 / prior_effective_observations - 1`, approximately 2.33 for load and 2.00 for intraday. Fractions must be finite and in `(0, 1]`. Positive finite lookback and half-life values are required where applicable, with `null` allowed for intraday lookback. Every solar/load calibration block supplies all three fields explicitly.
 
 Deployed YAML files must move the former top-level forecast provider/array settings into `forecast.solar`, move `solar_day_ahead`/`solar_intraday` calibration blocks to `forecast.solar.model_calibration_parameters.day_ahead`/`intraday`, and move load calibration to `forecast.load.model_calibration_parameters`. The old flat forecast layout is no longer accepted.
 
@@ -95,16 +143,6 @@ name: null
 
 `forecast.solar.model_calibration_parameters.intraday.lookback: null` and day-ahead `prior_effective_observations: null` are explicit values with documented meanings. Other nullable values must likewise be present. Shipped values are examples, not values to inject if a key is missing. Configuration schema dataclasses have no constructor defaults; recursive validation also prevents nullable types from silently accepting missing keys.
 
-## Tariff and scheduled-limit rules
-
-- Periods must have strictly increasing `effective_from` ISO dates. Lookup chooses the newest period effective on the supplied local date; earlier uncovered dates raise an error.
-- YAML `import` becomes dataclass `import_`. Each import band must have a non-empty `name`.
-- Rules specify weekday names, `start_time`, `end_time`, and non-negative finite `rate`.
-- Start is inclusive; end is exclusive. End may be `24:00`; equal start/end covers a full day.
-- A crossing-midnight rule's weekdays identify the starting day. Each tariff direction requires exactly one match per weekday/minute. Battery-limit schedules may have gaps, but overlapping rules are rejected.
-- Planning schedules reuse `TariffRule.rate`: it means **kWh** for minimum/maximum battery and **kW** for battery-to-grid limit, not money.
-- Where no battery-limit rule matches, the defaults are 0 kWh minimum, 999 kWh maximum, and 999 kW battery-to-grid export limit. The physical battery capacity and equipment limits still apply. Both planning models sample schedules at the interval's local start time.
-
 ## Register configuration
 
 - [solar_model/integrations/sigenstor/register_maps/sigen_register_map.json](../../solar_model/integrations/sigenstor/register_maps/sigen_register_map.json) and [solar_model/integrations/sigenstor/register_maps/sigen_device_register_map.json](../../solar_model/integrations/sigenstor/register_maps/sigen_device_register_map.json) are source-relative fixed filenames.
@@ -125,7 +163,7 @@ The single `energy_plan.optimiser.projection_resolution_mins` array covers the c
 
 `energy_plan.preferred_reserve_kwh` is a positive, finite target of stored battery kWh measured from zero; it must be supplied explicitly (3 kWh in the shipped YAML). Physical discharge cut-offs do not shift this scoring origin. `energy_plan.protection_preference` is X, any finite non-negative number, required and explicitly set to 50 in the shipped YAML. Values above 100 are supported. Replace the former `optimisation_weights` block with this scalar when updating separate YAML files; omitting the field is rejected. The old battery share corresponds to X = 100 * maximise_battery / (maximise_profit + maximise_battery), but the revised objective changes its effect.
 
-The maximum protection reward is `(X / 100) * reserve_kwh * reference_import_rate * projection_hours / 24`. Here `projection_hours` is the actual simulated duration. The reference is the time-weighted average import rate over the next 24 elapsed hours, clipped to zero if its mean is non-positive. Missing tariff coverage raises an error. The optimiser maximises reward minus net cost, using the existing diminishing-return curve and scenario probabilities normalised to sum to one. X = 0 is cost-only; X = 100 still considers cost. No reference solves or min/max score normalisation remain. Approximation error (0.05 protection points) is a fixed code constant. See [plan-model scoring](plan-model.md#3-scoring).
+The maximum protection reward is `(X / 100) * reserve_kwh * reference_import_rate * projection_hours / 24`. Here `projection_hours` is the actual simulated duration. The reference is the time-weighted average import rate over the next 24 elapsed hours, floored at zero. Missing tariff coverage raises an error. The optimiser uses the diminishing-return curve and weights outcomes with the Markov transition probabilities. Setting `X = 0` removes the protection reward. Grid costs, scheduled-limit penalties and terminal battery credit still contribute. See [plan-model scoring](plan-model.md#3-scoring).
 
 `projection_resolution_mins` also supports repetition entries: `[15*24, 60*18]` expands to 24 quarter-hour steps followed by 18 hourly steps. Plain integer entries can be mixed with repetitions. Entries accept `mins*count` or just `mins` (for example `15*24`, `15` or `"15"`). A plain duration means one step. Durations and explicit counts must be positive integers; a trailing `*` without a count is rejected. Expansion happens once during YAML loading; the planner still receives the same tuple of minutes and applies its usual alignment.
 
@@ -133,15 +171,11 @@ The maximum protection reward is `(X / 100) * reserve_kwh * reference_import_rat
 
 ## UI energy-plan overrides
 
-The Plan settings YAML editor exposes the contents of energy_plan. It accepts a complete replacement, validates using the same normalisation and validation as file loading, and rejects unknown fields. Run Demonstration automatically reruns the plan using an optional per-browser EnergyPlanConfig without modifying global configuration. The schema-aware serializer follows the hand-written YAML layout: blank lines between sections and between the model/mix_integer_linear_prog/dynamic_programming entries within optimiser, inline scenario/refinement mappings, inline weekday/timestep lists and quoted HH:MM times. Consecutive identical timesteps collapse to minutes*count; separated runs stay separate and single steps remain numeric. Scheduled rules with identical start/end times, rate and explicit nullable name share one weekday list in Monday-to-Sunday order. Different names/rates/windows remain separate, including overnight windows; grouping changes representation rather than schedule behaviour. Deserialising the generated YAML restores equivalent settings, and serialising again produces the same text. Descriptive comment fields on scheduled rules are ignored by both file loading and editor parsing. Save To Disk atomically replaces only energy_plan in the startup file, preserving all surrounding text; comments within the section are replaced by the editor text. Saving updates the running background planning settings immediately; a changed energy_plan triggers a shared run after the next new full SigEnergy reading. Other configuration sections still require restart.
-
-Rename former energy_plan.optimiser_specific to energy_plan.optimiser; the old section name is rejected to prevent silently losing settings. optimiser.model must explicitly select mix_integer_linear_prog or dynamic_programming. Generated YAML always includes this field with `# model - mix_integer_linear_prog, dynamic_programming` directly above it. The UI uses the override model; other callers use the global configured model. Save To Disk confirms before persisting, keeps the editor open and does not apply or run the draft.
+The Plan settings YAML editor accepts a complete `energy_plan` replacement and rejects unknown fields. **Run Demonstration** applies a private browser override and calculates a plan. The serializer writes the flat Markov optimiser block, groups consecutive identical timesteps as `minutes*count`, and groups equivalent scheduled rules by weekday. **Save To Disk** requests confirmation and atomically replaces only `energy_plan` in the startup file. The planner hot-reloads the saved settings and uses them on the next fresh full Sigenergy reading. Other configuration sections still require restart.
 
 In DP, `minimum_battery_kwh` and `maximum_battery_kwh` are preferred interval-end levels, with a bounded score penalty for breaches rather than hard SOC stops. The penalty is `-100 * error**2 / (error**2 + 5**2) * period_hours`, where error is the breach in SOC percentage points of health-adjusted capacity. It remains active at zero protection preference and has no additional configuration fields. Physical capacity and equipment/export restrictions remain hard constraints.
 
-DP always considers Grid supply and Hold battery alongside self-consumption and forced commands. These passive profiles add no configuration keys and ignore the forced-power preference settings; Grid supply permits charging up to physical battery/equipment capability, while Hold disables both directions.
-
-Solar export first is another always-considered DP candidate with no configuration key or forced rate. Its modelled overflow charging uses physical charge limits and the same soft Min/Max penalty; the mode-5 hardware overflow behaviour remains unverified.
+The solver considers self-consumption and PV-first charge and discharge commands, including zero-power variants. See [operating modes and command response](plan-model.md#52-operating-modes-and-command-response).
 
 `energy_plan.calculation_timeout_seconds` must be explicitly supplied, finite and positive; the shipped value is 300 (booleans rejected). It bounds each scheduled or private demonstration calculation, including cold worker startup. Deadline failure reaps the worker; a later job creates a replacement. Scheduled timeout detection runs once per second. This is separate from the existing five-second performance-experiment limit.
 
@@ -151,9 +185,9 @@ Solar export first is another always-considered DP candidate with no configurati
 energy_plan:
   history:
     retain_snapshots_frequency_mins: 30
-    retain_snapshots_period_days: 30
+    retain_snapshots_period_days: 7
 ```
 
-Both fields must be explicitly supplied as positive integers; the shipped values are 30. Retain the first successful snapshot per configured UTC slot, with all scenarios and both views, for the configured elapsed days; always protect latest. Cleanup runs only within a successful save. Frequency changes re-bucket surviving snapshots, and cannot restore deleted data. These settings hot-reload with energy_plan and round-trip through the Plan settings editor. See [saved-plan retention](../implementation/plan-history.md#retention-on-successful-submission).
+Both fields must be explicitly supplied as positive integers. The shipped configuration keeps the first successful snapshot in each 30-minute UTC slot for 7 days, with all scenarios and views, and always keeps the latest. Cleanup runs within a successful save. Frequency changes re-bucket surviving snapshots. These settings hot-reload with `energy_plan` and round-trip through the Plan settings editor. See [saved-plan retention](../implementation/plan-history.md#retention-on-successful-submission).
 
 `compile_model_to_native_code: true` selects lazy native compilation using Numba; `false` executes the same numerical functions in Python. This required boolean replaces `use_numba`, which is rejected in active configuration. Archived settings remain unchanged and can still be viewed.

@@ -74,7 +74,7 @@ It represents battery storage, household demand, solar generation, the inverter 
 
 The executable control set is self-consumption (2), charge with PV first (4), and discharge with PV first (5). Modes 3 and 6 are excluded from this design. The numerical mapping is defined in Appendix 6 of the [Sigenergy Modbus V2.9 specification](../reference/Sigenergy%20Modbus%20Protocol%20EN_V2.9.pdf); exact command response still requires verification on the installed firmware.
 
-Markov DP selects among three Sigenergy policies, including zero-power variations of modes 4 and 5. The first interval follows the assumed PV-to-load, surplus-to-battery, then export order, and PV before battery for load. Positive force-charge and force-discharge rates are ceilings constrained by physical supply, power limits and site/battery-export limits. A controller SOC target is derived after solving, not applied as an inverter stop. User minimum/maximum energy schedules remain hard interval-end bounds in Markov DP and soft score preferences in DP.
+Markov DP selects among three Sigenergy policies, including zero-power variations of modes 4 and 5. The first interval follows the assumed PV-to-load, surplus-to-battery, then export order, and PV before battery for load. Positive force-charge and force-discharge rates are ceilings constrained by physical supply, power limits and site/battery-export limits. The solver derives a controller SOC target for monitoring. User minimum and maximum energy schedules add soft penalties at interval end.
 
 This is a declared response model, not firmware verification. The active mode persists for the interval; power and energy are averaged uniformly. Ramping, response delay and subinterval clipping are not simulated.
 

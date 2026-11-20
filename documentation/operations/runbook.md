@@ -9,11 +9,11 @@ python docker_start.py
 ```
 
 - Run from the directory containing the intended `config.yaml`. Relative database paths use that directory; register maps/assets resolve relative to source.
-- Supervisor migrates/initialises the database, starts collector/dashboard, and stops both if a child exits. It is not an automatic crash-retry service.
+- The supervisor migrates or initialises the database, starts the collector, planner and dashboard, and restarts failed services individually with backoff.
 - Control restart touches `SOLAR_MODEL_RESTART_FILE`; supervisor stops children and reloads configuration. Standalone dashboard lacks this full-restart facility.
 - Control saves each valid holiday edit and removal automatically as inclusive local date ranges in `holiday_period`. Entering just one date creates a one-day period; an end before its start is rejected. The next Plan run reads saved edits immediately; already saved daily load profiles remain as they were until Control's month-range Backfill replaces each selected day's profile. Backfill uses only readings before each target day's local midnight and records its actual generation time. It does not alter measured load history or solar forecasts.
 - For development only: `python main_dashboard.py` or `python main_data_collection.py`. These still use configured hardware/database.
-- Shutdown terminates children, waits up to 10 seconds, then kills survivors.
+- Shutdown stops the supervised service trees. See [runtime ownership](../implementation/runtime.md#1-managed-process-hierarchy).
 
 ## Android installation
 
@@ -119,7 +119,7 @@ python -m solar_model.tools.plan_as_of --database solar.db --as-of "2026-09-15T0
 
 - Recalculation date bounds are inclusive; omitted `--to` updates all later matching raw rows. CLI alone does not restart the application; Control does.
 - Raw tariff updates and rollup rebuild share one transaction; either both commit or both roll back. Without `--to`, rebuilding extends through the latest available raw date. Neighboring samples in overlapping UTC hours are retained.
-- The load-profile and operational-rebuild CLIs read `forecast.model_calibration_parameters` from `--config` (default `config.yaml`); database and timezone default to that configuration and can be overridden by their CLI flags. Live solar correction and the fixed daily load forecast receive the same settings from the collector startup configuration. The first scheduled forecast run each local day saves that day's load profile; later runs and restarts retain it. Load forecasts start accumulating on deployment; historical dates remain blank.
+- The load-profile CLI reads `forecast.load.model_calibration_parameters`. The operational rebuild uses `forecast.solar.model_calibration_parameters`. Both load `--config` (default `config.yaml`) and support database and timezone overrides. Live solar correction and the fixed daily load forecast receive their settings from the collector startup configuration. The first scheduled forecast run each local day saves that day’s load profile, which later runs and restarts retain.
 - Forecast rebuild infers missing date bounds from earliest forecast/latest hourly actual. It commits clearing first and results by day, so interruption can leave a partial rebuild. It preserves raw fields.
 
 ## Backup, restore and recovery

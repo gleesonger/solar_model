@@ -54,6 +54,7 @@ def test_yaml_transition_settings_round_trip_and_change_probabilities(tmp_path):
     settings = raw["energy_plan"]["optimiser"]
     settings["transition_hours"] = 6.
     settings["transition_matrix"]["solar"] = [[.8, .15, .05], [.15, .7, .15], [.05, .15, .8]]
+    settings["transition_matrix"]["house_load"] = [[.5, .4, .1], [.2, .6, .2], [.1, .3, .6]]
     path = tmp_path / "config.yaml"
     path.write_text(yaml.safe_dump(raw), encoding="utf-8")
     config = load_config(path)
@@ -62,6 +63,7 @@ def test_yaml_transition_settings_round_trip_and_change_probabilities(tmp_path):
     assert not hasattr(actual, "uncertainty_model")
     assert actual.transition_hours == 6.
     assert actual.transition_matrix.solar == tuple(tuple(row) for row in settings["transition_matrix"]["solar"])
+    assert actual.transition_matrix.house_load == tuple(tuple(row) for row in settings["transition_matrix"]["house_load"])
     for row, expected in zip(markov.transition(6., actual.transition_matrix.solar, actual.transition_hours), actual.transition_matrix.solar):
         assert row == pytest.approx(expected)
     assert markov.joint_transition(6., actual.transition_matrix.solar, actual.transition_matrix.house_load, actual.transition_hours)[4][4] == pytest.approx(.42)

@@ -8,10 +8,10 @@ The live hook is [solar_model.services.forecasting.refresh_adjusted_forecast](..
 
 - Raw provider W, cumulative Wh, and daily Wh are preserved separately from adjusted output.
 - For each local target day, correction uses the latest provider snapshot at/before midnight. A new installation without one uses its first same-day snapshot.
-- Scalar calibration uses previous target days: 24 UTC-hour factors, 56-day lookback, 21-day recency half-life, weighted least squares through zero. Missing training yields scalar 1.
+- Scalar calibration fits 24 UTC-hour factors by weighted least squares through zero using previous target days. The shipped YAML uses a 42-day lookback and a 14-day half-life. Missing training yields a scalar of 1.
 - Factors interpolate around hourly centres. Historical actuals are mean plant PV kW per UTC hour.
 - Missing/non-finite observations do not contribute residuals; if none are usable, correction uses a neutral residual and retains the calibrated forecast.
-- Completed current-day hours supply standardised residuals against hourly historical distributions. Residual half-life defaults to 1 hour; `forecast.solar.model_calibration_parameters.intraday.prior_effective_observations` uses decimal influence after one effective observation; the code default is one-third (strength 2), and the shipped YAML uses `0.3333` (strength approximately 2).
+- Completed current-day hours supply standardised residuals against hourly historical distributions. The shipped YAML uses a one-hour half-life and `forecast.solar.model_calibration_parameters.intraday.prior_effective_observations: 0.3333`, giving one effective observation about one-third influence.
 - Only targets at/after the current UTC hour floor are updated. The open hour uses earlier completed observations; its actual is excluded from residual inference.
 - Future target days receive calibrated forecasts without today's residual.
 - Site correction is allocated to panels by raw-power share and saved into the newest available **collection snapshot**, keeping each collection's output.
@@ -52,15 +52,15 @@ Source: [solar_model/storage/queries/dashboard.py](../../solar_model/storage/que
 - [evaluate_forecasts.py](../../solar_model/tools/evaluate_forecasts.py): MAE/RMSE/bias and improvement, overall and by lead band; compares stored vintages with hourly actuals and excludes collections after target time and hours not completed by `--as-of` (default now). Sparse completed hours remain eligible.
 - [evaluate_load.py](../../solar_model/tools/evaluate_load.py): report-only evaluation of the production three-layer hourly profile using configured lookback, half-life and influence settings. Planning now uses this same prediction helper.
 
-The three model blocks use the same names: `lookback`, `halflife`, and `prior_effective_observations`. The last field is the decimal fraction of influence after one unit of evidence, despite its retained name. The baseline numerical-model values are:
+The three model blocks use `lookback`, `halflife`, and `prior_effective_observations`. The last field is the decimal influence of one unit of evidence. These are the values shipped in `config.yaml`.
 
 | `forecast.solar.model_calibration_parameters` (day_ahead/intraday) and `forecast.load.model_calibration_parameters` (house load) block | `lookback` | `halflife` | `prior_effective_observations` |
 | --- | --- | --- | --- |
-| `solar_day_ahead` | 56 days | 21 days | `null` (no prior in this model) |
-| `solar_intraday` | `null` (earlier completed hours today) | 1 hour | one-third (YAML: `0.3333`) |
-| `load` | 42 days | 14 days | `0.2` (20%) |
+| `day_ahead` | 42 days | 14 days | `null` (no prior in this model) |
+| `intraday` | `null` (earlier completed hours today) | 1 hour | `0.3333` (about one third) |
+| House load | 35 days | 7 days | `0.3` (30%) |
 
-A numeric intraday `lookback` imposes an additional limit in hours, within today's completed observations. Day-ahead/load time settings use days. Code derives `prior_strength = 1 / prior_effective_observations - 1`, giving strength 4 for load and approximately 2 for the shipped intraday fraction. Fractions must be finite, greater than 0 and at most 1, with no rounding of derived strengths. The code default of exact one-third retains intraday strength 2 when model settings are omitted. Load evidence is the sum of recency weights; solar intraday evidence is effective sample size (`sum(weights)^2 / sum(weights^2)`). Missing model blocks or fields are rejected; every production YAML setting must be supplied explicitly. The collector, load-profile CLI and operational rebuild all consume the model settings; restart managed processes after changing YAML. Planning uses the same house-load helper and `forecast.load.model_calibration_parameters` tuning block; the unused legacy `energy_plan` history fields have been removed.
+A numeric intraday `lookback` imposes an additional hour limit within today’s completed observations. Day-ahead and house-load time settings use days. The code derives `prior_strength = 1 / prior_effective_observations - 1`, giving approximately 2.33 for load and 2.00 for intraday with the shipped settings. Load evidence is the sum of recency weights. Solar intraday evidence is effective sample size (`sum(weights)^2 / sum(weights^2)`). The collector, planner and forecast tools use the explicitly supplied YAML settings. Restart the managed application after changing forecast calibration. Direct helper calls without settings use the separate defaults in `ForecastModelsConfig`.
 
 Commands and write effects are in [operations.md](../operations/runbook.md).
 

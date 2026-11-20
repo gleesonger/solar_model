@@ -99,7 +99,7 @@ Model settings are passed as `ForecastModelsConfig` from `config.forecast.models
 
 ## 4. Calibration structures
 
-`_training_frames()` first restricts targets to the configured day-ahead lookback window (default 56 days) and days before the requested target day. It selects official vintages against the full collection-time list, filters matching rows, then merges actuals once. A chosen snapshot lacking that day's targets does not fall back to another vintage. `_fit_scalars()` retains its complete-row/window checks and weighting.
+`_training_frames()` restricts targets to the configured day-ahead lookback window (42 days in the shipped YAML) and to days before the requested target day. It selects official vintages against the full collection-time list, filters matching rows, then merges actuals once. A chosen snapshot lacking that day’s targets does not fall back to another vintage. `_fit_scalars()` applies its complete-row and window checks before weighting.
 
 For each UTC hour 0–23:
 
@@ -116,7 +116,7 @@ Output is `numpy.ndarray`, shape `(24,)`, dimensionless. Missing usable hour/den
 dict[int, tuple[float, float]]  # UTC hour -> weighted mean kW, sigma kW
 ```
 
-It uses the configured day-ahead half-life (default 21 days) but does not apply the scalar's explicit lookback cutoff, preserving the existing distribution policy. The distribution mean is calculated; residual normalisation uses sigma.
+It uses the configured day-ahead half-life (14 days in the shipped YAML) over the available actual history before the target day. The distribution mean is calculated and residual normalisation uses sigma.
 
 ## 5. Intraday inference and intermediate frame
 

@@ -21,7 +21,7 @@ load_config(path='config.yaml')
   yaml.safe_load(file) -> Python mapping/lists/scalars
   config_from_mapping(...) shares normalisation/validation with the UI editor
   validate scenario_multiplier dimensions contain exactly low/med/high numeric values
-  expand optimiser.mix_integer_linear_prog.projection_resolution_mins repetitions (e.g. 15*24)
+  expand energy_plan.optimiser.projection_resolution_mins repetitions (e.g. 15*96)
   normalise minimum_battery_kwh wrapper if supplied
   rename each tariff period's import key to import_
   require_config_values(Config, normalised_mapping) recursively checks every field

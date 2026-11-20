@@ -42,15 +42,7 @@ The initial command comes directly from this expected-value policy, not from res
 
 ## Transition timing
 
-Solar uses `optimiser.transition_matrix.solar`; load uses `optimiser.transition_matrix.house_load`. Both matrices are explicitly required and independently validated, with their shared reference duration in `transition_hours`. The shipped values are three hours and:
-
-The Plan YAML editor round-trips all six flat optimiser fields. There is no uncertainty selector to omit or default; obsolete selector keys are rejected.
-
-| From / to | Low | Medium | High |
-| --- | ---: | ---: | ---: |
-| Low | 0.6 | 0.3 | 0.1 |
-| Medium | 0.2 | 0.6 | 0.2 |
-| High | 0.1 | 0.3 | 0.6 |
+Solar uses `optimiser.transition_matrix.solar` and load uses `optimiser.transition_matrix.house_load`. Both matrices are explicitly required and independently validated. They share the `transition_hours` reference duration. The [shipped configuration](../overview/configuration.md#markov-optimiser) uses separate solar and load matrices with a two-hour reference duration. All six flat optimiser fields round-trip through the Plan YAML editor.
 
 `planning.markov_transitions.transition(hours, matrix, reference_hours)` applies the agreed scalar scaling to each row's total probability of leaving its current layer:
 
@@ -67,9 +59,9 @@ The matrix must be 3-by-3 with finite probabilities in [0,1] and row sums within
 
 This is row-wise exit-probability scaling, not a continuous-time matrix exponential. Repeated short transitions generally do not reproduce a single long transition: paths can leave and re-enter layers between decisions. Interval granularity therefore affects the projected condition process. The old composition guarantee and scalar spectral derivation in the original proposal no longer describe runtime behaviour.
 
-Solar and load transitions are independently duration-scaled using their respective configured matrices. Joint probabilities are the load-matrix and solar-matrix products in the explicit nine-layer order. At three hours, the probability of medium/medium ending medium/medium is 0.36. Old configured scenario probabilities are not multiplied into these transitions.
+Solar and load transitions are independently duration-scaled using their respective configured matrices. Joint probabilities are the load-matrix and solar-matrix products in the explicit nine-layer order. At the shipped two-hour reference duration, the probability of medium/medium ending medium/medium is `0.4 × 0.4 = 0.16`.
 
-The default matrix at its three-hour reference duration has long-run probabilities `(2/7, 3/7, 2/7)`. Duration-scaled matrices can have different stationary distributions, and editing the matrix also changes them. The asymmetric load multipliers can make expected load differ from the medium forecast. Do not silently recenter probabilities or amounts.
+Stationary probabilities depend on the matrix and the interval duration. The asymmetric load multipliers can make expected load differ from the medium forecast. The planner uses the configured values directly.
 
 Physical simulation uses one destination condition's aggregate energy for each entire interval. Coarser intervals approximate within-period ordering as well as changing the condition process under this scaling rule.
 
@@ -95,7 +87,7 @@ Positive force-charge controller targets use the largest first-step ending energ
 
 ## Consumers
 
-The Plan tab displays expected visible net cost and full-horizon expected score separately. Existing solar/load selectors, charts and details retain the stress illustrations; their cost is labelled as stress-case cost. Excel detail adds a report-basis column. These stress totals must not be averaged with old scenario weights to reconstruct the Markov objective.
+The Plan tab’s solar and load selectors show a fixed-condition stress case. Its summary shows that case’s visible net cost and the minimum and maximum across stress cases. Excel metadata identifies the report basis. The Markov objective is available in the separate expected result fields.
 
 The as-of workbook adds an `Expected visible` sheet and summary rows identifying fixed-condition stress sheets, expected visible cost and full-horizon score. Grouping stress sheets sums score contributions as well as energy/costs. Expected rows retain model resolution even when stress sheets are grouped. CLI visible exports do not include hidden expectations; the full score includes them.
 
@@ -124,6 +116,4 @@ On 6 November 2026, targeted verification used the repository's Windows `.venv` 
 
 ## Saved plans
 
-This branch builds on the database-backed Plan History feature. Shared reports preserve separate expected-result frames and score alongside all nine stress scenarios. The restored live summary shows expected visible net cost/full-horizon score and labels selected scenario costs as stress cases; both live and history Excel exports identify the report basis. Expected frames use the same configured retention period as Compact and Advanced, with expected-score and expected-visible-cost metadata retained alongside them. See [saved plans](plan-history.md).
-
-The independent planning service also owns Markov runs; demonstrations use a separate worker. Historical snapshots are selected inside the single Plan tab. All retained snapshots keep both views and expected frames for the common configured period. Legacy Compact-only snapshots can still use expected visible net cost and full-horizon score from metadata; UI/export labels selected scenario details as stress cases.
+Shared reports preserve the expected-result frames and score alongside all nine stress scenarios. The configured retention period applies to Expected, Compact and Advanced data together. Expected score and visible net cost are also saved as metadata. The Plan tab displays saved snapshots and labels the stress-case basis in Excel metadata. See [saved plans](plan-history.md).
